@@ -1,0 +1,16 @@
+# Локальная разработка: инфраструктура в Docker, приложения — `pnpm dev` на хосте.
+#   docker compose -f compose.yaml -f compose.dev.yaml up -d postgres valkey rustfs buckets keycloak clamav mailpit migrate
+# В .env для этого режима: PUBLIC_URL=http://localhost:3000 (Next.js проксирует /api и /kc).
+services:
+  postgres:
+    ports: ["5432:5432"]
+  valkey:
+    ports: ["6379:6379"]
+  rustfs:
+    ports: ["9000:9000", "9001:9001"]
+  keycloak:
+    ports: ["8180:8080"]
+  clamav:
+    ports: ["3310:3310"]
+  mailpit:
+    ports: ["1025:1025", "8025:8025"]

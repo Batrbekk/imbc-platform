@@ -1,0 +1,24 @@
+{
+  "name": "imbc-platform",
+  "private": true,
+  "description": "IMBC Platform — реестр производителей нефтегазового машиностроения РК (Фаза 1)",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "db:generate": "pnpm --filter @imbc/api db:generate",
+    "db:migrate": "pnpm --filter @imbc/api db:migrate",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2",
+    "turbo": "^2.11.10",
+    "typescript": "5.9.3"
+  }
+}

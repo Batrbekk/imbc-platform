@@ -1,0 +1,115 @@
+{
+  "common": {
+    "appName": "IMBC Platform",
+    "signIn": "Sign in",
+    "signOut": "Sign out",
+    "register": "Register",
+    "loading": "Loading…",
+    "error": "Something went wrong",
+    "retry": "Retry",
+    "reset": "Reset",
+    "any": "Any",
+    "yes": "Yes",
+    "no": "No",
+    "language": "Language",
+    "back": "Back"
+  },
+  "nav": {
+    "catalog": "Catalog",
+    "dashboard": "Dashboard",
+    "profile": "Company profile"
+  },
+  "login": {
+    "title": "Sign in to the platform",
+    "subtitle": "Registry of domestic manufacturers for operators and IMBC",
+    "button": "Sign in with single sign-on",
+    "noAccount": "No account yet?",
+    "errors": {
+      "flow_expired": "The sign-in attempt expired, please try again",
+      "oidc": "Could not complete sign-in",
+      "no_account": "Account not found or blocked. Contact IMBC"
+    }
+  },
+  "verify": {
+    "title": "Confirm sign-in",
+    "hint": "We sent a six-digit code to your email. The code is valid for 10 minutes.",
+    "button": "Confirm",
+    "resend": "Resend code",
+    "resent": "A new code has been sent",
+    "tooSoon": "You can request a code once a minute",
+    "trust": "Trust this device for 30 days",
+    "invalid": "Invalid or expired code"
+  },
+  "responsibility": {
+    "title": "Responsibility for credentials",
+    "text": "I confirm that this account was issued to me personally. I do not share my password or sign-in codes with third parties and I am responsible for actions taken under my account.",
+    "accept": "I accept"
+  },
+  "register": {
+    "title": "Manufacturer registration",
+    "subtitle": "After registration you will receive a link to set your password (valid for 72 hours)",
+    "companyName": "Company name",
+    "bin": "BIN",
+    "binHint": "12 digits",
+    "email": "Email",
+    "heardAboutUs": "How did you hear about the platform",
+    "acceptTerms": "I accept the platform terms of use",
+    "submit": "Register",
+    "success": "Done. Check your email — we sent a link to set your password.",
+    "errors": {
+      "bin_format": "BIN must be 12 digits",
+      "bin_check_digit": "Check the BIN: the check digit does not match",
+      "bin_exists": "A company with this BIN is already registered. Contact IMBC",
+      "email_exists": "This email is already in use"
+    }
+  },
+  "catalog": {
+    "title": "Manufacturer catalog",
+    "query": "Name or BIN",
+    "region": "Region",
+    "group": "Commodity group",
+    "groupValue": "Group {group}",
+    "surveyed": "Site survey",
+    "unifiedRegister": "In the unified register",
+    "tnved": "HS (TN VED) code",
+    "tnvedHint": "Code prefix",
+    "sort": "Sort",
+    "sortName": "By name",
+    "sortVerified": "By verification date",
+    "sortRegion": "By region",
+    "found": "{count, plural, one {# company found} other {# companies found}}",
+    "empty": "Nothing found. Change the filters.",
+    "copyLink": "Copy link",
+    "linkCopied": "Link with filters copied",
+    "columns": {
+      "name": "Company",
+      "bin": "BIN",
+      "region": "Region",
+      "groups": "Groups",
+      "certificates": "Certificates",
+      "verifiedAt": "Verified",
+      "status": "Freshness"
+    },
+    "status": {
+      "active": "Up to date",
+      "outdated": "Needs update",
+      "inactive": "Inactive"
+    },
+    "pending": "Changes under review",
+    "prev": "Previous",
+    "next": "Next",
+    "page": "Page {page} of {pages}"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "total": "Visible manufacturers",
+    "siteSurveyed": "Site surveyed",
+    "unifiedRegister": "In the unified register",
+    "active": "Up to date",
+    "outdated": "Need update",
+    "inactive": "Inactive",
+    "byRegion": "By region",
+    "byGroup": "By commodity group",
+    "generatedAt": "Updated {time}"
+  }
+}

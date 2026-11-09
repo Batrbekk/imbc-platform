@@ -1,0 +1,252 @@
+{
+  "realm": "imbc",
+  "displayName": "IMBC Platform",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "registrationEmailAsUsername": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "rememberMe": false,
+  "verifyEmail": false,
+  "editUsernameAllowed": false,
+  "passwordPolicy": "length(12) and notUsername and notEmail and passwordHistory(3)",
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "failureFactor": 10,
+  "waitIncrementSeconds": 900,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 43200,
+  "accessTokenLifespan": 300,
+  "actionTokenGeneratedByAdminLifespan": 259200,
+  "actionTokenGeneratedByUserLifespan": 900,
+  "internationalizationEnabled": true,
+  "supportedLocales": [
+    "kk",
+    "ru",
+    "en"
+  ],
+  "defaultLocale": "kk",
+  "loginTheme": "keycloak.v2",
+  "smtpServer": {
+    "host": "${KEYCLOAK_SMTP_HOST}",
+    "port": "${KEYCLOAK_SMTP_PORT}",
+    "from": "${KEYCLOAK_SMTP_FROM}",
+    "fromDisplayName": "IMBC Platform",
+    "replyTo": "${KEYCLOAK_SMTP_REPLY_TO}",
+    "auth": "${KEYCLOAK_SMTP_AUTH}",
+    "user": "${KEYCLOAK_SMTP_USER}",
+    "password": "${KEYCLOAK_SMTP_PASSWORD}",
+    "ssl": "${KEYCLOAK_SMTP_SSL}",
+    "starttls": "${KEYCLOAK_SMTP_STARTTLS}"
+  },
+  "eventsEnabled": true,
+  "eventsExpiration": 2592000,
+  "eventsListeners": [
+    "jboss-logging"
+  ],
+  "enabledEventTypes": [
+    "LOGIN",
+    "LOGIN_ERROR",
+    "LOGOUT",
+    "LOGOUT_ERROR",
+    "CODE_TO_TOKEN",
+    "CODE_TO_TOKEN_ERROR",
+    "UPDATE_PASSWORD",
+    "UPDATE_PASSWORD_ERROR",
+    "RESET_PASSWORD",
+    "RESET_PASSWORD_ERROR",
+    "SEND_RESET_PASSWORD",
+    "EXECUTE_ACTIONS",
+    "EXECUTE_ACTION_TOKEN",
+    "EXECUTE_ACTION_TOKEN_ERROR",
+    "USER_DISABLED_BY_TEMPORARY_LOCKOUT",
+    "USER_DISABLED_BY_PERMANENT_LOCKOUT"
+  ],
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": false,
+  "clients": [
+    {
+      "clientId": "imbc-bff",
+      "name": "IMBC Platform (BFF)",
+      "description": "NestJS BFF: Authorization Code + PKCE, токены не уходят в браузер (ADR-04)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${OIDC_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "rootUrl": "${PUBLIC_URL}",
+      "baseUrl": "/",
+      "redirectUris": [
+        "${PUBLIC_URL}/api/auth/callback"
+      ],
+      "webOrigins": [
+        "${PUBLIC_URL}"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "${PUBLIC_URL}##${PUBLIC_URL}/",
+        "login_theme": "keycloak.v2"
+      }
+    },
+    {
+      "clientId": "imbc-admin-api",
+      "name": "IMBC Platform (Admin API)",
+      "description": "Сервисный клиент: создание учётных записей, письма установки пароля, блокировка, чтение событий входа",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KEYCLOAK_ADMIN_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-imbc-admin-api",
+      "enabled": true,
+      "serviceAccountClientId": "imbc-admin-api",
+      "clientRoles": {
+        "realm-management": [
+          "manage-users",
+          "view-users",
+          "query-users",
+          "view-events"
+        ]
+      }
+    },
+    {
+      "username": "expert@imbc.local",
+      "email": "expert@imbc.local",
+      "firstName": "Эксперт",
+      "lastName": "IMBC",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "locale": [
+          "ru"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KEYCLOAK_DEV_USER_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "admin@imbc.local",
+      "email": "admin@imbc.local",
+      "firstName": "Администратор",
+      "lastName": "IMBC",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "locale": [
+          "ru"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KEYCLOAK_DEV_USER_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "director@imbc.local",
+      "email": "director@imbc.local",
+      "firstName": "Директор",
+      "lastName": "IMBC",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "locale": [
+          "ru"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KEYCLOAK_DEV_USER_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "operator@operator.local",
+      "email": "operator@operator.local",
+      "firstName": "Специалист",
+      "lastName": "Оператора",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "locale": [
+          "ru"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KEYCLOAK_DEV_USER_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "spectator@spectator.local",
+      "email": "spectator@spectator.local",
+      "firstName": "Наблюдатель",
+      "lastName": "Демо",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "locale": [
+          "ru"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KEYCLOAK_DEV_USER_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "manufacturer@demo.local",
+      "email": "manufacturer@demo.local",
+      "firstName": "Производитель",
+      "lastName": "Демо",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "locale": [
+          "ru"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KEYCLOAK_DEV_USER_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}
