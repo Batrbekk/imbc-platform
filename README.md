@@ -326,6 +326,24 @@ make ps           # дождаться healthy у api и keycloak
 - Для HTTPS (через внешний балансировщик или certbot перед nginx) поставьте `COOKIE_SECURE=true`, `SESSION_COOKIE_NAME=__Host-imbc-session`, `DEVICE_COOKIE_NAME=__Host-imbc-device` и `PUBLIC_URL=https://…`. На http префикс `__Host-` снимается автоматически — браузер не принял бы такую cookie без `Secure`.
 - Казахского набора сообщений в Keycloak нет: страницы входа на `kk` пока показываются на английском. Тема с логотипом IMBC и файлом `messages_kk` — в плане (LANG-01).
 
+### Dev-сервер в Azure одной командой
+
+`infrastructure/azure/deploy.sh` создаёт VM и разворачивает на ней стенд, используя ваш `az login`. Запуск — из корня репозитория:
+
+```bash
+./infrastructure/azure/deploy.sh up        # resource group, VM Ubuntu 24.04, Docker, код, .env, docker compose up
+./infrastructure/azure/deploy.sh info      # адреса, пароли демо-пользователей и консолей
+./infrastructure/azure/deploy.sh redeploy  # залить текущий код и пересобрать api/worker/web
+./infrastructure/azure/deploy.sh ssh       # зайти на сервер
+./infrastructure/azure/deploy.sh down      # удалить resource group целиком
+```
+
+- По умолчанию: `westeurope`, `Standard_D4as_v5` (4 vCPU, 16 ГБ — ClamAV и Keycloak требовательны к памяти), диск 128 ГБ. Меняется переменными: `LOCATION=… SIZE=… ./infrastructure/azure/deploy.sh up`.
+- Порты 22, 8080, 8025 и 9001 открыты **только с вашего текущего IP**. Другой адрес или подсеть — `ALLOW_FROM=1.2.3.4/32`, открыть всем — `ALLOW_FROM='*'`.
+- Секреты генерируются на сервере при первом запуске и остаются в `~/imbc-platform/.env`; пароль демо-пользователей тоже случайный — его показывает `info`.
+- Стенд работает по http на публичном IP, поэтому скрипт ставит `KEYCLOAK_SSL_REQUIRED=none` и снимает требование HTTPS с консоли Keycloak. Для стенда с доменом и TLS это не нужно.
+- VM тарифицируется, пока существует: ориентир для `D4as_v5` — около 0,2 $ в час. Остановить без удаления: `az vm deallocate -g imbc-dev-rg -n imbc-dev`.
+
 ## 12. Локальная разработка
 
 Инфраструктура в Docker, приложения на хосте с hot reload. Нужны Node.js 26 (`.nvmrc`) и pnpm 10.

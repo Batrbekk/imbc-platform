@@ -2,7 +2,7 @@
   "realm": "imbc",
   "displayName": "IMBC Platform",
   "enabled": true,
-  "sslRequired": "external",
+  "sslRequired": "${KEYCLOAK_SSL_REQUIRED}",
   "registrationAllowed": false,
   "registrationEmailAsUsername": true,
   "loginWithEmailAllowed": true,
