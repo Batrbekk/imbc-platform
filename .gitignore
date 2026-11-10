@@ -10,3 +10,6 @@ coverage/
 .DS_Store
 *.tsbuildinfo
 next-env.d.ts
+.deployed-source-commit
+__pycache__/
+*.py[cod]

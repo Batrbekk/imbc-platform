@@ -1,9 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, gt, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import { ENV, type Env } from '../../config/env.js';
 import { DB, type Database } from '../../database/database.module.js';
 import {
   organizations,
+  authSecurityEvents,
+  revokedIdpSessions,
+  auditEntries,
   otpCodes,
   responsibilityAcceptances,
   sessions,
@@ -12,6 +15,7 @@ import {
 } from '../../database/schema/index.js';
 import type { AuthContext } from './auth.types.js';
 import { randomToken, sha256, sixDigitCode } from './crypto.js';
+import { ProblemException } from '../../common/problem.js';
 
 /** Параметры входа из спецификации (AUTH-03, AUTH-05) и ADR-20. */
 export const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
@@ -29,22 +33,33 @@ export class SessionService {
     @Inject(ENV) private readonly env: Env,
   ) {}
 
-  async findAccountForLogin(subject: string, email: string | null) {
+  async findAccountForLogin(subject: string, email: string | null, emailVerified: boolean) {
+    if (!emailVerified || !email) return undefined;
     const bySubject = await this.db.query.userAccounts.findFirst({ where: eq(userAccounts.idpSubject, subject) });
-    if (bySubject) return bySubject;
-    if (!email) return undefined;
-    return this.db.query.userAccounts.findFirst({ where: sql`lower(${userAccounts.email}) = lower(${email})` });
+    if (bySubject) return bySubject.email.toLowerCase() === email.toLowerCase() ? bySubject : undefined;
+    // Email fallback exists only for seeded/migrated accounts not yet bound to an IdP subject.
+    return this.db.query.userAccounts.findFirst({
+      where: and(isNull(userAccounts.idpSubject), sql`lower(${userAccounts.email}) = lower(${email})`),
+    });
   }
 
-  async markSignedIn(userId: string, subject: string): Promise<void> {
-    await this.db
+  async markSignedIn(userId: string, subject: string) {
+    const [account] = await this.db
       .update(userAccounts)
       .set({
         idpSubject: subject,
         lastSignInAt: new Date(),
         state: sql`case when ${userAccounts.state} = 'invited' then 'active'::account_state else ${userAccounts.state} end`,
       })
-      .where(eq(userAccounts.id, userId));
+      .where(
+        and(
+          eq(userAccounts.id, userId),
+          inArray(userAccounts.state, ['invited', 'active']),
+          or(isNull(userAccounts.idpSubject), eq(userAccounts.idpSubject, subject)),
+        ),
+      )
+      .returning();
+    return account;
   }
 
   async isTrustedDevice(userId: string, deviceToken: string | undefined): Promise<boolean> {
@@ -59,39 +74,78 @@ export class SessionService {
     return Boolean(row);
   }
 
-  async trustDevice(userId: string): Promise<{ token: string; expiresAt: Date }> {
-    const token = randomToken();
-    const expiresAt = new Date(Date.now() + TRUSTED_DEVICE_MS);
-    await this.db
-      .insert(trustedDevices)
-      .values({ userId, deviceHash: sha256(token), expiresAt })
-      .onConflictDoUpdate({ target: [trustedDevices.userId, trustedDevices.deviceHash], set: { expiresAt } });
-    return { token, expiresAt };
+  async trustDevice(userId: string, sessionId: string): Promise<{ token: string; expiresAt: Date } | null> {
+    return this.db.transaction(async (tx) => {
+      const [account] = await tx.select().from(userAccounts).where(eq(userAccounts.id, userId)).for('update');
+      const entry = await tx.query.sessions.findFirst({
+        where: and(eq(sessions.id, sessionId), eq(sessions.userId, userId)),
+      });
+      if (!account || account.state !== 'active' || !entry?.mfaPassed || entry.authVersion !== account.authVersion)
+        return null;
+      const token = randomToken();
+      const expiresAt = new Date(Date.now() + TRUSTED_DEVICE_MS);
+      await tx.insert(trustedDevices).values({ userId, deviceHash: sha256(token), expiresAt });
+      return { token, expiresAt };
+    });
   }
 
   async create(input: {
     userId: string;
     authVersion: number;
-    mfaPassed: boolean;
+    deviceToken?: string;
     idToken: string | null;
+    idpSessionId: string | null;
+    idpAuthTime: Date;
     ip: string | null;
     userAgent: string | null;
-  }): Promise<{ token: string; id: string }> {
-    const token = randomToken();
-    const [row] = await this.db
-      .insert(sessions)
-      .values({
-        tokenHash: sha256(token),
-        userId: input.userId,
-        authVersion: input.authVersion,
-        mfaPassed: input.mfaPassed,
-        idTokenHint: input.idToken,
-        expiresAt: new Date(Date.now() + ABSOLUTE_TIMEOUT_MS),
-        ip: input.ip,
-        userAgent: input.userAgent?.slice(0, 512) ?? null,
-      })
-      .returning({ id: sessions.id });
-    return { token, id: row!.id };
+  }): Promise<{ token: string; id: string; mfaPassed: boolean }> {
+    return this.db.transaction(async (tx) => {
+      if (!input.idpSessionId) throw new ProblemException(401, 'session_expired', 'Войдите снова');
+      // Same lock as backchannel logout prevents a callback from resurrecting a revoked sid.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`idp-sid:${input.idpSessionId}`}, 0))`);
+      const [account] = await tx.select().from(userAccounts).where(eq(userAccounts.id, input.userId)).for('update');
+      const revoked = await tx.query.revokedIdpSessions.findFirst({
+        where: eq(revokedIdpSessions.sid, input.idpSessionId),
+      });
+      if (
+        !account ||
+        account.state !== 'active' ||
+        revoked ||
+        input.idpAuthTime.getTime() + ABSOLUTE_TIMEOUT_MS <= Date.now() ||
+        (account.credentialsChangedAt &&
+          input.idpAuthTime.getTime() < Math.floor(account.credentialsChangedAt.getTime() / 1000) * 1000) ||
+        (account.idpLoggedOutAt && input.idpAuthTime <= account.idpLoggedOutAt)
+      ) {
+        throw new ProblemException(401, 'session_expired', 'Войдите снова');
+      }
+      const device = input.deviceToken
+        ? await tx.query.trustedDevices.findFirst({
+            where: and(
+              eq(trustedDevices.userId, input.userId),
+              eq(trustedDevices.deviceHash, sha256(input.deviceToken)),
+              gt(trustedDevices.expiresAt, new Date()),
+            ),
+          })
+        : undefined;
+      const mfaPassed = Boolean(device);
+      const token = randomToken();
+      const [row] = await tx
+        .insert(sessions)
+        .values({
+          tokenHash: sha256(token),
+          userId: input.userId,
+          authVersion: account.authVersion,
+          mfaPassed,
+          idTokenHint: input.idToken,
+          idpSessionId: input.idpSessionId,
+          idpAuthTime: input.idpAuthTime,
+          expiresAt: new Date(Math.min(Date.now(), input.idpAuthTime.getTime()) + ABSOLUTE_TIMEOUT_MS),
+          ip: input.ip,
+          userAgent: input.userAgent?.slice(0, 512) ?? null,
+        })
+        .returning({ id: sessions.id });
+      return { token, id: row!.id, mfaPassed };
+    });
   }
 
   /** Загружает сеанс; учитывает бездействие, абсолютный срок, auth_version и состояние аккаунта. */
@@ -112,6 +166,10 @@ export class SessionService {
         state: userAccounts.state,
         locale: userAccounts.locale,
         authVersion: userAccounts.authVersion,
+        credentialsChangedAt: userAccounts.credentialsChangedAt,
+        idpAuthTime: sessions.idpAuthTime,
+        idpSessionId: sessions.idpSessionId,
+        idpLoggedOutAt: userAccounts.idpLoggedOutAt,
         organizationId: organizations.id,
         organizationType: organizations.type,
       })
@@ -123,7 +181,18 @@ export class SessionService {
     if (!row) return null;
 
     const idleExpired = now.getTime() - row.lastSeenAt.getTime() > IDLE_TIMEOUT_MS;
-    const revoked = row.sessionAuthVersion !== row.authVersion || row.state !== 'active';
+    const sidRevoked = row.idpSessionId
+      ? await this.db.query.revokedIdpSessions.findFirst({ where: eq(revokedIdpSessions.sid, row.idpSessionId) })
+      : true;
+    const revoked =
+      row.sessionAuthVersion !== row.authVersion ||
+      row.state !== 'active' ||
+      !row.idpAuthTime ||
+      Boolean(sidRevoked) ||
+      (row.idpLoggedOutAt !== null && row.idpAuthTime !== null && row.idpAuthTime <= row.idpLoggedOutAt) ||
+      (row.credentialsChangedAt !== null &&
+        (row.idpAuthTime === null ||
+          row.idpAuthTime.getTime() < Math.floor(row.credentialsChangedAt.getTime() / 1000) * 1000));
     if (idleExpired || row.expiresAt <= now || revoked) {
       await this.db.delete(sessions).where(eq(sessions.id, row.sessionId));
       return null;
@@ -164,44 +233,210 @@ export class SessionService {
     return row?.idToken ?? null;
   }
 
-  async issueOtp(sessionId: string): Promise<string | null> {
-    const last = await this.db.query.otpCodes.findFirst({
-      where: eq(otpCodes.sessionId, sessionId),
-      orderBy: desc(otpCodes.createdAt),
-    });
-    if (last && Date.now() - last.createdAt.getTime() < OTP_RESEND_MS) return null;
-    const code = sixDigitCode();
-    await this.db.insert(otpCodes).values({
-      sessionId,
-      codeHash: sha256(`${sessionId}:${code}`),
-      expiresAt: new Date(Date.now() + OTP_TTL_MS),
-    });
-    return code;
+  async logoutToken(sessionId: string): Promise<string | null> {
+    const row = await this.db.query.sessions.findFirst({ where: eq(sessions.id, sessionId) });
+    return row?.idTokenHint ?? null;
   }
 
-  async verifyOtp(sessionId: string, code: string): Promise<'ok' | 'invalid' | 'expired' | 'locked'> {
-    const current = await this.db.query.otpCodes.findFirst({
-      where: and(eq(otpCodes.sessionId, sessionId), isNull(otpCodes.consumedAt)),
-      orderBy: desc(otpCodes.createdAt),
-    });
-    if (!current || current.expiresAt <= new Date()) return 'expired';
-    if (current.attempts >= OTP_MAX_ATTEMPTS) return 'locked';
-    if (current.codeHash !== sha256(`${sessionId}:${code}`)) {
-      await this.db
+  async issueOtp(
+    sessionId: string,
+    userId: string,
+  ): Promise<
+    | { issued: true; id: string; code: string; expiresAt: Date; retryAfter: number }
+    | { issued: false; reason: 'too_soon' | 'not_required'; retryAfter: number }
+  > {
+    return this.db.transaction(async (tx) => {
+      // Account lock serializes issuance across all sessions and API replicas.
+      const [account] = await tx.select().from(userAccounts).where(eq(userAccounts.id, userId)).for('update');
+      const [session] = await tx
+        .select()
+        .from(sessions)
+        .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)));
+      if (
+        !account ||
+        account.state !== 'active' ||
+        !session ||
+        session.mfaPassed ||
+        session.authVersion !== account.authVersion
+      )
+        return { issued: false, reason: 'not_required', retryAfter: 0 };
+      const retryAfter = account.lastOtpIssuedAt
+        ? Math.ceil((account.lastOtpIssuedAt.getTime() + OTP_RESEND_MS - Date.now()) / 1000)
+        : 0;
+      if (retryAfter > 0) return { issued: false, reason: 'too_soon', retryAfter };
+      await tx
         .update(otpCodes)
-        .set({ attempts: current.attempts + 1 })
-        .where(eq(otpCodes.id, current.id));
-      return 'invalid';
-    }
-    await this.db.transaction(async (tx) => {
-      await tx.update(otpCodes).set({ consumedAt: new Date() }).where(eq(otpCodes.id, current.id));
-      await tx.update(sessions).set({ mfaPassed: true }).where(eq(sessions.id, sessionId));
+        .set({ consumedAt: new Date() })
+        .where(
+          and(
+            inArray(
+              otpCodes.sessionId,
+              tx.select({ id: sessions.id }).from(sessions).where(eq(sessions.userId, userId)),
+            ),
+            isNull(otpCodes.consumedAt),
+          ),
+        );
+      const code = sixDigitCode();
+      const createdAt = new Date();
+      const expiresAt = new Date(Date.now() + OTP_TTL_MS);
+      const [row] = await tx
+        .insert(otpCodes)
+        .values({ sessionId, codeHash: sha256(`${sessionId}:${code}`), expiresAt, createdAt })
+        .returning({ id: otpCodes.id });
+      await tx.update(userAccounts).set({ lastOtpIssuedAt: createdAt }).where(eq(userAccounts.id, userId));
+      return { issued: true, id: row!.id, code, expiresAt, retryAfter: OTP_RESEND_MS / 1000 };
     });
-    return 'ok';
+  }
+
+  async discardUndeliveredOtp(id: string, userId: string): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx.select({ id: userAccounts.id }).from(userAccounts).where(eq(userAccounts.id, userId)).for('update');
+      const [removed] = await tx
+        .delete(otpCodes)
+        .where(and(eq(otpCodes.id, id), isNull(otpCodes.consumedAt)))
+        .returning();
+      if (removed)
+        await tx
+          .update(userAccounts)
+          .set({ lastOtpIssuedAt: null })
+          .where(and(eq(userAccounts.id, userId), eq(userAccounts.lastOtpIssuedAt, removed.createdAt)));
+    });
+  }
+
+  async verifyOtp(sessionId: string, userId: string, code: string): Promise<'ok' | 'invalid' | 'expired' | 'locked'> {
+    return this.db.transaction(async (tx) => {
+      const [account] = await tx.select().from(userAccounts).where(eq(userAccounts.id, userId)).for('update');
+      const [session] = await tx
+        .select()
+        .from(sessions)
+        .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)));
+      if (
+        !account ||
+        account.state !== 'active' ||
+        !session ||
+        session.mfaPassed ||
+        session.authVersion !== account.authVersion
+      )
+        return 'expired';
+      // Inspect the latest code even when consumed; never fall back to older codes.
+      const current = await tx.query.otpCodes.findFirst({
+        where: eq(otpCodes.sessionId, sessionId),
+        orderBy: desc(otpCodes.createdAt),
+      });
+      if (!current || current.consumedAt || current.expiresAt <= new Date()) return 'expired';
+      if (current.attempts >= OTP_MAX_ATTEMPTS) return 'locked';
+      if (current.codeHash !== sha256(`${sessionId}:${code}`)) {
+        await tx
+          .update(otpCodes)
+          .set({ attempts: sql`${otpCodes.attempts} + 1` })
+          .where(eq(otpCodes.id, current.id));
+        return current.attempts + 1 >= OTP_MAX_ATTEMPTS ? 'locked' : 'invalid';
+      }
+      await tx
+        .update(otpCodes)
+        .set({ consumedAt: new Date(), attempts: sql`${otpCodes.attempts} + 1` })
+        .where(eq(otpCodes.id, current.id));
+      await tx.update(sessions).set({ mfaPassed: true }).where(eq(sessions.id, sessionId));
+      return 'ok';
+    });
+  }
+
+  async backchannelLogout(claims: { jti: string; iat: number; sid?: string; sub?: string }): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      if (claims.sid)
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`idp-sid:${claims.sid}`}, 0))`);
+      const inserted = await tx
+        .insert(authSecurityEvents)
+        .values({ eventKey: `logout:${sha256(claims.jti)}` })
+        .onConflictDoNothing()
+        .returning();
+      if (!inserted.length) return;
+      if (claims.sid) {
+        await tx
+          .insert(revokedIdpSessions)
+          .values({ sid: claims.sid, expiresAt: new Date(Date.now() + 24 * 3600000) })
+          .onConflictDoNothing();
+        const conditions = [eq(sessions.idpSessionId, claims.sid)];
+        if (claims.sub) {
+          const account = await tx.query.userAccounts.findFirst({ where: eq(userAccounts.idpSubject, claims.sub) });
+          if (!account) return;
+          conditions.push(eq(sessions.userId, account.id));
+        }
+        await tx.delete(sessions).where(and(...conditions));
+      } else if (claims.sub) {
+        const [account] = await tx
+          .select()
+          .from(userAccounts)
+          .where(eq(userAccounts.idpSubject, claims.sub))
+          .for('update');
+        if (account) {
+          const cutoff = new Date(claims.iat * 1000);
+          if (!account.idpLoggedOutAt || account.idpLoggedOutAt < cutoff) {
+            await tx.update(userAccounts).set({ idpLoggedOutAt: cutoff }).where(eq(userAccounts.id, account.id));
+          }
+          await tx
+            .delete(sessions)
+            .where(
+              and(eq(sessions.userId, account.id), or(isNull(sessions.idpAuthTime), lte(sessions.idpAuthTime, cutoff))),
+            );
+        }
+      }
+    });
+  }
+
+  async revokeForPasswordChange(subject: string, at: Date, eventKey: string): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const inserted = await tx.insert(authSecurityEvents).values({ eventKey }).onConflictDoNothing().returning();
+      if (!inserted.length) return;
+      const [account] = await tx.select().from(userAccounts).where(eq(userAccounts.idpSubject, subject)).for('update');
+      if (!account || (account.credentialsChangedAt && account.credentialsChangedAt >= at)) return;
+      const authVersion = account.authVersion + 1;
+      const authCutoff = new Date(Math.floor(at.getTime() / 1000) * 1000);
+      await tx
+        .delete(sessions)
+        .where(
+          and(
+            eq(sessions.userId, account.id),
+            or(lte(sessions.createdAt, at), isNull(sessions.idpAuthTime), lt(sessions.idpAuthTime, authCutoff)),
+          ),
+        );
+      // Revoke all trust, including devices issued by a stale session during the polling lag.
+      await tx.delete(trustedDevices).where(eq(trustedDevices.userId, account.id));
+      // A fresh login after the password change remains valid when its event is polled later.
+      await tx.update(sessions).set({ authVersion }).where(eq(sessions.userId, account.id));
+      await tx
+        .update(userAccounts)
+        .set({
+          authVersion,
+          credentialsChangedAt: at,
+          ...(account.state === 'inactive' && at >= account.updatedAt ? { state: 'active' as const } : {}),
+        })
+        .where(eq(userAccounts.id, account.id));
+      await tx
+        .insert(auditEntries)
+        .values({
+          userId: account.id,
+          organizationId: account.organizationId,
+          action: 'auth.credentials_changed',
+          objectType: 'account',
+          objectId: account.id,
+          isAccountEvent: true,
+        });
+    });
   }
 
   async acceptResponsibility(userId: string, ip: string | null): Promise<void> {
-    await this.db.insert(responsibilityAcceptances).values({ userId, textVersion: RESPONSIBILITY_TEXT_VERSION, ip });
+    await this.db.transaction(async (tx) => {
+      await tx.select({ id: userAccounts.id }).from(userAccounts).where(eq(userAccounts.id, userId)).for('update');
+      const found = await tx.query.responsibilityAcceptances.findFirst({
+        where: and(
+          eq(responsibilityAcceptances.userId, userId),
+          eq(responsibilityAcceptances.textVersion, RESPONSIBILITY_TEXT_VERSION),
+        ),
+      });
+      if (!found)
+        await tx.insert(responsibilityAcceptances).values({ userId, textVersion: RESPONSIBILITY_TEXT_VERSION, ip });
+    });
   }
 
   get cookieBase() {

@@ -5,6 +5,8 @@
 export const QUEUES = {
   scanFile: 'scan-file',
   sendNotification: 'send-notification',
+  sendPasswordEmail: 'send-password-email',
+  cleanupIdentity: 'cleanup-identity',
   refreshCatalog: 'refresh-catalog',
   buildExport: 'build-export',
   certificateExpiry: 'certificate-expiry',
@@ -53,6 +55,10 @@ export interface SendNotificationJob {
   subject: string;
   text: string;
   html?: string;
+}
+
+export interface IdentityJob {
+  subject: string;
 }
 
 export interface RefreshCatalogJob {

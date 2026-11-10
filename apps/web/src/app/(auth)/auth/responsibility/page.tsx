@@ -1,3 +1,4 @@
+import { safeReturnTo } from "@imbc/contracts";
 import { getTranslations } from "next-intl/server";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AcceptButton } from "./accept-button";
@@ -9,11 +10,13 @@ export default async function ResponsibilityPage({ searchParams }: PageProps<"/a
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-xl">{t("title")}</CardTitle>
+        <CardTitle className="text-xl">
+          <h1>{t("title")}</h1>
+        </CardTitle>
         <CardDescription className="text-base leading-relaxed text-foreground">{t("text")}</CardDescription>
       </CardHeader>
       <CardContent>
-        <AcceptButton returnTo={typeof returnTo === "string" && returnTo.startsWith("/") ? returnTo : "/catalog"} />
+        <AcceptButton returnTo={safeReturnTo(returnTo)} />
       </CardContent>
     </Card>
   );

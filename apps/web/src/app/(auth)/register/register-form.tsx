@@ -2,69 +2,171 @@
 
 import { checkBin } from "@imbc/contracts";
 import { useMutation } from "@tanstack/react-query";
-import { CheckCircle2Icon } from "lucide-react";
+import { MailCheckIcon } from "lucide-react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { type FormEvent, useState } from "react";
+import { z } from "zod";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, passwordResetUrl } from "@/lib/api";
+import { useCooldown } from "@/lib/use-cooldown";
 
-type ErrorCode = "bin_format" | "bin_check_digit" | "bin_exists" | "email_exists";
-const KNOWN: ErrorCode[] = ["bin_format", "bin_check_digit", "bin_exists", "email_exists"];
+type FieldName = "companyName" | "bin" | "email" | "heardAboutUs" | "acceptTerms";
+type RegistrationInput = {
+  companyName: string;
+  bin: string;
+  email: string;
+  heardAboutUs?: string;
+  acceptTerms: true;
+  locale: string;
+};
+type ErrorCode =
+  | "company_name"
+  | "bin_format"
+  | "bin_check_digit"
+  | "bin_exists"
+  | "email_invalid"
+  | "email_exists"
+  | "heard_about_us"
+  | "terms_required";
 
-/** Самостоятельная регистрация производителя (REG-01…05): БИН проверяется ещё в браузере. */
 export function RegisterForm() {
   const t = useTranslations("register");
   const common = useTranslations("common");
   const locale = useLocale();
   const [form, setForm] = useState({ companyName: "", bin: "", email: "", heardAboutUs: "", acceptTerms: false });
-  const [binError, setBinError] = useState<ErrorCode | null>(null);
-
+  const [errors, setErrors] = useState<Partial<Record<FieldName, ErrorCode>>>({});
+  const cooldown = useCooldown();
   const submit = useMutation({
+    mutationFn: (input: RegistrationInput) =>
+      api<{ status: string }>("/v1/registrations", { method: "POST", json: input }),
+    onSuccess: () => cooldown.start(60),
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 429) cooldown.start(error.retryAfter ?? 60);
+    },
+  });
+  const resend = useMutation({
     mutationFn: () =>
-      api<{ status: string }>("/v1/registrations", {
+      api<{ status: string }>("/v1/registrations/resend", {
         method: "POST",
-        json: { ...form, heardAboutUs: form.heardAboutUs || null, acceptTerms: true, locale },
+        json: { email: submit.variables?.email ?? form.email.trim() },
       }),
+    onSuccess: () => cooldown.start(60),
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 429) cooldown.start(error.retryAfter ?? 60);
+    },
   });
 
-  const onSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    const bin = checkBin(form.bin);
-    if (!bin.valid) return setBinError(bin.reason === "format" ? "bin_format" : "bin_check_digit");
-    setBinError(null);
-    submit.mutate();
+  const onSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    const next: Partial<Record<FieldName, ErrorCode>> = {};
+    const companyName = form.companyName.trim();
+    const email = form.email.trim();
+    const heardAboutUs = form.heardAboutUs.trim();
+    const bin = checkBin(form.bin.trim());
+    if (companyName.length < 2 || companyName.length > 300) next.companyName = "company_name";
+    if (!bin.valid) next.bin = bin.reason === "format" ? "bin_format" : "bin_check_digit";
+    if (!z.email().max(254).safeParse(email).success) next.email = "email_invalid";
+    if (heardAboutUs.length > 500) next.heardAboutUs = "heard_about_us";
+    if (!form.acceptTerms) next.acceptTerms = "terms_required";
+    setErrors(next);
+    if (Object.keys(next).length || !bin.valid) return;
+    submit.mutate({
+      companyName,
+      bin: bin.bin,
+      email,
+      ...(heardAboutUs ? { heardAboutUs } : {}),
+      acceptTerms: true,
+      locale,
+    });
   };
+
+  const serverCode = submit.error instanceof ApiError ? submit.error.code : undefined;
+  const fieldError = (field: FieldName): ErrorCode | undefined => {
+    if (errors[field]) return errors[field];
+    if (
+      field === "bin" &&
+      (serverCode === "bin_format" || serverCode === "bin_check_digit" || serverCode === "bin_exists")
+    )
+      return serverCode;
+    if (field === "email" && serverCode === "email_exists") return serverCode;
+    return undefined;
+  };
+  const change = (field: Exclude<FieldName, "acceptTerms">) => (event: React.ChangeEvent<HTMLInputElement>) => {
+    setForm((current) => ({ ...current, [field]: event.target.value }));
+    setErrors((current) => ({ ...current, [field]: undefined }));
+    if (submit.isError) submit.reset();
+  };
+  const registrationError =
+    submit.error instanceof ApiError && submit.error.status === 429 ? t("rateLimited") : t("requestError");
 
   if (submit.isSuccess) {
     return (
-      <Alert>
-        <CheckCircle2Icon />
-        <AlertDescription>{t("success")}</AlertDescription>
-      </Alert>
+      <div className="space-y-5">
+        <div className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <MailCheckIcon className="size-6" />
+        </div>
+        <div className="space-y-2" role="status">
+          <h2 className="text-lg font-semibold">{t("successTitle")}</h2>
+          <p className="break-words text-sm leading-relaxed text-muted-foreground">
+            {t("success", { email: submit.variables?.email ?? form.email })}
+          </p>
+          <p className="text-sm text-muted-foreground">{t("deliveryHint")}</p>
+        </div>
+        {resend.isSuccess && (
+          <Alert>
+            <AlertDescription>{t("resendAccepted")}</AlertDescription>
+          </Alert>
+        )}
+        {resend.isError && (
+          <Alert variant="destructive">
+            <AlertDescription>
+              {resend.error instanceof ApiError && resend.error.status === 429 ? t("rateLimited") : t("requestError")}
+            </AlertDescription>
+          </Alert>
+        )}
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          disabled={resend.isPending || cooldown.seconds > 0}
+          onClick={() => resend.mutate()}
+        >
+          {resend.isPending && <Spinner />}
+          {cooldown.seconds > 0 ? t("resendIn", { seconds: cooldown.seconds }) : t("resend")}
+        </Button>
+        <Button asChild className="w-full">
+          <Link href="/login">{common("signIn")}</Link>
+        </Button>
+      </div>
     );
   }
 
-  const serverCode =
-    submit.error instanceof ApiError && KNOWN.includes(submit.error.code as ErrorCode)
-      ? (submit.error.code as ErrorCode)
-      : null;
-  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm({ ...form, [k]: e.target.value });
-
   return (
     <form onSubmit={onSubmit} noValidate>
-      <FieldGroup>
-        <Field>
+      <FieldGroup className="gap-5">
+        <Field data-invalid={!!fieldError("companyName") || undefined}>
           <FieldLabel htmlFor="companyName">{t("companyName")}</FieldLabel>
-          <Input id="companyName" required value={form.companyName} onChange={set("companyName")} />
+          <Input
+            id="companyName"
+            autoComplete="organization"
+            maxLength={300}
+            required
+            value={form.companyName}
+            onChange={change("companyName")}
+            aria-invalid={!!fieldError("companyName")}
+            aria-describedby={fieldError("companyName") ? "companyName-error" : undefined}
+          />
+          {fieldError("companyName") && (
+            <FieldError id="companyName-error">{t(`errors.${fieldError("companyName")}`)}</FieldError>
+          )}
         </Field>
-        <Field data-invalid={!!binError || serverCode?.startsWith("bin") || undefined}>
+        <Field data-invalid={!!fieldError("bin") || undefined}>
           <FieldLabel htmlFor="bin">{t("bin")}</FieldLabel>
           <Input
             id="bin"
@@ -72,44 +174,77 @@ export function RegisterForm() {
             maxLength={12}
             required
             value={form.bin}
-            onChange={set("bin")}
-            aria-invalid={!!binError}
+            onChange={change("bin")}
+            aria-invalid={!!fieldError("bin")}
+            aria-describedby={fieldError("bin") ? "bin-error" : "bin-help"}
           />
-          <FieldDescription>{t("binHint")}</FieldDescription>
-          {(binError || serverCode?.startsWith("bin")) && (
-            <FieldError>{t(`errors.${binError ?? serverCode!}`)}</FieldError>
+          <FieldDescription id="bin-help">{t("binHint")}</FieldDescription>
+          {fieldError("bin") && <FieldError id="bin-error">{t(`errors.${fieldError("bin")}`)}</FieldError>}
+        </Field>
+        <Field data-invalid={!!fieldError("email") || undefined}>
+          <FieldLabel htmlFor="email">{t("email")}</FieldLabel>
+          <Input
+            id="email"
+            type="email"
+            autoComplete="email"
+            maxLength={254}
+            required
+            value={form.email}
+            onChange={change("email")}
+            aria-invalid={!!fieldError("email")}
+            aria-describedby={fieldError("email") ? "email-error" : "email-help"}
+          />
+          <FieldDescription id="email-help">{t("emailHint")}</FieldDescription>
+          {fieldError("email") && <FieldError id="email-error">{t(`errors.${fieldError("email")}`)}</FieldError>}
+          {serverCode === "email_exists" && (
+            <a href={passwordResetUrl("/", locale)} className="text-sm text-primary hover:underline">
+              {t("recoverAccount")}
+            </a>
           )}
         </Field>
-        <Field data-invalid={serverCode === "email_exists" || undefined}>
-          <FieldLabel htmlFor="email">{t("email")}</FieldLabel>
-          <Input id="email" type="email" autoComplete="email" required value={form.email} onChange={set("email")} />
-          {serverCode === "email_exists" && <FieldError>{t("errors.email_exists")}</FieldError>}
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="heardAboutUs">{t("heardAboutUs")}</FieldLabel>
-          <Input id="heardAboutUs" value={form.heardAboutUs} onChange={set("heardAboutUs")} />
-        </Field>
-        <Field orientation="horizontal">
-          <Checkbox
-            id="acceptTerms"
-            checked={form.acceptTerms}
-            onCheckedChange={(v) => setForm({ ...form, acceptTerms: v === true })}
-          />
-          <FieldLabel htmlFor="acceptTerms" className="font-normal">
-            {t("acceptTerms")}
+        <Field data-invalid={!!fieldError("heardAboutUs") || undefined}>
+          <FieldLabel htmlFor="heardAboutUs">
+            {t("heardAboutUs")} <span className="font-normal text-muted-foreground">{t("optional")}</span>
           </FieldLabel>
+          <Input
+            id="heardAboutUs"
+            maxLength={500}
+            value={form.heardAboutUs}
+            onChange={change("heardAboutUs")}
+            aria-invalid={!!fieldError("heardAboutUs")}
+          />
+          {fieldError("heardAboutUs") && <FieldError>{t(`errors.${fieldError("heardAboutUs")}`)}</FieldError>}
         </Field>
-        {submit.isError && !serverCode && (
+        <Field data-invalid={!!fieldError("acceptTerms") || undefined}>
+          <div className="flex items-start gap-3">
+            <Checkbox
+              id="acceptTerms"
+              className="mt-0.5"
+              checked={form.acceptTerms}
+              onCheckedChange={(value) => {
+                setForm((current) => ({ ...current, acceptTerms: value === true }));
+                setErrors((current) => ({ ...current, acceptTerms: undefined }));
+              }}
+              aria-invalid={!!fieldError("acceptTerms")}
+            />
+            <FieldLabel htmlFor="acceptTerms" className="font-normal leading-relaxed">
+              {t("acceptTerms")}
+            </FieldLabel>
+          </div>
+          {fieldError("acceptTerms") && <FieldError>{t(`errors.${fieldError("acceptTerms")}`)}</FieldError>}
+        </Field>
+        {submit.isError && !fieldError("bin") && !fieldError("email") && (
           <Alert variant="destructive">
-            <AlertDescription>{common("error")}</AlertDescription>
+            <AlertDescription>{registrationError}</AlertDescription>
           </Alert>
         )}
-        <Button type="submit" disabled={!form.acceptTerms || submit.isPending}>
+        <Button type="submit" className="w-full" size="lg" disabled={submit.isPending || cooldown.seconds > 0}>
           {submit.isPending && <Spinner />}
-          {t("submit")}
+          {cooldown.seconds > 0 ? t("resendIn", { seconds: cooldown.seconds }) : t("submit")}
         </Button>
         <p className="text-center text-sm text-muted-foreground">
-          <Link href="/login" className="text-primary hover:underline">
+          {t("alreadyRegistered")}{" "}
+          <Link href="/login" className="font-medium text-primary hover:underline">
             {common("signIn")}
           </Link>
         </p>

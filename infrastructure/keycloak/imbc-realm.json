@@ -9,7 +9,7 @@
   "duplicateEmailsAllowed": false,
   "resetPasswordAllowed": true,
   "rememberMe": false,
-  "verifyEmail": false,
+  "verifyEmail": true,
   "editUsernameAllowed": false,
   "passwordPolicy": "length(12) and notUsername and notEmail and passwordHistory(3)",
   "bruteForceProtected": true,
@@ -24,7 +24,7 @@
   "ssoSessionMaxLifespan": 43200,
   "accessTokenLifespan": 300,
   "actionTokenGeneratedByAdminLifespan": 259200,
-  "actionTokenGeneratedByUserLifespan": 900,
+  "actionTokenGeneratedByUserLifespan": 259200,
   "internationalizationEnabled": true,
   "supportedLocales": [
     "kk",
@@ -32,7 +32,7 @@
     "en"
   ],
   "defaultLocale": "kk",
-  "loginTheme": "keycloak.v2",
+  "loginTheme": "${KEYCLOAK_LOGIN_THEME}",
   "smtpServer": {
     "host": "${KEYCLOAK_SMTP_HOST}",
     "port": "${KEYCLOAK_SMTP_PORT}",
@@ -59,6 +59,8 @@
     "CODE_TO_TOKEN_ERROR",
     "UPDATE_PASSWORD",
     "UPDATE_PASSWORD_ERROR",
+    "UPDATE_CREDENTIAL",
+    "UPDATE_CREDENTIAL_ERROR",
     "RESET_PASSWORD",
     "RESET_PASSWORD_ERROR",
     "SEND_RESET_PASSWORD",
@@ -84,19 +86,23 @@
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
-      "frontchannelLogout": true,
+      "frontchannelLogout": false,
       "rootUrl": "${PUBLIC_URL}",
       "baseUrl": "/",
       "redirectUris": [
-        "${PUBLIC_URL}/api/auth/callback"
+        "${PUBLIC_URL}/api/auth/callback",
+        "${PUBLIC_URL}/api/auth/login"
       ],
       "webOrigins": [
         "${PUBLIC_URL}"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
+        "backchannel.logout.url": "http://api:3001/api/auth/backchannel-logout",
+        "backchannel.logout.session.required": "true",
+        "backchannel.logout.revoke.offline.tokens": "true",
         "post.logout.redirect.uris": "${PUBLIC_URL}##${PUBLIC_URL}/",
-        "login_theme": "keycloak.v2"
+        "login_theme": "${KEYCLOAK_LOGIN_THEME}"
       }
     },
     {

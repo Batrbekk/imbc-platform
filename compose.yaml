@@ -99,10 +99,23 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        for i in $$(seq 1 60); do aws --endpoint-url http://rustfs:9000 s3api list-buckets >/dev/null 2>&1 && break; sleep 2; done
+        set -eu
+        export AWS_MAX_ATTEMPTS=1
+        s3api() {
+          aws --endpoint-url http://rustfs:9000 --cli-connect-timeout 5 --cli-read-timeout 5 s3api "$$@"
+        }
+        ready=false
+        for i in $$(seq 1 60); do
+          if s3api list-buckets >/dev/null 2>&1; then ready=true; break; fi
+          sleep 2
+        done
+        if [ "$$ready" != true ]; then
+          echo "RustFS did not become ready" >&2
+          exit 1
+        fi
         for b in imbc-quarantine imbc-files imbc-exports; do
-          aws --endpoint-url http://rustfs:9000 s3api head-bucket --bucket $$b 2>/dev/null \
-            || aws --endpoint-url http://rustfs:9000 s3api create-bucket --bucket $$b
+          s3api head-bucket --bucket "$$b" 2>/dev/null \
+            || s3api create-bucket --bucket "$$b"
         done
         echo "buckets ready"
     restart: "no"
@@ -133,6 +146,7 @@ services:
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET}
       KEYCLOAK_DEV_USER_PASSWORD: ${KEYCLOAK_DEV_USER_PASSWORD}
+      KEYCLOAK_LOGIN_THEME: ${KEYCLOAK_LOGIN_THEME:-keycloak.v2}
       # Почта Keycloak: письма установки и сброса пароля (AUTH-01, AUTH-08). По умолчанию — Mailpit.
       KEYCLOAK_SMTP_HOST: ${KEYCLOAK_SMTP_HOST:-mailpit}
       KEYCLOAK_SMTP_PORT: ${KEYCLOAK_SMTP_PORT:-1025}

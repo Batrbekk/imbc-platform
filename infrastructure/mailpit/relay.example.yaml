@@ -1,0 +1,14 @@
+# Copy to .env.smtp-relay.yaml in this directory on the server (chmod 600).
+# Enable with MAILPIT_RELAY_CONFIG=/etc/mailpit/.env.smtp-relay.yaml
+# and MAILPIT_RELAY_ALL=true in the server .env. Never commit credentials.
+host: smtp.azurecomm.net
+port: 587
+starttls: true
+tls: false
+allow-insecure: false
+auth: login
+username: REPLACE_WITH_SMTP_USERNAME
+password: REPLACE_WITH_APP_CLIENT_SECRET
+override-from: donotreply@REPLACE_WITH_AZURE_MANAGED_DOMAIN
+blocked-recipients: '(?i)(@|\.)(local|localhost|invalid|test|example)$'
+forward-smtp-errors: true

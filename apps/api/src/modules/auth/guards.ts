@@ -19,9 +19,12 @@ const PUBLIC = 'imbc:public';
 const ALLOW_MFA_PENDING = 'imbc:allow-mfa-pending';
 const ALLOW_RESPONSIBILITY_PENDING = 'imbc:allow-responsibility-pending';
 const ACTION = 'imbc:action';
+const SIGNED_BACKCHANNEL = 'imbc:signed-backchannel';
 
 /** Маршрут без сеанса (вход, регистрация, health). */
 export const Public = () => SetMetadata(PUBLIC, true);
+/** Only the OIDC logout endpoint uses this; it verifies an issuer-signed JWT itself. */
+export const SignedBackchannel = () => SetMetadata(SIGNED_BACKCHANNEL, true);
 /** Маршрут доступен до ввода email-кода (отправка и проверка кода, /me). */
 export const AllowMfaPending = () => SetMetadata(ALLOW_MFA_PENDING, true);
 /** Маршрут доступен до принятия ответственности (сам диалог, /me, выход). */
@@ -55,7 +58,7 @@ export class SessionGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<Request>();
     const meta = <T>(key: string) => this.reflector.getAllAndOverride<T>(key, targets);
 
-    if (!SAFE_METHODS.has(req.method)) this.checkOrigin(req);
+    if (!SAFE_METHODS.has(req.method) && !meta<boolean>(SIGNED_BACKCHANNEL)) this.checkOrigin(req);
     if (meta<boolean>(PUBLIC)) return true;
 
     const auth = await this.sessions.resolve(req.cookies?.[this.env.SESSION_COOKIE_NAME]);
@@ -92,9 +95,12 @@ export class SessionGuard implements CanActivate {
   /** CSRF: изменяющие запросы принимаются только со своего origin (архитектура §9). */
   private checkOrigin(req: Request): void {
     const origin = req.get('origin') ?? req.get('referer');
-    if (!origin) return; // сервер-серверные вызовы pull API идут без Origin и аутентифицируются ключом
-    if (new URL(origin).origin !== new URL(this.env.PUBLIC_URL).origin) {
-      throw new ProblemException(403, 'bad_origin', 'Запрос с чужого origin');
+    if (!origin && !req.cookies?.[this.env.SESSION_COOKIE_NAME] && req.get('sec-fetch-site') !== 'cross-site') return;
+    try {
+      if (origin && new URL(origin).origin === new URL(this.env.PUBLIC_URL).origin) return;
+    } catch {
+      // Invalid and opaque origins fail with a controlled response, never a 500.
     }
+    throw new ProblemException(403, 'bad_origin', 'Запрос с чужого origin');
   }
 }

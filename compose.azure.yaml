@@ -1,0 +1,58 @@
+# Azure dev VM: docker compose -f compose.yaml -f compose.azure.yaml up -d --build
+# Requires Docker Compose 2.24.4+ for !override. Set PUBLIC_HOST and HTTPS PUBLIC_URL in .env.
+services:
+  keycloak:
+    image: imbc/keycloak:${IMAGE_TAG:-dev}
+    build:
+      context: ./infrastructure/keycloak/identity
+      dockerfile: Dockerfile
+    environment:
+      KEYCLOAK_LOGIN_THEME: imbc
+
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:?Set PUBLIC_HOST to the public DNS hostname}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # A directory mount sees new inodes when deployment replaces Caddyfile.
+      - ./infrastructure/azure:/etc/caddy:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      web: { condition: service_started }
+      mailpit: { condition: service_started }
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Caddy is the external ingress; diagnostic consoles are reachable by SSH tunnel.
+  nginx:
+    ports: !override
+      - "127.0.0.1:8080:80"
+
+  mailpit:
+    image: axllent/mailpit:v1.33.1
+    environment:
+      MP_WEBROOT: /dev-mail/
+      MP_SMTP_RELAY_CONFIG: ${MAILPIT_RELAY_CONFIG:-}
+      MP_SMTP_RELAY_ALL: ${MAILPIT_RELAY_ALL:-false}
+    volumes:
+      - ./infrastructure/mailpit:/etc/mailpit:ro
+    ports: !override
+      - "127.0.0.1:8025:8025"
+
+  rustfs:
+    ports: !override
+      - "127.0.0.1:9001:9001"
+
+volumes:
+  caddy-data:
+  caddy-config:
