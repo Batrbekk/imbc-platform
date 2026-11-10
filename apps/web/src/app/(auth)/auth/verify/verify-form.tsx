@@ -131,6 +131,7 @@ export function VerifyForm({ returnTo }: { returnTo: string }) {
           <FieldLabel htmlFor="email-code">{t("codeLabel")}</FieldLabel>
           <InputOTP
             id="email-code"
+            containerClassName="justify-center"
             maxLength={6}
             value={code}
             onChange={setCode}
