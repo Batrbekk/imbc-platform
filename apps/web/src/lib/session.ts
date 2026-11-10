@@ -19,6 +19,7 @@ export interface Me {
   };
   gates: { mfa: boolean; responsibility: boolean };
   homePath: string;
+  otpDelivery?: "email" | "development_code";
 }
 
 export const meKey = ["auth", "me"] as const;

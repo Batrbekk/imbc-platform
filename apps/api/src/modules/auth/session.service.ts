@@ -15,6 +15,7 @@ import {
 } from '../../database/schema/index.js';
 import type { AuthContext } from './auth.types.js';
 import { randomToken, sha256, sixDigitCode } from './crypto.js';
+import { DEVELOPMENT_OTP_CODE, DEVELOPMENT_OTP_HASH_PREFIX, otpDeliveryFor } from './development-otp.js';
 import { ProblemException } from '../../common/problem.js';
 
 /** Параметры входа из спецификации (AUTH-03, AUTH-05) и ADR-20. */
@@ -242,7 +243,14 @@ export class SessionService {
     sessionId: string,
     userId: string,
   ): Promise<
-    | { issued: true; id: string; code: string; expiresAt: Date; retryAfter: number }
+    | {
+        issued: true;
+        id: string;
+        code: string;
+        expiresAt: Date;
+        retryAfter: number;
+        delivery: 'email' | 'development_code';
+      }
     | { issued: false; reason: 'too_soon' | 'not_required'; retryAfter: number }
   > {
     return this.db.transaction(async (tx) => {
@@ -276,15 +284,17 @@ export class SessionService {
             isNull(otpCodes.consumedAt),
           ),
         );
-      const code = sixDigitCode();
+      const delivery = otpDeliveryFor(this.env, account);
+      const code = delivery === 'development_code' ? DEVELOPMENT_OTP_CODE : sixDigitCode();
+      const prefix = delivery === 'development_code' ? DEVELOPMENT_OTP_HASH_PREFIX : '';
       const createdAt = new Date();
       const expiresAt = new Date(Date.now() + OTP_TTL_MS);
       const [row] = await tx
         .insert(otpCodes)
-        .values({ sessionId, codeHash: sha256(`${sessionId}:${code}`), expiresAt, createdAt })
+        .values({ sessionId, codeHash: prefix + sha256(`${sessionId}:${code}`), expiresAt, createdAt })
         .returning({ id: otpCodes.id });
       await tx.update(userAccounts).set({ lastOtpIssuedAt: createdAt }).where(eq(userAccounts.id, userId));
-      return { issued: true, id: row!.id, code, expiresAt, retryAfter: OTP_RESEND_MS / 1000 };
+      return { issued: true, id: row!.id, code, expiresAt, delivery, retryAfter: OTP_RESEND_MS / 1000 };
     });
   }
 
@@ -324,8 +334,15 @@ export class SessionService {
         orderBy: desc(otpCodes.createdAt),
       });
       if (!current || current.consumedAt || current.expiresAt <= new Date()) return 'expired';
+      const developmentCode = current.codeHash.startsWith(DEVELOPMENT_OTP_HASH_PREFIX);
+      if (developmentCode && otpDeliveryFor(this.env, account) !== 'development_code') {
+        // A role/configuration change cannot leave an already issued fixed code usable.
+        await tx.update(otpCodes).set({ consumedAt: new Date() }).where(eq(otpCodes.id, current.id));
+        return 'expired';
+      }
       if (current.attempts >= OTP_MAX_ATTEMPTS) return 'locked';
-      if (current.codeHash !== sha256(`${sessionId}:${code}`)) {
+      const prefix = developmentCode ? DEVELOPMENT_OTP_HASH_PREFIX : '';
+      if (current.codeHash !== prefix + sha256(`${sessionId}:${code}`)) {
         await tx
           .update(otpCodes)
           .set({ attempts: sql`${otpCodes.attempts} + 1` })
@@ -412,16 +429,14 @@ export class SessionService {
           ...(account.state === 'inactive' && at >= account.updatedAt ? { state: 'active' as const } : {}),
         })
         .where(eq(userAccounts.id, account.id));
-      await tx
-        .insert(auditEntries)
-        .values({
-          userId: account.id,
-          organizationId: account.organizationId,
-          action: 'auth.credentials_changed',
-          objectType: 'account',
-          objectId: account.id,
-          isAccountEvent: true,
-        });
+      await tx.insert(auditEntries).values({
+        userId: account.id,
+        organizationId: account.organizationId,
+        action: 'auth.credentials_changed',
+        objectType: 'account',
+        objectId: account.id,
+        isAccountEvent: true,
+      });
     });
   }
 

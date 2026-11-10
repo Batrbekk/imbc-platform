@@ -261,7 +261,7 @@ API ставит задания, выполняет их worker. Для `send-pa
 | Уведомления каталога NOT (профиль, проверка, сертификаты, статус актуальности) | Worker | Обработчик `send-notification` готов; постановка из предметных процессов добавляется вместе с ними | Дедупликация `code + dedupe_key + адрес` (NOT-20) |
 
 - Письма платформы — на языке учётной записи (kk по умолчанию, ru, en), текст и HTML; шаблоны в `apps/api/src/mail/templates.ts`, отправка — `MailService`. При старте API и worker проверяют SMTP (`verify`) и пишут результат в лог, но не падают: письма из очереди повторятся.
-- **Azure dev:** API и Keycloak передают письма в **Mailpit**, который сохраняет копию и пересылает реальные адреса через Azure Communication Services SMTP (STARTTLS). Адреса `.local`, `.localhost`, `.invalid`, `.test`, `.example` остаются только в Mailpit. Интерфейс — `/dev-mail/` на HTTPS-домене, с `MAILPIT_UI_AUTH`. Письма хранятся в томе `mailpit-data` (до 5 000 штук).
+- **Azure dev:** API и Keycloak передают письма в **Mailpit**, который сохраняет копию и пересылает реальные адреса через Azure Communication Services SMTP (STARTTLS). Адреса `.local`, `.localhost`, `.invalid`, `.test`, `.example` остаются только в Mailpit. Интерфейс — `/dev-mail/` на HTTPS-домене, с IP из `ADMIN_ALLOWED_IPS` и паролем `MAILPIT_UI_AUTH`. Письма хранятся в томе `mailpit-data` (до 5 000 штук).
 - Relay-конфигурация находится только на сервере: `infrastructure/mailpit/.env.smtp-relay.yaml` с правами `0600`; шаблон — `relay.example.yaml`. В `.env`: `MAILPIT_RELAY_CONFIG=/etc/mailpit/.env.smtp-relay.yaml`, `MAILPIT_RELAY_ALL=true`. Временный домен Azure допускает до 5 писем в минуту и 10 в час на подписку; для более активной разработки нужен свой домен. Локальный Compose без Azure-overlay сохраняет прежний режим перехвата без отправки.
 - **Реальная доставка** (test/acceptance/prod или проверка на настоящих ящиках) — две настройки в `.env`:
   - платформа: `SMTP_URL=smtps://user:password@smtp.imbc.kz:465` (или `smtp://…:587` для STARTTLS), `MAIL_FROM`;
@@ -303,14 +303,14 @@ API ставит задания, выполняет их worker. Для `send-pa
 
 ## 11. Запуск на dev-сервере
 
-Для Azure используется один Ubuntu 24.04 VM с Docker Compose и HTTPS через Caddy. Скрипт [infrastructure/azure/deploy.sh](infrastructure/azure/deploy.sh) работает с текущей подпиской `az login`; нужны Azure CLI, Git, SSH и tar на вашей машине. Docker и Compose устанавливаются на VM через cloud-init.
+Для Azure используется один Ubuntu 24.04 VM с Docker Compose и HTTPS через Caddy. Скрипт [infrastructure/azure/deploy.sh](infrastructure/azure/deploy.sh) работает с текущей подпиской `az login`; нужны Azure CLI, Python 3, Git, SSH и tar на вашей машине. Docker и Compose устанавливаются на VM через cloud-init.
 
 ### Dev-сервер в Azure
 
 Запускайте из корня репозитория:
 
 ```bash
-./infrastructure/azure/deploy.sh up        # создать или обновить VM, разрешить текущий IP, развернуть HTTPS-стенд
+./infrastructure/azure/deploy.sh up        # создать или обновить VM, ограничить SSH по IP, открыть сайт всем
 ./infrastructure/azure/deploy.sh info      # адреса и способ подключения, без паролей
 ./infrastructure/azure/deploy.sh redeploy  # загрузить текущие локальные исходники, пересобрать и проверить стенд
 ./infrastructure/azure/deploy.sh ssh       # подключиться к VM
@@ -318,7 +318,7 @@ API ставит задания, выполняет их worker. Для `send-pa
 
 По умолчанию: `imbc-dev-rg` / `imbc-dev`, `polandcentral`, `Standard_D4as_v5` (4 vCPU, 16 ГБ RAM), Standard SSD 128 ГБ. SSH-ключ хранится локально в `~/.ssh/imbc-dev-azure`, приложение на VM — в `/home/imbc/imbc-platform`. Подробные адреса, команды обслуживания и стоимость: [runbook Azure dev](docs/deployment/azure-dev.md).
 
-- Caddy получает и обновляет TLS-сертификат для `PUBLIC_HOST`. HTTPS/443 и SSH/22 разрешены только с текущего внешнего IP; HTTP/80 открыт для ACME и перенаправления на HTTPS. После смены сети повторите `up`: он обновит IP в NSG и заново развернёт текущий код. Для заданного адреса используйте `ALLOW_FROM=1.2.3.4/32 ./infrastructure/azure/deploy.sh up`.
+- Caddy получает и обновляет TLS-сертификат для `PUBLIC_HOST`. HTTPS/443 доступен всем получателям ссылок; SSH/22 ограничен текущим внешним IP (`ALLOW_FROM`). HTTP/80 открыт для ACME и перенаправления. Mailpit, Keycloak admin и master realm доступны только с IP из серверной `ADMIN_ALLOWED_IPS`; Mailpit дополнительно требует пароль. При первом запуске список берётся из `ALLOW_FROM`, затем сохраняется. После смены сети задайте оба списка явно: `ALLOW_FROM=1.2.3.4/32 ADMIN_ALLOWED_IPS="1.2.3.4/32 127.0.0.1/32 ::1/128" ./infrastructure/azure/deploy.sh up`. Публичный HTTPS открывается после проверки ограничений Caddy; обычный `redeploy` не меняет NSG.
 - Запуск всегда объединяет `compose.yaml` и `compose.azure.yaml`. API, Keycloak, Web и Mailpit доступны через Caddy; PostgreSQL, Valkey и S3 API остаются в Docker-сети. Порты nginx, Mailpit и консоли S3 привязаны к localhost VM.
 - Серверная `.env` создаётся со случайными секретами и правами `0600`. В ней включены `COOKIE_SECURE=true`, cookie с префиксом `__Host-` и `KEYCLOAK_SSL_REQUIRED=external`. Повторное развёртывание сохраняет `.env`, данные и TLS-сертификаты; `info` не печатает пароли.
 - Realm Keycloak импортируется один раз. После каждого запуска `sync-realm.py --theme imbc` обновляет разрешённый набор настроек темы, политик, событий, SMTP и клиента BFF; пользователи и client secrets сохраняются. Изменение hostname, секретов или переход существующего HTTP-стенда на HTTPS требует согласованной миграции; скрипт останавливается при несовместимой `.env`.
@@ -328,8 +328,8 @@ API ставит задания, выполняет их worker. Для `send-pa
 |---|---|
 | Платформа | `/` |
 | OpenAPI | `/api/docs` |
-| Консоль Keycloak | `/kc/admin/` |
-| Почта с кодами входа | `/dev-mail/`, пароль из `MAILPIT_UI_AUTH` в серверной `.env` |
+| Консоль Keycloak | `/kc/admin/`, IP из `ADMIN_ALLOWED_IPS` |
+| Почта с кодами входа | `/dev-mail/`, IP из `ADMIN_ALLOWED_IPS` и пароль из `MAILPIT_UI_AUTH` |
 | Консоль S3 | SSH-туннель на `127.0.0.1:9001`, см. runbook |
 
 **Демо-учётные записи** при `SEED_DEMO=true`; общий начальный пароль находится в `KEYCLOAK_DEV_USER_PASSWORD` серверной `.env`:
@@ -393,6 +393,7 @@ Next.js проксирует `/api` на `localhost:3001` и `/kc` на Keycloak
 | `SMTP_URL`, `MAIL_FROM`, `IMBC_MAILBOX` | Почта платформы (по умолчанию Mailpit) |
 | `KEYCLOAK_SMTP_*` | Почта Keycloak: установка и сброс пароля |
 | `MAILPIT_UI_AUTH` | Пароль на интерфейс Mailpit |
+| `ADMIN_ALLOWED_IPS` | IP/CIDR через пробел для Mailpit и Keycloak admin в Azure; без настройки разрешён только loopback |
 | `MAILPIT_RELAY_CONFIG`, `MAILPIT_RELAY_ALL` | Конфигурация и автоматическая пересылка Mailpit в Azure-overlay; SMTP-секрет хранится отдельно на VM |
 | `CLAMAV_HOST`, `CLAMAV_PORT` | clamd |
 | `SEED_DEMO` | Демо-данные при миграции (только dev) |
@@ -407,7 +408,7 @@ docker compose config -q
 Для текущего auth-среза прошли:
 
 - `@imbc/contracts` — **23 теста**: БИН, нормализация названий, фильтры, матрица прав, безопасный `returnTo` и стартовая страница роли.
-- `@imbc/api` — **45 тестов**, включая **16 интеграционных на PostgreSQL 18**: параллельные OTP и лимиты, истечение и отзыв сеансов, подписанный backchannel logout, смена пароля, отказ SMTP, транзакционная регистрация с pg-boss и компенсация IdP. Также проверяются guard/Origin, clamd и шаблоны писем.
+- `@imbc/api` — **56 тестов**, включая **20 интеграционных на PostgreSQL 18**: параллельные OTP и лимиты, истечение и отзыв сеансов, подписанный backchannel logout, смена пароля, отказ SMTP, транзакционная регистрация с pg-boss и компенсация IdP. Также проверяются guard/Origin, clamd и шаблоны писем.
 - `@imbc/web` — **4 теста** переходов по ролям, ограничения назначения и безопасного возврата. Проверки типов, lint web и сборки API/web выполнены отдельно.
 
 Интеграционные API-тесты запускаются только при заданном `TEST_DATABASE_URL` с отдельной одноразовой БД **`imbc_auth_test`**: тестовый набор пересоздаёт её схемы. Без этой переменной 16 тестов пропускаются; обычный `pnpm test` не подтверждает их выполнение. Внешние IdP/SMTP-вызовы в этих тестах подменены, поэтому доставка настоящего письма и весь браузерный путь проверяются отдельно на dev-стенде.
@@ -428,3 +429,5 @@ docker compose config -q
 8. **Эксплуатация**: резервное копирование и восстановление, нагрузка и наблюдаемость; для production — Helm/Kustomize, Argo CD, Vault/OpenBao, Grafana Alloy.
 
 Открытые вопросы, которые архитектура не решает сама, — раздел 23 документа архитектуры.
+
+Dev-only тестовый администратор и его конфигурация фиксированного OTP описаны в [Azure runbook](docs/deployment/azure-dev.md#тестовый-администратор-с-фиксированным-кодом).

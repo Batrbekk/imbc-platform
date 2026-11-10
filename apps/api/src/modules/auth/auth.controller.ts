@@ -9,6 +9,7 @@ import { ENV, type Env } from '../../config/env.js';
 import { MailService } from '../../mail/mail.service.js';
 import type { AuthContext } from './auth.types.js';
 import { sign, unsign } from './crypto.js';
+import { otpDeliveryFor } from './development-otp.js';
 import { AllowMfaPending, AllowResponsibilityPending, Auth, Public, SignedBackchannel } from './guards.js';
 import { OidcService } from './oidc.service.js';
 import { ABSOLUTE_TIMEOUT_MS, OTP_TTL_MS, SessionService, TRUSTED_DEVICE_MS } from './session.service.js';
@@ -185,6 +186,7 @@ export class AuthController {
       user: auth.user,
       gates: { mfa: auth.mfaPassed, responsibility: auth.responsibilityAccepted },
       homePath: roleHome(auth.user.role),
+      otpDelivery: otpDeliveryFor(this.env, auth.user),
     };
   }
 
@@ -199,6 +201,13 @@ export class AuthController {
     await this.rates.enforce('otp-send-user', auth.user.id, 60, 3600);
     const issued = await this.sessions.issueOtp(auth.sessionId, auth.user.id);
     if (!issued.issued) return { sent: false, reason: issued.reason, retryAfter: issued.retryAfter };
+    if (issued.delivery === 'development_code')
+      return {
+        sent: false,
+        reason: 'development_code',
+        retryAfter: issued.retryAfter,
+        expiresAt: issued.expiresAt.toISOString(),
+      };
     // NOT-02: на языке учётной записи; отправляется сразу, без очереди — пользователь ждёт код.
     try {
       await this.mail.send('NOT-02', auth.user.email, auth.user.locale, {

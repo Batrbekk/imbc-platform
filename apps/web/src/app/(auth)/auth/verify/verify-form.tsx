@@ -44,7 +44,7 @@ export function VerifyForm({ returnTo }: { returnTo: string }) {
         return;
       }
       cooldown.start(result.retryAfter ?? 60);
-      if (result.sent) {
+      if (result.sent || result.reason === "development_code") {
         setCode("");
         verify.reset();
       }
@@ -94,7 +94,11 @@ export function VerifyForm({ returnTo }: { returnTo: string }) {
         : errorCode === "otp_invalid"
           ? t("invalid")
           : t("verifyError");
-  const sendMessage = send.error instanceof ApiError && send.error.status === 429 ? t("tooSoon") : t("sendError");
+  const developmentCode = me.data.otpDelivery === "development_code";
+  const sendMessage =
+    send.error instanceof ApiError && send.error.status === 429
+      ? t(developmentCode ? "developmentTooSoon" : "tooSoon")
+      : t(developmentCode ? "developmentSendError" : "sendError");
 
   return (
     <div className="space-y-5">
@@ -104,15 +108,17 @@ export function VerifyForm({ returnTo }: { returnTo: string }) {
           <span className="break-all">{me.data.user.email}</span>
         </div>
         <p className="text-muted-foreground">
-          {send.isPending
-            ? t("sending")
-            : send.isError
-              ? t("notSent")
-              : send.data?.sent
-                ? t("sent")
-                : send.data?.reason === "too_soon"
-                  ? t("alreadyRequested")
-                  : t("preparing")}
+          {developmentCode
+            ? t("developmentCode")
+            : send.isPending
+              ? t("sending")
+              : send.isError
+                ? t("notSent")
+                : send.data?.sent
+                  ? t("sent")
+                  : send.data?.reason === "too_soon"
+                    ? t("alreadyRequested")
+                    : t("preparing")}
         </p>
       </div>
       {send.isError && (
@@ -178,9 +184,13 @@ export function VerifyForm({ returnTo }: { returnTo: string }) {
           disabled={send.isPending || cooldown.seconds > 0}
         >
           {send.isPending && <Spinner />}
-          {cooldown.seconds > 0 ? t("resendIn", { seconds: cooldown.seconds }) : t("resend")}
+          {cooldown.seconds > 0
+            ? t(developmentCode ? "developmentResendIn" : "resendIn", { seconds: cooldown.seconds })
+            : t(developmentCode ? "developmentResend" : "resend")}
         </Button>
-        <p className="text-center text-xs leading-relaxed text-muted-foreground">{t("deliveryHint")}</p>
+        {!developmentCode && (
+          <p className="text-center text-xs leading-relaxed text-muted-foreground">{t("deliveryHint")}</p>
+        )}
         <p className="text-center text-xs leading-relaxed text-muted-foreground">{t("trust")}</p>
       </div>
       <SessionExit changeAccount />

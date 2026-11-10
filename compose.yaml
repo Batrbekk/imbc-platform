@@ -7,6 +7,9 @@ name: imbc
 
 x-backend-env: &backend-env
   NODE_ENV: production
+  DEPLOYMENT_ENV: ${DEPLOYMENT_ENV:-production}
+  DEV_FIXED_OTP_ENABLED: ${DEV_FIXED_OTP_ENABLED:-false}
+  DEV_FIXED_OTP_USER_ID: ${DEV_FIXED_OTP_USER_ID:-}
   LOG_LEVEL: ${LOG_LEVEL:-info}
   PUBLIC_URL: ${PUBLIC_URL}
   DATABASE_URL: postgres://imbc_app:${DB_APP_PASSWORD}@postgres:5432/imbc

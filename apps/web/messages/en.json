@@ -42,14 +42,14 @@
   },
   "verify": {
     "title": "Confirm sign-in",
-    "hint": "Enter the six-digit code sent to your account email.",
+    "hint": "Enter the six-digit code to confirm your sign-in.",
     "button": "Confirm",
     "resend": "Resend code",
     "resent": "A new code has been sent",
     "tooSoon": "Emails have been requested too often. Please wait before trying again.",
     "trust": "After confirmation, this device will be trusted for 30 days.",
     "invalid": "This code does not match. Check the digits and try again.",
-    "codeLabel": "Email code",
+    "codeLabel": "Confirmation code",
     "expiryHint": "The code is valid for 10 minutes.",
     "sending": "Sending your code…",
     "notSent": "Your code could not be sent yet.",
@@ -61,7 +61,12 @@
     "expired": "This code has expired. Request a new code.",
     "locked": "You have reached the attempt limit. Request a new code.",
     "resendIn": "Send again in {seconds}s",
-    "deliveryHint": "If the email has not arrived, check your spam folder and the address above."
+    "deliveryHint": "If the email has not arrived, check your spam folder and the address above.",
+    "developmentCode": "Test account: use code 000000. No email is sent.",
+    "developmentSendError": "We could not prepare the code. Please try again.",
+    "developmentTooSoon": "Codes have been requested too often. Please wait before trying again.",
+    "developmentResend": "Refresh code",
+    "developmentResendIn": "Refresh code in {seconds}s"
   },
   "responsibility": {
     "title": "Responsibility for credentials",

@@ -16,6 +16,8 @@ import * as schema from '../src/database/schema/index.js';
 import { QUEUES } from '../src/jobs/queues.js';
 import { AuthController } from '../src/modules/auth/auth.controller.js';
 import { randomToken, sha256 } from '../src/modules/auth/crypto.js';
+import * as crypto from '../src/modules/auth/crypto.js';
+import { DEVELOPMENT_OTP_HASH_PREFIX } from '../src/modules/auth/development-otp.js';
 import { KeycloakAdminService, KeycloakRequestError } from '../src/modules/auth/keycloak-admin.service.js';
 import { AuthRateLimitService } from '../src/modules/auth/rate-limit.service.js';
 import { SessionService } from '../src/modules/auth/session.service.js';
@@ -63,14 +65,21 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
     await pool?.end();
   });
 
-  async function account(state: 'active' | 'invited' | 'inactive' = 'active', bound = true) {
-    const [org] = await db.insert(schema.organizations).values({ type: 'operator', name: 'Auth test' }).returning();
+  async function account(
+    state: 'active' | 'invited' | 'inactive' = 'active',
+    bound = true,
+    role: 'operator' | 'administrator' = 'operator',
+  ) {
+    const [org] = await db
+      .insert(schema.organizations)
+      .values({ type: role === 'administrator' ? 'imbc' : 'operator', name: 'Auth test' })
+      .returning();
     const [user] = await db
       .insert(schema.userAccounts)
       .values({
         organizationId: org!.id,
         email: `${randomUUID()}@example.invalid`,
-        role: 'operator',
+        role,
         state,
         idpSubject: bound ? randomUUID() : null,
       })
@@ -97,6 +106,103 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
     await db.update(schema.sessions).set({ mfaPassed: true }).where(eq(schema.sessions.id, sessionId));
     return (await sessions.trustDevice(userId, sessionId))!;
   }
+
+  function developmentEnv(userId: string): Env {
+    return { ...env, DEPLOYMENT_ENV: 'development', DEV_FIXED_OTP_ENABLED: true, DEV_FIXED_OTP_USER_ID: userId };
+  }
+
+  it('issues only a stored, session-bound test code with honest no-email response and normal cooldown/replay limits', async () => {
+    const user = await account('active', true, 'administrator');
+    const entry = await session(user);
+    const configured = developmentEnv(user.id);
+    const service = new SessionService(db, configured);
+    const mail = { send: vi.fn() };
+    const controller = new AuthController({} as never, service, new AuditService(db), mail as never, rates, configured);
+    const auth = (await service.resolve(entry.token))!;
+    expect(controller.me(auth).otpDelivery).toBe('development_code');
+    expect(await service.verifyOtp(entry.id, user.id, '000000')).toBe('expired');
+    expect(await controller.sendOtp(auth, { ip: '127.0.0.21' } as never)).toMatchObject({
+      sent: false,
+      reason: 'development_code',
+      retryAfter: 60,
+      expiresAt: expect.any(String),
+    });
+    expect(mail.send).not.toHaveBeenCalled();
+    const code = (await db.query.otpCodes.findFirst({ where: eq(schema.otpCodes.sessionId, entry.id) }))!;
+    expect(code.codeHash).toBe(DEVELOPMENT_OTP_HASH_PREFIX + sha256(`${entry.id}:000000`));
+    expect(await service.issueOtp(entry.id, user.id)).toMatchObject({ issued: false, reason: 'too_soon' });
+    expect(await service.verifyOtp(entry.id, user.id, '000000')).toBe('ok');
+    expect(await service.verifyOtp(entry.id, user.id, '000000')).toBe('expired');
+    expect((await service.resolve(entry.token))?.mfaPassed).toBe(true);
+  });
+
+  it('keeps normal random issuance for other users, non-admin roles, disabled flags and production tiers', async () => {
+    const random = vi.spyOn(crypto, 'sixDigitCode').mockReturnValue('482651');
+    try {
+      for (const mode of ['wrong_user', 'wrong_role', 'disabled', 'production'] as const) {
+        const user = await account('active', true, mode === 'wrong_role' ? 'operator' : 'administrator');
+        const entry = await session(user);
+        const configured = developmentEnv(user.id);
+        if (mode === 'wrong_user') configured.DEV_FIXED_OTP_USER_ID = randomUUID();
+        if (mode === 'disabled') configured.DEV_FIXED_OTP_ENABLED = false;
+        if (mode === 'production') configured.DEPLOYMENT_ENV = 'production';
+        const service = new SessionService(db, configured);
+        const issued = await service.issueOtp(entry.id, user.id);
+        expect(issued).toMatchObject({ issued: true, delivery: 'email', code: '482651' });
+        expect(await service.verifyOtp(entry.id, user.id, '000000')).toBe('invalid');
+        expect(await service.verifyOtp(entry.id, user.id, '482651')).toBe('ok');
+      }
+      expect(random).toHaveBeenCalledTimes(4);
+    } finally {
+      random.mockRestore();
+    }
+  });
+
+  it('invalidates outstanding fixed codes when UUID, role, flag or deployment tier changes', async () => {
+    for (const change of ['uuid', 'role', 'disabled', 'production'] as const) {
+      const user = await account('active', true, 'administrator');
+      const entry = await session(user);
+      const configured = developmentEnv(user.id);
+      const service = new SessionService(db, configured);
+      expect(await service.issueOtp(entry.id, user.id)).toMatchObject({ issued: true, delivery: 'development_code' });
+      if (change === 'uuid') configured.DEV_FIXED_OTP_USER_ID = randomUUID();
+      if (change === 'disabled') configured.DEV_FIXED_OTP_ENABLED = false;
+      if (change === 'production') configured.DEPLOYMENT_ENV = 'production';
+      if (change === 'role')
+        await db.update(schema.userAccounts).set({ role: 'operator' }).where(eq(schema.userAccounts.id, user.id));
+      expect(await service.verifyOtp(entry.id, user.id, '000000')).toBe('expired');
+      expect((await sessions.resolve(entry.token))?.mfaPassed).toBe(false);
+    }
+  });
+
+  it('expires and locks fixed codes normally and never applies a fixed-code exception to a normal random 000000', async () => {
+    const user = await account('active', true, 'administrator');
+    const service = new SessionService(db, developmentEnv(user.id));
+    const locked = await session(user);
+    await service.issueOtp(locked.id, user.id);
+    await Promise.all(Array.from({ length: 8 }, () => service.verifyOtp(locked.id, user.id, '999999')));
+    expect(await service.verifyOtp(locked.id, user.id, '000000')).toBe('locked');
+    const record = (await db.query.otpCodes.findFirst({ where: eq(schema.otpCodes.sessionId, locked.id) }))!;
+    expect(record.attempts).toBe(5);
+    await db.update(schema.userAccounts).set({ lastOtpIssuedAt: null }).where(eq(schema.userAccounts.id, user.id));
+    const expired = await session(user);
+    await service.issueOtp(expired.id, user.id);
+    await db
+      .update(schema.otpCodes)
+      .set({ expiresAt: new Date(Date.now() - 1) })
+      .where(eq(schema.otpCodes.sessionId, expired.id));
+    expect(await service.verifyOtp(expired.id, user.id, '000000')).toBe('expired');
+
+    const ordinary = await account();
+    const normal = await session(ordinary);
+    const random = vi.spyOn(crypto, 'sixDigitCode').mockReturnValue('000000');
+    try {
+      expect(await sessions.issueOtp(normal.id, ordinary.id)).toMatchObject({ delivery: 'email', code: '000000' });
+    } finally {
+      random.mockRestore();
+    }
+    expect(await sessions.verifyOtp(normal.id, ordinary.id, '000000')).toBe('ok');
+  });
 
   it('serializes OTP issuance across sessions and preserves cooldown after logout', async () => {
     const user = await account();
@@ -269,15 +375,13 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
     if (login!.status === 'fulfilled') expect(await sessions.resolve(login!.value.token)).toBeNull();
     else expect(login!.reason).toMatchObject({ code: 'session_expired' });
     const legacyToken = randomToken();
-    await db
-      .insert(schema.sessions)
-      .values({
-        userId: user.id,
-        tokenHash: sha256(legacyToken),
-        authVersion: user.authVersion,
-        expiresAt: new Date(Date.now() + 60000),
-        mfaPassed: true,
-      });
+    await db.insert(schema.sessions).values({
+      userId: user.id,
+      tokenHash: sha256(legacyToken),
+      authVersion: user.authVersion,
+      expiresAt: new Date(Date.now() + 60000),
+      mfaPassed: true,
+    });
     expect(await sessions.resolve(legacyToken)).toBeNull();
   });
 
