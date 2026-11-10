@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ROLES } from '@imbc/contracts';
 import { loadEnv } from '../src/config/env.js';
 import { otpDeliveryFor } from '../src/modules/auth/development-otp.js';
 
@@ -21,6 +22,7 @@ describe('explicit development OTP configuration', () => {
     const env = loadEnv({ ...source, NODE_ENV: 'development', DEV_FIXED_OTP_USER_ID: '' });
     expect(env.DEPLOYMENT_ENV).toBe('production');
     expect(env.DEV_FIXED_OTP_ENABLED).toBe(false);
+    expect(env.DEV_FIXED_OTP_ACCOUNTS).toEqual([]);
     expect(otpDeliveryFor(env, { id: accountId, role: 'administrator' })).toBe('email');
   });
 
@@ -48,5 +50,69 @@ describe('explicit development OTP configuration', () => {
     expect(otpDeliveryFor({ ...env, DEV_FIXED_OTP_USER_ID: undefined }, admin)).toBe('email');
     expect(otpDeliveryFor(env, { ...admin, id: '09544cc6-ef1f-41fb-916e-cab7f50da4dc' })).toBe('email');
     expect(otpDeliveryFor(env, { ...admin, role: 'operator' })).toBe('email');
+  });
+
+  it.each(ROLES)('allows only the exact configured UUID and %s role', (role) => {
+    const env = loadEnv({
+      ...source,
+      DEPLOYMENT_ENV: 'development',
+      DEV_FIXED_OTP_ENABLED: 'true',
+      DEV_FIXED_OTP_ACCOUNTS: JSON.stringify([{ id: accountId.toUpperCase(), role }]),
+    });
+    const account = { id: accountId, role };
+    expect(env.DEV_FIXED_OTP_ACCOUNTS).toEqual([account]);
+    expect(otpDeliveryFor(env, account)).toBe('development_code');
+    for (const differentRole of ROLES.filter((candidate) => candidate !== role))
+      expect(otpDeliveryFor(env, { ...account, role: differentRole })).toBe('email');
+    expect(otpDeliveryFor(env, { ...account, id: '09544cc6-ef1f-41fb-916e-cab7f50da4dc' })).toBe('email');
+    expect(otpDeliveryFor({ ...env, DEV_FIXED_OTP_ENABLED: false }, account)).toBe('email');
+    expect(otpDeliveryFor({ ...env, DEPLOYMENT_ENV: 'production' }, account)).toBe('email');
+  });
+
+  it('combines listed accounts with the separate administrator-only legacy setting', () => {
+    const listedId = '09544cc6-ef1f-41fb-916e-cab7f50da4dc';
+    const env = loadEnv({
+      ...source,
+      DEPLOYMENT_ENV: 'development',
+      DEV_FIXED_OTP_ENABLED: 'true',
+      DEV_FIXED_OTP_USER_ID: accountId,
+      DEV_FIXED_OTP_ACCOUNTS: JSON.stringify([{ id: listedId, role: 'expert' }]),
+    });
+    expect(otpDeliveryFor(env, { id: listedId, role: 'expert' })).toBe('development_code');
+    expect(otpDeliveryFor(env, { id: accountId, role: 'administrator' })).toBe('development_code');
+    expect(otpDeliveryFor(env, { id: accountId, role: 'expert' })).toBe('email');
+    expect(otpDeliveryFor(env, { id: listedId, role: 'administrator' })).toBe('email');
+  });
+
+  it.each([
+    '{',
+    '{}',
+    'null',
+    '["not-an-account"]',
+    JSON.stringify([{ id: 'not-a-uuid', role: 'operator' }]),
+    JSON.stringify([{ id: accountId, role: 'observer' }]),
+    JSON.stringify([{ id: accountId }]),
+    JSON.stringify([{ role: 'operator' }]),
+    JSON.stringify([{ id: accountId, role: 'operator', email: 'unused@example.invalid' }]),
+    JSON.stringify([
+      { id: accountId, role: 'operator' },
+      { id: accountId, role: 'operator' },
+    ]),
+    JSON.stringify([
+      { id: accountId, role: 'operator' },
+      { id: accountId.toUpperCase(), role: 'director' },
+    ]),
+  ])('rejects malformed or ambiguous account configuration even with the feature disabled %#', (value) => {
+    expect(() => loadEnv({ ...source, DEV_FIXED_OTP_ACCOUNTS: value })).toThrow('Некорректная конфигурация окружения');
+  });
+
+  it('rejects a collision with the legacy UUID and production enablement for a list-only configuration', () => {
+    const list = JSON.stringify([{ id: accountId.toUpperCase(), role: 'administrator' }]);
+    expect(() => loadEnv({ ...source, DEV_FIXED_OTP_USER_ID: accountId, DEV_FIXED_OTP_ACCOUNTS: list })).toThrow(
+      'legacy administrator',
+    );
+    expect(() => loadEnv({ ...source, DEV_FIXED_OTP_ENABLED: 'true', DEV_FIXED_OTP_ACCOUNTS: list })).toThrow(
+      'development deployment tier',
+    );
   });
 });

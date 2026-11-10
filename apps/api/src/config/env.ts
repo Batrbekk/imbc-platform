@@ -1,5 +1,28 @@
 import { existsSync } from 'node:fs';
+import { ROLES } from '@imbc/contracts';
 import { z } from 'zod';
+
+const developmentOtpAccounts = z
+  .string()
+  .default('[]')
+  .transform((value, context) => {
+    try {
+      return JSON.parse(value) as unknown;
+    } catch {
+      context.addIssue({ code: 'custom', message: 'Fixed OTP accounts must be a valid JSON array' });
+      return z.NEVER;
+    }
+  })
+  .pipe(
+    z.array(
+      z
+        .object({
+          id: z.uuid().transform((value) => value.toLowerCase()),
+          role: z.enum(ROLES),
+        })
+        .strict(),
+    ),
+  );
 
 /** Конфигурация из переменных окружения; невалидная конфигурация останавливает старт. */
 const envSchema = z
@@ -18,6 +41,7 @@ const envSchema = z
         .transform((value) => value.toLowerCase())
         .optional(),
     ),
+    DEV_FIXED_OTP_ACCOUNTS: developmentOtpAccounts,
     PORT: z.coerce.number().int().default(3001),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
     /** Роль процесса из одного образа: api (HTTP) или worker (очередь и расписание). */
@@ -68,6 +92,22 @@ const envSchema = z
     IMBC_MAILBOX: z.string().default('platform@imbc.local'),
   })
   .superRefine((env, context) => {
+    const ids = new Set<string>();
+    for (const [index, account] of env.DEV_FIXED_OTP_ACCOUNTS.entries()) {
+      if (ids.has(account.id))
+        context.addIssue({
+          code: 'custom',
+          path: ['DEV_FIXED_OTP_ACCOUNTS', index, 'id'],
+          message: 'Fixed OTP accounts must not contain duplicate UUIDs',
+        });
+      if (account.id === env.DEV_FIXED_OTP_USER_ID)
+        context.addIssue({
+          code: 'custom',
+          path: ['DEV_FIXED_OTP_ACCOUNTS', index, 'id'],
+          message: 'Fixed OTP account UUID must not also appear in the legacy administrator setting',
+        });
+      ids.add(account.id);
+    }
     if (!env.DEV_FIXED_OTP_ENABLED) return;
     if (env.DEPLOYMENT_ENV !== 'development')
       context.addIssue({
@@ -75,11 +115,11 @@ const envSchema = z
         path: ['DEPLOYMENT_ENV'],
         message: 'Fixed test OTP requires the development deployment tier',
       });
-    if (!env.DEV_FIXED_OTP_USER_ID)
+    if (!env.DEV_FIXED_OTP_USER_ID && env.DEV_FIXED_OTP_ACCOUNTS.length === 0)
       context.addIssue({
         code: 'custom',
-        path: ['DEV_FIXED_OTP_USER_ID'],
-        message: 'Fixed test OTP requires one immutable account UUID',
+        path: ['DEV_FIXED_OTP_ACCOUNTS'],
+        message: 'Fixed test OTP requires at least one immutable account target',
       });
   });
 

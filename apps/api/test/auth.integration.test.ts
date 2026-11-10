@@ -7,7 +7,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
 import { PgBoss } from 'pg-boss';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { computeBinCheckDigit } from '@imbc/contracts';
+import { computeBinCheckDigit, ROLES, type Role } from '@imbc/contracts';
 import { AuditService } from '../src/common/audit.service.js';
 import { ProblemException } from '../src/common/problem.js';
 import type { Env } from '../src/config/env.js';
@@ -65,14 +65,13 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
     await pool?.end();
   });
 
-  async function account(
-    state: 'active' | 'invited' | 'inactive' = 'active',
-    bound = true,
-    role: 'operator' | 'administrator' = 'operator',
-  ) {
+  async function account(state: 'active' | 'invited' | 'inactive' = 'active', bound = true, role: Role = 'operator') {
     const [org] = await db
       .insert(schema.organizations)
-      .values({ type: role === 'administrator' ? 'imbc' : 'operator', name: 'Auth test' })
+      .values({
+        type: role === 'manufacturer' || role === 'operator' || role === 'spectator' ? role : 'imbc',
+        name: 'Auth test',
+      })
       .returning();
     const [user] = await db
       .insert(schema.userAccounts)
@@ -108,8 +107,88 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
   }
 
   function developmentEnv(userId: string): Env {
-    return { ...env, DEPLOYMENT_ENV: 'development', DEV_FIXED_OTP_ENABLED: true, DEV_FIXED_OTP_USER_ID: userId };
+    return {
+      ...env,
+      DEPLOYMENT_ENV: 'development',
+      DEV_FIXED_OTP_ENABLED: true,
+      DEV_FIXED_OTP_USER_ID: userId,
+      DEV_FIXED_OTP_ACCOUNTS: [],
+    };
   }
+
+  function listedDevelopmentEnv(userId: string, role: Role): Env {
+    return {
+      ...env,
+      DEPLOYMENT_ENV: 'development',
+      DEV_FIXED_OTP_ENABLED: true,
+      DEV_FIXED_OTP_ACCOUNTS: [{ id: userId, role }],
+    };
+  }
+
+  it.each(ROLES)('issues and verifies an ordinary session-bound fixed-code record for listed %s', async (role) => {
+    const user = await account('active', true, role);
+    const entry = await session(user);
+    const configured = listedDevelopmentEnv(user.id, role);
+    const service = new SessionService(db, configured);
+    const mail = { send: vi.fn() };
+    const controller = new AuthController({} as never, service, new AuditService(db), mail as never, rates, configured);
+    const auth = (await service.resolve(entry.token))!;
+    expect(controller.me(auth).otpDelivery).toBe('development_code');
+    expect(await service.verifyOtp(entry.id, user.id, '000000')).toBe('expired');
+    expect(await controller.sendOtp(auth, { ip: '127.0.0.22' } as never)).toMatchObject({
+      sent: false,
+      reason: 'development_code',
+      retryAfter: 60,
+    });
+    expect(mail.send).not.toHaveBeenCalled();
+    expect(await service.issueOtp(entry.id, user.id)).toMatchObject({ issued: false, reason: 'too_soon' });
+    expect(await service.verifyOtp(entry.id, user.id, '000000')).toBe('ok');
+    expect(await service.verifyOtp(entry.id, user.id, '000000')).toBe('expired');
+    expect((await service.resolve(entry.token))?.mfaPassed).toBe(true);
+  });
+
+  it('keeps a recreated account with the same email and role on normal random email codes', async () => {
+    const old = await account();
+    const configured = listedDevelopmentEnv(old.id, old.role);
+    await db.delete(schema.userAccounts).where(eq(schema.userAccounts.id, old.id));
+    const replacement = await account();
+    await db.update(schema.userAccounts).set({ email: old.email }).where(eq(schema.userAccounts.id, replacement.id));
+    const entry = await session(replacement);
+    const service = new SessionService(db, configured);
+    const random = vi.spyOn(crypto, 'sixDigitCode').mockReturnValue('482651');
+    try {
+      expect(await service.issueOtp(entry.id, replacement.id)).toMatchObject({
+        issued: true,
+        delivery: 'email',
+        code: '482651',
+      });
+      expect(await service.verifyOtp(entry.id, replacement.id, '000000')).toBe('invalid');
+      expect(await service.verifyOtp(entry.id, replacement.id, '482651')).toBe('ok');
+    } finally {
+      random.mockRestore();
+    }
+  });
+
+  it('consumes outstanding listed codes after account removal, UUID replacement or either side of the role binding changes', async () => {
+    for (const change of ['remove', 'new_uuid', 'configured_role', 'account_role'] as const) {
+      const user = await account('active', true, 'expert');
+      const entry = await session(user);
+      const configured = listedDevelopmentEnv(user.id, user.role);
+      const service = new SessionService(db, configured);
+      const issued = await service.issueOtp(entry.id, user.id);
+      if (!issued.issued) throw new Error('Expected a listed fixed code');
+      if (change === 'remove') configured.DEV_FIXED_OTP_ACCOUNTS = [];
+      if (change === 'new_uuid') configured.DEV_FIXED_OTP_ACCOUNTS = [{ id: randomUUID(), role: user.role }];
+      if (change === 'configured_role') configured.DEV_FIXED_OTP_ACCOUNTS = [{ id: user.id, role: 'director' }];
+      if (change === 'account_role')
+        await db.update(schema.userAccounts).set({ role: 'director' }).where(eq(schema.userAccounts.id, user.id));
+      expect(await service.verifyOtp(entry.id, user.id, '000000')).toBe('expired');
+      expect(
+        (await db.query.otpCodes.findFirst({ where: eq(schema.otpCodes.id, issued.id) }))?.consumedAt,
+      ).not.toBeNull();
+      expect((await sessions.resolve(entry.token))?.mfaPassed).toBe(false);
+    }
+  });
 
   it('issues only a stored, session-bound test code with honest no-email response and normal cooldown/replay limits', async () => {
     const user = await account('active', true, 'administrator');
