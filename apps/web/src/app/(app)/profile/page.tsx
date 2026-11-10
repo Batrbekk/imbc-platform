@@ -1,15 +1,27 @@
+import { Building2Icon } from "lucide-react";
+import Link from "next/link";
 import { getTranslations } from "next-intl/server";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-/** Профиль производителя: восемь секций и прогресс заполнения (MAN-01…91) — следующий этап. */
 export default async function ProfilePage() {
-  const t = await getTranslations("nav");
+  const t = await getTranslations("profile");
+  const nav = await getTranslations("nav");
   return (
-    <Empty className="border">
-      <EmptyHeader>
-        <EmptyTitle>{t("profile")}</EmptyTitle>
-        <EmptyDescription>MAN-01…MAN-91</EmptyDescription>
-      </EmptyHeader>
-    </Empty>
+    <Card className="mx-auto max-w-3xl">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Building2Icon className="size-5 text-primary" />
+          {nav("profile")}
+        </CardTitle>
+        <CardDescription>{t("welcome")}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-muted-foreground">{t("accountHint")}</p>
+        <Button asChild variant="outline">
+          <Link href="/account">{nav("account")}</Link>
+        </Button>
+      </CardContent>
+    </Card>
   );
 }

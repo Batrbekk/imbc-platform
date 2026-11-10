@@ -41,6 +41,9 @@ export const userAccounts = pgTable(
     lastSignInAt: timestamp('last_sign_in_at', { withTimezone: true }),
     /** Увеличивается при блокировке/смене роли — открытые сеансы отзываются (AUTH-06). */
     authVersion: integer('auth_version').notNull().default(1),
+    credentialsChangedAt: timestamp('credentials_changed_at', { withTimezone: true }),
+    lastOtpIssuedAt: timestamp('last_otp_issued_at', { withTimezone: true }),
+    idpLoggedOutAt: timestamp('idp_logged_out_at', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -63,6 +66,8 @@ export const sessions = pgTable(
       .references(() => userAccounts.id, { onDelete: 'cascade' }),
     authVersion: integer('auth_version').notNull(),
     idTokenHint: text('id_token_hint'),
+    idpSessionId: text('idp_session_id'),
+    idpAuthTime: timestamp('idp_auth_time', { withTimezone: true }),
     mfaPassed: boolean('mfa_passed').notNull().default(false),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
@@ -70,7 +75,11 @@ export const sessions = pgTable(
     userAgent: text('user_agent'),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('sessions_token_hash_uq').on(t.tokenHash), index('sessions_user_idx').on(t.userId)],
+  (t) => [
+    uniqueIndex('sessions_token_hash_uq').on(t.tokenHash),
+    index('sessions_user_idx').on(t.userId),
+    index('sessions_idp_session_idx').on(t.idpSessionId),
+  ],
 );
 
 /** Доверенное устройство: email-код не запрашивается 30 дней (AUTH-03, ADR-20). */
@@ -89,16 +98,44 @@ export const trustedDevices = pgTable(
 );
 
 /** Одноразовый email-код: 6 цифр, 10 минут, 5 попыток (AUTH-03). */
-export const otpCodes = pgTable('otp_codes', {
-  id: id(),
-  sessionId: uuid('session_id')
-    .notNull()
-    .references(() => sessions.id, { onDelete: 'cascade' }),
-  codeHash: text('code_hash').notNull(),
-  attempts: integer('attempts').notNull().default(0),
-  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-  consumedAt: timestamp('consumed_at', { withTimezone: true }),
+export const otpCodes = pgTable(
+  'otp_codes',
+  {
+    id: id(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    codeHash: text('code_hash').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index('otp_codes_session_created_idx').on(t.sessionId, t.createdAt)],
+);
+
+/** Atomic PostgreSQL limits work across API replicas and survive process restarts. */
+export const authRateLimits = pgTable('auth_rate_limits', {
+  key: text('key').primaryKey(),
+  windowStart: timestamp('window_start', { withTimezone: true }).notNull(),
+  attempts: integer('attempts').notNull(),
+});
+
+/** Deduplication for signed backchannel logout and replayed Keycloak events. */
+export const authSecurityEvents = pgTable('auth_security_events', {
+  eventKey: text('event_key').primaryKey(),
   createdAt: createdAt(),
+});
+
+export const authSyncState = pgTable('auth_sync_state', {
+  name: text('name').primaryKey(),
+  checkedAt: timestamp('checked_at', { withTimezone: true }).notNull(),
+});
+
+/** Logout can arrive before the corresponding OAuth callback creates its BFF session. */
+export const revokedIdpSessions = pgTable('revoked_idp_sessions', {
+  sid: text('sid').primaryKey(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
 
 /** Принятие ответственности при первом входе (AUTH-10, D-65). */

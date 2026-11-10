@@ -1,8 +1,11 @@
 "use client";
 
 import type { OrganizationType, Role } from "@imbc/contracts";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "./api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+import { api, ApiError } from "./api";
+
+export { authDestination } from "./auth-navigation";
 
 export interface Me {
   user: {
@@ -15,10 +18,30 @@ export interface Me {
     locale: string;
   };
   gates: { mfa: boolean; responsibility: boolean };
+  homePath: string;
+  otpDelivery?: "email" | "development_code";
 }
 
 export const meKey = ["auth", "me"] as const;
 
 export function useMe() {
   return useQuery({ queryKey: meKey, queryFn: () => api<Me>("/auth/me"), retry: false, staleTime: 60_000 });
+}
+
+export function useLogout() {
+  const client = useQueryClient();
+  const router = useRouter();
+  return useMutation({
+    mutationFn: () => api<{ redirectTo: string }>("/auth/logout", { method: "POST" }),
+    onSuccess: ({ redirectTo }) => {
+      client.clear();
+      window.location.assign(redirectTo);
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 401) {
+        client.clear();
+        router.replace("/login");
+      }
+    },
+  });
 }

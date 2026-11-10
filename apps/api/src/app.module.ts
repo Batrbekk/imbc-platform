@@ -13,6 +13,7 @@ import { SessionGuard } from './modules/auth/guards.js';
 import { KeycloakAdminService } from './modules/auth/keycloak-admin.service.js';
 import { OidcService } from './modules/auth/oidc.service.js';
 import { SessionService } from './modules/auth/session.service.js';
+import { AuthRateLimitService } from './modules/auth/rate-limit.service.js';
 import { CatalogController } from './modules/catalog/catalog.controller.js';
 import { CatalogService } from './modules/catalog/catalog.service.js';
 import { HealthController } from './modules/health/health.controller.js';
@@ -42,6 +43,7 @@ import { RegistrationController } from './modules/registration/registration.cont
   providers: [
     OidcService,
     SessionService,
+    AuthRateLimitService,
     KeycloakAdminService,
     ProfilesService,
     CatalogService,

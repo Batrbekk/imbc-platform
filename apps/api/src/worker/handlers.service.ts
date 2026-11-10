@@ -20,12 +20,18 @@ import {
   sessions,
   trustedDevices,
   userAccounts,
+  authRateLimits,
+  authSecurityEvents,
+  authSyncState,
+  revokedIdpSessions,
 } from '../database/schema/index.js';
 import { S3 } from '../infra/infra.module.js';
 import { MailService } from '../mail/mail.service.js';
 import { renderMail } from '../mail/templates.js';
 import { KeycloakAdminService } from '../modules/auth/keycloak-admin.service.js';
-import type { ScanFileJob, SendNotificationJob } from '../jobs/queues.js';
+import { SessionService } from '../modules/auth/session.service.js';
+import { sha256 } from '../modules/auth/crypto.js';
+import type { IdentityJob, ScanFileJob, SendNotificationJob } from '../jobs/queues.js';
 import { scanStream } from './clamd.js';
 
 /**
@@ -43,6 +49,7 @@ export class JobHandlers {
     @Inject(ENV) private readonly env: Env,
     private readonly audit: AuditService,
     private readonly keycloak: KeycloakAdminService,
+    private readonly sessions: SessionService,
   ) {}
 
   /** Файл из карантина проверяется ClamAV и только чистым переносится в рабочий бакет (FILE-03). */
@@ -115,6 +122,21 @@ export class JobHandlers {
     await this.db.delete(sessions).where(lt(sessions.expiresAt, now));
     await this.db.delete(otpCodes).where(lt(otpCodes.expiresAt, now));
     await this.db.delete(trustedDevices).where(lt(trustedDevices.expiresAt, now));
+    await this.db.delete(authRateLimits).where(lt(authRateLimits.windowStart, new Date(Date.now() - 86_400_000)));
+    await this.db
+      .delete(authSecurityEvents)
+      .where(lt(authSecurityEvents.createdAt, new Date(Date.now() - 32 * 86_400_000)));
+    await this.db.delete(revokedIdpSessions).where(lt(revokedIdpSessions.expiresAt, now));
+  }
+
+  async sendPasswordEmail({ subject }: IdentityJob): Promise<void> {
+    const account = await this.db.query.userAccounts.findFirst({ where: eq(userAccounts.idpSubject, subject) });
+    if (account?.state === 'invited') await this.keycloak.sendPasswordEmail(subject);
+  }
+
+  async cleanupIdentity({ subject }: IdentityJob): Promise<void> {
+    const account = await this.db.query.userAccounts.findFirst({ where: eq(userAccounts.idpSubject, subject) });
+    if (!account) await this.keycloak.deleteUser(subject);
   }
 
   /** Файлы выгрузок хранятся 90 дней (OPR-23); запись о запуске остаётся. */
@@ -141,13 +163,29 @@ export class JobHandlers {
    * Раз в минуту читаем его события и отправляем NOT-03 — одно письмо на одну блокировку.
    */
   async keycloakEvents(): Promise<void> {
-    // Задание повторяется каждую минуту само: недоступный Keycloak — предупреждение, а не цепочка повторов.
-    const events = await this.keycloak.lockoutEvents(new Date(Date.now() - 86_400_000)).catch((error: unknown) => {
-      this.logger.warn(`Keycloak events недоступны: ${String(error)}`);
-      return [];
-    });
-    for (const event of events) {
-      if (!event.userId) continue;
+    const started = new Date();
+    const cursor = await this.db.query.authSyncState.findFirst({ where: eq(authSyncState.name, 'keycloak-events') });
+    const since = new Date(cursor ? cursor.checkedAt.getTime() - 5 * 60_000 : Date.now() - 30 * 86_400_000);
+    const events = await this.keycloak.securityEvents(since);
+    const ordered = events.sort((a, b) => a.time - b.time);
+    // Revocations must finish even when an unrelated lockout notification cannot be mailed.
+    for (const event of ordered) {
+      if (!event.userId || event.error || !Number.isFinite(event.time)) continue;
+      if (
+        event.type === 'UPDATE_PASSWORD' ||
+        event.type === 'RESET_PASSWORD' ||
+        (event.type === 'UPDATE_CREDENTIAL' && event.details?.credential_type === 'password')
+      ) {
+        await this.sessions.revokeForPasswordChange(
+          event.userId,
+          new Date(event.time),
+          `password:${sha256(event.id ?? `${event.type}:${event.userId}:${event.time}`)}`,
+        );
+      }
+    }
+    for (const event of ordered) {
+      if (!event.userId || event.error || !Number.isFinite(event.time)) continue;
+      if (event.type !== 'USER_DISABLED_BY_TEMPORARY_LOCKOUT') continue;
       const [account] = await this.db
         .select({
           id: userAccounts.id,
@@ -176,6 +214,10 @@ export class JobHandlers {
         isAccountEvent: true,
       });
     }
+    await this.db
+      .insert(authSyncState)
+      .values({ name: 'keycloak-events', checkedAt: started })
+      .onConflictDoUpdate({ target: authSyncState.name, set: { checkedAt: started } });
   }
 
   /** Заглушки этапа 0: контракты заданий и расписание уже на месте, логика — в своих модулях. */

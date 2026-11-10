@@ -1,0 +1,61 @@
+{$PUBLIC_HOST} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "SAMEORIGIN"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	# 25 MB files plus multipart overhead, matching the existing nginx ingress.
+	request_body {
+		max_size 30MB
+	}
+
+	# Preserve this order: access checks must run before any proxy handle.
+	route {
+		# Reject paths that upstream frameworks could normalize differently.
+		@ambiguous path_regexp ambiguous (^|/)[.]{1,2}(/|$)|[;%]|//|\x5c
+		respond @ambiguous 404
+
+		# Match decoded paths, including case and trailing-slash variants.
+		# remote_ip reads the TCP peer; caller-supplied forwarding headers grant no access.
+		@private {
+			path_regexp private (?i)^/(?:dev-mail(?:/|$)|kc/(?:admin|realms/master)(?:/|$))
+			not remote_ip {$ADMIN_ALLOWED_IPS:127.0.0.1/32 ::1/128}
+		}
+		respond @private 404
+
+		@api path /api /api/*
+		handle @api {
+			# Signed logout notifications arrive directly from the identity service internally.
+			@backchannel path_regexp (?i)^/api/auth/backchannel-logout/?$
+			respond @backchannel 404
+			reverse_proxy api:3001 {
+				transport http {
+					response_header_timeout 120s
+				}
+			}
+		}
+
+		# Product realm, OIDC endpoints and login theme resources remain public.
+		@keycloak path /kc /kc/*
+		handle @keycloak {
+			reverse_proxy keycloak:8080
+		}
+
+		# Preserve /dev-mail/ because Mailpit serves this prefix via MP_WEBROOT.
+		# Mailpit additionally enforces its MP_UI_AUTH password from compose.yaml.
+		@devMail path /dev-mail /dev-mail/*
+		handle @devMail {
+			reverse_proxy mailpit:8025
+		}
+
+		handle {
+			reverse_proxy web:3000
+		}
+	}
+}

@@ -1,9 +1,14 @@
 #cloud-config
-# Ubuntu 24.04 → Docker Engine + Compose v2 (официальный репозиторий Docker) для dev-стенда IMBC.
+# Ubuntu 24.04: Docker Engine + Compose, bounded local container logs.
 package_update: true
-packages: [ca-certificates, curl, make, openssl, unzip]
+packages: [ca-certificates, curl, make, openssl, python3, unzip]
+write_files:
+  - path: /etc/docker/daemon.json
+    permissions: '0644'
+    content: |
+      {"log-driver":"local","log-opts":{"max-size":"20m","max-file":"5"}}
 runcmd:
-  - curl -fsSL https://get.docker.com | sh
-  - systemctl enable --now docker
-  - usermod -aG docker ${ADMIN_USER}
-  - echo 'vm.max_map_count=262144' > /etc/sysctl.d/99-imbc.conf && sysctl --system
+  - [sh, -c, 'curl -fsSL --retry 3 https://get.docker.com -o /tmp/imbc-install-docker.sh && sh /tmp/imbc-install-docker.sh && rm -f /tmp/imbc-install-docker.sh']
+  - [systemctl, enable, --now, docker]
+  - [usermod, -aG, docker, '${ADMIN_USER}']
+  - [sh, -c, "echo 'vm.max_map_count=262144' > /etc/sysctl.d/99-imbc.conf && sysctl --system"]

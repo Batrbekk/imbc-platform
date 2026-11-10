@@ -8,6 +8,7 @@ export class ApiError extends Error {
     readonly code: string,
     title: string,
     readonly detail?: string,
+    readonly retryAfter?: number,
   ) {
     super(title);
   }
@@ -34,13 +35,21 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
       String(body?.code ?? "unknown"),
       String(body?.title ?? res.statusText),
       body?.detail ? String(body.detail) : undefined,
+      Number(res.headers.get("retry-after")) || undefined,
     );
   }
   return body as T;
 }
 
-export function loginUrl(returnTo: string, locale?: string): string {
+export function loginUrl(returnTo: string, locale?: string, prompt?: "login"): string {
   const params = new URLSearchParams({ returnTo });
   if (locale) params.set("locale", locale);
+  if (prompt) params.set("prompt", prompt);
   return `/api/auth/login?${params}`;
+}
+
+export function passwordResetUrl(returnTo = "/", locale?: string): string {
+  const params = new URLSearchParams({ returnTo });
+  if (locale) params.set("locale", locale);
+  return `/api/auth/password-reset?${params}`;
 }

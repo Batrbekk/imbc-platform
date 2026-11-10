@@ -93,4 +93,26 @@ describe('SessionGuard', () => {
     const req = { method: 'POST', get: (h: string) => (h === 'origin' ? 'https://evil.example' : undefined) };
     expect(await code(guard(auth('operator')).g.canActivate(ctx('open', req)))).toBe('bad_origin');
   });
+
+  it.each([undefined, 'null', 'invalid-url', 'https://evil.example'])(
+    'rejects invalid or absent Origin with a session cookie',
+    async (origin) => {
+      const req = { method: 'POST', get: (h: string) => (h === 'origin' ? origin : undefined) };
+      expect(await code(guard(auth('operator')).g.canActivate(ctx('open', req)))).toBe('bad_origin');
+    },
+  );
+
+  it('accepts a same-origin mutation and a public non-browser request without cookies', async () => {
+    expect(
+      await code(
+        guard(auth('operator')).g.canActivate(
+          ctx('me', {
+            method: 'POST',
+            get: (h: string) => (h === 'origin' ? 'https://imbc.example.kz' : undefined),
+          }),
+        ),
+      ),
+    ).toBe('ok');
+    expect(await code(guard(null).g.canActivate(ctx('open', { method: 'POST', cookies: {} })))).toBe('ok');
+  });
 });
