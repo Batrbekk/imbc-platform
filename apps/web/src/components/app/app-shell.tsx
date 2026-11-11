@@ -1,15 +1,14 @@
-"use client";
-
 import { can } from "@imbc/contracts";
 import { BuildingIcon, LayoutDashboardIcon, LogOutIcon, SearchIcon, UserRoundIcon } from "lucide-react";
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
-import { type ReactNode, useEffect } from "react";
-import { BrandMark } from "@/components/app/brand";
+import { useEffect } from "react";
+import { Link, Outlet, useLocation, useMatches, useNavigate } from "react-router";
+import { useTranslations } from "use-intl";
+
+import { LocaleSwitcher } from "@/components/app/locale-switcher";
+import { Logo } from "@/components/app/logo";
+import { PageTitle } from "@/components/app/page-title";
 import { SessionStatus } from "@/components/auth/session-status";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { LocaleSwitcher } from "@/components/app/locale-switcher";
 import { Separator } from "@/components/ui/separator";
 import {
   Sidebar,
@@ -27,33 +26,44 @@ import {
 import { ApiError } from "@/lib/api";
 import { authDestination, useLogout, useMe } from "@/lib/session";
 
+/** `handle` рабочего маршрута: ключ заголовка вкладки, пока страница ещё не показана. */
+export interface AppRouteHandle {
+  title?: string;
+}
+
 /**
  * Оболочка рабочих страниц. Пункты меню берутся из той же PolicyMatrix, что проверяет сервер:
- * интерфейс не показывает недоступное, но решает всегда сервер (GEN-10).
+ * интерфейс не показывает недоступное, но решает всегда сервер (GEN-08, GEN-10).
  */
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell() {
   const t = useTranslations();
-  const pathname = usePathname();
-  const router = useRouter();
+  const { pathname, search } = useLocation();
+  const navigate = useNavigate();
   const me = useMe();
   const logout = useLogout();
 
   useEffect(() => {
-    const back = encodeURIComponent(pathname + window.location.search);
+    const back = encodeURIComponent(pathname + search);
     if (me.error instanceof ApiError) {
-      if (me.error.status === 401) router.replace(`/login?error=session_expired&returnTo=${back}`);
+      if (me.error.status === 401) void navigate(`/login?error=session_expired&returnTo=${back}`, { replace: true });
     } else if (me.data && !me.data.gates.mfa) {
-      router.replace(`/auth/verify?returnTo=${back}`);
+      void navigate(`/auth/verify?returnTo=${back}`, { replace: true });
     } else if (me.data && !me.data.gates.responsibility) {
-      router.replace(`/auth/responsibility?returnTo=${back}`);
+      void navigate(`/auth/responsibility?returnTo=${back}`, { replace: true });
     } else if (me.data && authDestination(me.data, pathname) !== pathname) {
-      router.replace(authDestination(me.data, pathname));
+      void navigate(authDestination(me.data, pathname), { replace: true });
     }
-  }, [me.error, me.data, pathname, router]);
+  }, [me.error, me.data, pathname, search, navigate]);
+
+  // Пока страница не показана (проверка сеанса, переход по шлюзу), во вкладке уже её заголовок
+  // из handle маршрута. Когда страница на экране, заголовок ставит она: оболочка свой не рендерит.
+  const handle = useMatches().at(-1)?.handle as AppRouteHandle | undefined;
+  const gateTitle = <PageTitle title={handle?.title ? t(handle.title) : undefined} />;
 
   if (me.isError && !(me.error instanceof ApiError && me.error.status === 401)) {
     return (
       <div className="flex min-h-svh items-center justify-center">
+        {gateTitle}
         <SessionStatus error retry={() => void me.refetch()} />
       </div>
     );
@@ -67,6 +77,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   ) {
     return (
       <div className="flex min-h-svh items-center justify-center">
+        {gateTitle}
         <SessionStatus />
       </div>
     );
@@ -82,11 +93,14 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <SidebarProvider>
-      <Sidebar collapsible="icon">
+      <Sidebar collapsible="icon" mobileTitle={t("nav.sheetTitle")} mobileDescription={t("nav.sheetDescription")}>
         <SidebarHeader>
           <div className="flex items-center gap-2 px-1 py-1.5 font-semibold">
-            <BrandMark className="size-7 shrink-0" />
-            <span className="truncate group-data-[collapsible=icon]:hidden">{t("common.appName")}</span>
+            {/* Сайдбар тёмно-синий — логотипу подложка не нужна; квадратного знака нет,
+                поэтому в свёрнутом виде логотип скрыт (NFR-15). Название — в sr-only рядом,
+                поэтому логотип декоративный: диктор не читает имя дважды. */}
+            <Logo decorative className="h-7 group-data-[collapsible=icon]:hidden" />
+            <span className="sr-only">{t("common.appName")}</span>
           </div>
         </SidebarHeader>
         <SidebarContent>
@@ -94,11 +108,13 @@ export function AppShell({ children }: { children: ReactNode }) {
             <SidebarMenu>
               {items.map((i) => (
                 <SidebarMenuItem key={i.href}>
-                  <SidebarMenuButton asChild isActive={pathname.startsWith(i.href)} tooltip={i.label}>
-                    <Link href={i.href}>
-                      <i.icon />
-                      <span>{i.label}</span>
-                    </Link>
+                  <SidebarMenuButton
+                    render={<Link to={i.href} />}
+                    isActive={pathname.startsWith(i.href)}
+                    tooltip={i.label}
+                  >
+                    <i.icon />
+                    <span>{i.label}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
@@ -113,10 +129,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           )}
           <SidebarMenu>
             <SidebarMenuItem>
+              {/* Видимый текст — адрес; имя кнопки называет действие и содержит этот адрес (WCAG 2.5.3). */}
               <SidebarMenuButton
                 onClick={() => logout.mutate()}
                 disabled={logout.isPending}
                 tooltip={t("common.signOut")}
+                aria-label={t("nav.signOutAs", { email: me.data.user.email })}
               >
                 <LogOutIcon />
                 <span className="truncate">{me.data.user.email}</span>
@@ -127,12 +145,17 @@ export function AppShell({ children }: { children: ReactNode }) {
       </Sidebar>
       <SidebarInset>
         <header className="flex h-14 items-center gap-2 border-b px-4">
-          <SidebarTrigger />
-          <Separator orientation="vertical" className="mr-2 h-4" />
+          <SidebarTrigger aria-label={t("nav.toggleSidebar")} />
+          {/* base-nova задаёт вертикальному разделителю data-vertical:self-stretch: с явной высотой
+              stretch не растягивает, и линия встаёт к верху шапки, а не по центру. Высота и выравнивание —
+              как в блоке sidebar-07 base-nova. */}
+          <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" />
           <div className="flex-1" />
           <LocaleSwitcher />
         </header>
-        <div className="flex-1 p-4 md:p-6">{children}</div>
+        <div className="flex-1 p-4 md:p-6">
+          <Outlet />
+        </div>
       </SidebarInset>
     </SidebarProvider>
   );

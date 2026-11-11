@@ -1,40 +1,41 @@
-"use client";
-
-import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { Locale } from "@imbc/contracts";
+import { type QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
-import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { type ReactNode, useState } from "react";
-import { Toaster } from "@/components/ui/sonner";
-import { ApiError } from "@/lib/api";
-import { meKey } from "@/lib/session";
+import { useTranslations } from "use-intl";
 
-export function Providers({ children }: { children: ReactNode }) {
-  const [client] = useState(() => {
-    const qc: QueryClient = new QueryClient({
-      defaultOptions: {
-        queries: {
-          staleTime: 30_000,
-          // 4xx не повторяем: это ответ сервера, а не сбой сети.
-          retry: (count, error) => !(error instanceof ApiError && error.status < 500) && count < 2,
-        },
-      },
-      queryCache: new QueryCache({
-        onError: (error, query) => {
-          // Сеанс истёк (простой 30 минут или 12 часов): перечитываем /me,
-          // и AppShell уводит на вход с возвратом на текущую страницу.
-          if (error instanceof ApiError && error.status === 401 && query.queryKey[0] !== meKey[0]) {
-            void qc.invalidateQueries({ queryKey: meKey });
-          }
-        },
-      }),
-    });
-    return qc;
-  });
+import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import type { Messages } from "@/i18n/messages";
+import { I18nProvider } from "@/i18n/provider";
+import { createQueryClient } from "@/lib/query-client";
+
+export function Providers({
+  initialLocale,
+  initialMessages,
+  queryClient,
+  children,
+}: {
+  initialLocale: Locale;
+  initialMessages: Messages;
+  queryClient?: QueryClient;
+  children: ReactNode;
+}) {
+  const [client] = useState(() => queryClient ?? createQueryClient());
   return (
     <QueryClientProvider client={client}>
-      <NuqsAdapter>{children}</NuqsAdapter>
-      <Toaster richColors position="top-right" />
+      <I18nProvider initialLocale={initialLocale} initialMessages={initialMessages}>
+        {/* Base UI не встраивает провайдер подсказок в Tooltip и Sidebar: он один на приложение. */}
+        <TooltipProvider>{children}</TooltipProvider>
+        <AppToaster />
+      </I18nProvider>
       <ReactQueryDevtools buttonPosition="bottom-left" />
     </QueryClientProvider>
   );
+}
+
+/** Уведомления: область названа на языке интерфейса (у sonner по умолчанию — «Notifications»). */
+function AppToaster() {
+  const t = useTranslations("common");
+  return <Toaster richColors position="top-right" containerAriaLabel={t("notifications")} />;
 }

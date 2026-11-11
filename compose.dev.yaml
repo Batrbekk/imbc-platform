@@ -1,6 +1,6 @@
 # Локальная разработка: инфраструктура в Docker, приложения — `pnpm dev` на хосте.
 #   docker compose -f compose.yaml -f compose.dev.yaml up -d postgres valkey rustfs buckets keycloak clamav mailpit migrate
-# В .env для этого режима: PUBLIC_URL=http://localhost:3000 (Next.js проксирует /api и /kc).
+# В .env для этого режима: PUBLIC_URL=http://localhost:3000 (Vite проксирует /api и /kc).
 services:
   postgres:
     ports: ["5432:5432"]

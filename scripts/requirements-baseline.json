@@ -3,7 +3,6 @@
     "DATA-34": 1,
     "GEN-14": 1,
     "GEN-15": 1,
-    "GEN-20": 1,
     "IMBC-27": 1,
     "IMBC-28": 1,
     "IMBC-29": 1,
@@ -63,7 +62,6 @@
     "NFR-20": 1,
     "NFR-32": 1,
     "NFR-43": 1,
-    "NFR-60": 1,
     "NOT-36": 1,
     "NOT-37": 1,
     "NOT-38": 1,
@@ -197,9 +195,5 @@
     "MAN-96": 1
   },
   "apps/api/src/worker/handlers.service.ts": { "REV-20": 1 },
-  "apps/web/src/app/(app)/catalog/catalog-view.tsx": { "DATA-40": 1 },
-  "apps/web/src/app/(app)/dashboard/dashboard-view.tsx": { "OPR-70": 1, "OPR-71": 1, "OPR-72": 1, "OPR-73": 1 },
-  "apps/web/src/app/globals.css": { "NFR-60": 1 },
-  "apps/web/src/i18n/request.ts": { "GEN-20": 1 },
   "infrastructure/keycloak/identity/src/styles.css": { "NFR-60": 1 }
 }

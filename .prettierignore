@@ -1,6 +1,4 @@
 pnpm-lock.yaml
 **/dist
-**/.next
 **/drizzle/meta
-**/next-env.d.ts
 infrastructure/keycloak/*.json

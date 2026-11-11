@@ -1,9 +1,9 @@
-"use client";
+import { useTranslations } from "use-intl";
 
-import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 
+/** Пока проверяется сеанс — индикатор; при сбое связи — сообщение и повтор. */
 export function SessionStatus({ error = false, retry }: { error?: boolean; retry?: () => void }) {
   const t = useTranslations("auth");
   return (

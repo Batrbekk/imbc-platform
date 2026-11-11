@@ -10,8 +10,10 @@ import {
 
 /**
  * Фильтры каталога в адресе страницы (OPR-05, D-21). Формат совпадает с catalogFilterSchema
- * из @imbc/contracts: списки через запятую, логические — true/false. Поэтому query string
- * страницы без преобразований уходит в GET /api/v1/catalog/search, а ссылку можно переслать.
+ * из @imbc/contracts: списки через запятую, логические — true/false. Запрос в
+ * GET /api/v1/catalog/search строится из этих ключей, поэтому известный ключ уходит в API в том
+ * же виде, что и в адресе, а ссылку можно переслать. Ключи схемы без поля в интерфейсе в запрос
+ * не попадают; их список — в test/catalog.test.tsx (KEYS_WITHOUT_CONTROL).
  */
 export const catalogParsers = {
   q: parseAsString.withDefault(""),

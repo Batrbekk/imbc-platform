@@ -1,6 +1,5 @@
 **/node_modules
 **/dist
-**/.next
 **/.turbo
 **/coverage
 **/*.tsbuildinfo
@@ -9,6 +8,7 @@
 !**/.env.example
 .git
 .github
+.claude
+.superpowers
 docs
 *.md
-!apps/web/AGENTS.md
