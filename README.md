@@ -14,7 +14,7 @@
 |---|---|
 | Войти в платформу | [Вход IMBC](https://imbc-dev-e1cde8dd.polandcentral.cloudapp.azure.com/login) |
 | Зарегистрировать производителя | [Регистрация](https://imbc-dev-e1cde8dd.polandcentral.cloudapp.azure.com/register) |
-| Развернуть или обслуживать стенд | [Инструкция Azure dev](docs/deployment/azure-dev.md) |
+| Развернуть или обслуживать стенд | [Инструкция Azure dev](docs/deployment/azure-dev.md) · [конвейер развёртывания](docs/deployment/azure-dev.md#конвейер-развёртывания) |
 | Посмотреть результаты проверок | [Проверка стенда от 10.11.2026](docs/deployment/verification-2026-11-10.md) |
 
 **Новые пользователи:** производитель регистрируется самостоятельно: компания, БИН и email → письмо → подтверждение email, имя/фамилия и установка пароля → вход и почтовый код → принятие ответственности. Выбрать административную или другую служебную роль при регистрации нельзя. Приглашения для остальных ролей через интерфейс администратора — следующий этап; сейчас такие аккаунты создаются при настройке стенда.
@@ -125,7 +125,7 @@ imbc-platform/
 │                              проверка БИН, нормализация названий, PolicyMatrix
 ├─ infrastructure/
 │  ├─ docker/                  api.Dockerfile, web.Dockerfile (Node 26, multi-stage)
-│  ├─ azure/                   deploy.sh, Caddyfile, cloud-init, синхронизация настроек realm
+│  ├─ azure/                   deploy.sh, vm-deploy.sh (шаги на VM), setup-github-deploy.sh, Caddyfile, cloud-init, синхронизация realm
 │  ├─ keycloak/imbc-realm.json realm: клиенты, политика паролей, блокировка, сеансы, языки, демо-пользователи
 │  ├─ keycloak/identity/       React + Keycloakify + shadcn/ui: собственные экраны IMBC
 │  ├─ mailpit/                 шаблон SMTP relay; секретный файл существует только на VM
@@ -332,9 +332,12 @@ API ставит задания, выполняет их worker. Для `send-pa
 ./infrastructure/azure/deploy.sh info      # адреса и способ подключения, без паролей
 ./infrastructure/azure/deploy.sh redeploy  # загрузить текущие локальные исходники, пересобрать и проверить стенд
 ./infrastructure/azure/deploy.sh ssh       # подключиться к VM
+./infrastructure/azure/deploy.sh preview <sha>  # что синхронизация конвейера удалит и изменит; ничего не меняет
 ```
 
 По умолчанию: `imbc-dev-rg` / `imbc-dev`, `polandcentral`, `Standard_D4as_v5` (4 vCPU, 16 ГБ RAM), Standard SSD 128 ГБ. SSH-ключ хранится локально в `~/.ssh/imbc-dev-azure`, приложение на VM — в `/home/imbc/imbc-platform`. Подробные адреса, команды обслуживания и стоимость: [runbook Azure dev](docs/deployment/azure-dev.md).
+
+**Конвейер развёртывания.** После настройки скриптом `infrastructure/azure/setup-github-deploy.sh` (`plan` — только чтение, затем `apply --yes --subscription-name "<имя подписки>"`) workflow [deploy-dev.yml](.github/workflows/deploy-dev.yml) обновляет стенд сам после успешного CI для push в `main`. Вручную: Actions → Deploy dev → Run workflow из `main` с полем `ref` (ветка, тег или SHA). Вход в Azure — через GitHub OIDC без секретов, без SSH: управляемая идентичность может только читать VM `imbc-dev` и запускать на ней run-command. Шаги на VM выполняет `infrastructure/azure/vm-deploy.sh` из развёртываемого коммита — тот же скрипт вызывает `deploy.sh redeploy`. Конвейер работает только с публичным репозиторием (архив коммита VM скачивает анонимно); журналы Actions видны всем, поэтому наружу выводится только краткая сводка, полный журнал остаётся на VM в `/var/log/imbc-deploy/`. Перед первым запуском посмотрите, что синхронизация удалит: `./infrastructure/azure/deploy.sh preview <sha>`. Первое развёртывание новой VM, создание `.env` и смена `ADMIN_ALLOWED_IPS` остаются за `deploy.sh`. Подробности, откат и отключение — в [разделе «Конвейер развёртывания»](docs/deployment/azure-dev.md#конвейер-развёртывания).
 
 - Caddy получает и обновляет TLS-сертификат для `PUBLIC_HOST`. HTTPS/443 доступен всем получателям ссылок; SSH/22 ограничен текущим внешним IP (`ALLOW_FROM`). HTTP/80 открыт для ACME и перенаправления. Mailpit, Keycloak admin и master realm доступны только с IP из серверной `ADMIN_ALLOWED_IPS`; Mailpit дополнительно требует пароль. При первом запуске список берётся из `ALLOW_FROM`, затем сохраняется. После смены сети задайте оба списка явно: `ALLOW_FROM=1.2.3.4/32 ADMIN_ALLOWED_IPS="1.2.3.4/32 127.0.0.1/32 ::1/128" ./infrastructure/azure/deploy.sh up`. Публичный HTTPS открывается после проверки ограничений Caddy; обычный `redeploy` не меняет NSG.
 - Запуск всегда объединяет `compose.yaml` и `compose.azure.yaml`. API, Keycloak, Web и Mailpit доступны через Caddy; PostgreSQL, Valkey и S3 API остаются в Docker-сети. Порты nginx, Mailpit и консоли S3 привязаны к localhost VM.
@@ -430,6 +433,8 @@ Next.js проксирует `/api` на `localhost:3001` и `/kc` на Keycloak
 ```bash
 pnpm typecheck && pnpm test && pnpm build
 docker compose config -q
+bash infrastructure/azure/test/vm-deploy.test.sh   # скрипт развёртывания; не на Linux — в контейнере ubuntu:24.04
+bash infrastructure/azure/test/setup-github-deploy.test.sh   # скрипт настройки конвейера с заглушками az и gh
 ```
 
 Для текущего auth-среза по результатам проверки **10 ноября 2026 года** прошли:

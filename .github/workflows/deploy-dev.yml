@@ -1,0 +1,176 @@
+# Конвейер развёртывания dev-стенда Azure (NFR-05; миграции — сервис migrate, NFR-06):
+# без долгоживущих секретов и SSH. Только публичный репозиторий: архив коммита VM скачивает анонимно.
+# GitHub OIDC → управляемая идентичность imbc-dev-github-deploy (роль «IMBC dev deploy» только на VM)
+# → az vm run-command invoke со скриптом infrastructure/azure/vm-deploy.sh из развёртываемого коммита.
+# Запуск: автоматически после успешного CI для push в main; вручную — workflow_dispatch из main
+# с входом ref. Настройка Azure и GitHub — infrastructure/azure/setup-github-deploy.sh,
+# описание — docs/deployment/azure-dev.md, раздел «Конвейер развёртывания».
+name: Deploy dev
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Ветка, тег или полный SHA коммита Batrbekk/imbc-platform
+        type: string
+        required: true
+        default: main
+
+permissions: {}
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+env:
+  AZURE_RESOURCE_GROUP: imbc-dev-rg
+  AZURE_VM_NAME: imbc-dev
+  DEV_HOST: imbc-dev-e1cde8dd.polandcentral.cloudapp.azure.com
+
+jobs:
+  # Выбор коммита без доступа к Azure.
+  resolve:
+    name: Select commit
+    if: >-
+      github.repository == 'Batrbekk/imbc-platform' && (
+        github.event_name == 'workflow_dispatch' || (
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main' &&
+          github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+      deploy: ${{ steps.commit.outputs.deploy }}
+    steps:
+      # Токен в run-command не передаётся (параметры могут остаться на диске VM): для закрытого
+      # репозитория нужен другой канал исходников, см. docs/deployment/azure-dev.md.
+      - name: Require public repository
+        env:
+          PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          if [[ "$PRIVATE" != false ]]; then
+            echo "::error::Репозиторий закрыт: конвейер поддерживает только публичный репозиторий (раздел «Конвейер развёртывания» в docs/deployment/azure-dev.md)"
+            exit 1
+          fi
+      - name: Validate requested ref
+        id: request
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_REF: ${{ inputs.ref }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [[ "$EVENT" == workflow_dispatch ]]; then
+            ref="$INPUT_REF"
+            if [[ ! "$ref" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$ || "$ref" == *..* || "$ref" == refs/pull/* || "$ref" == pull/* ]]; then
+              echo "::error::ref должен быть веткой, тегом или полным SHA этого репозитория"
+              exit 1
+            fi
+          else
+            ref="$RUN_SHA"
+            [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Некорректный head_sha в событии workflow_run"; exit 1; }
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.request.outputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve full SHA
+        id: commit
+        env:
+          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha="$(git rev-parse HEAD)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Не удалось определить SHA"; exit 1; }
+          if [[ "$EVENT" == workflow_dispatch ]]; then
+            # Только коммиты веток и тегов этого репозитория, не коммиты форков из общей сети.
+            if [[ -z "$(git for-each-ref --contains "$sha" --count=1 refs/remotes/origin refs/tags)" ]]; then
+              echo "::error::Коммит $sha не входит ни в одну ветку или тег Batrbekk/imbc-platform"
+              exit 1
+            fi
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            # Если за время CI в main появился новый коммит, его развернёт собственный запуск.
+            tip="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+            if [[ "$tip" == "$sha" ]]; then
+              echo "deploy=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "::notice::$sha уже не вершина main ($tip); развёртывание пропущено"
+              echo "deploy=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Deploy to Azure dev
+    needs: resolve
+    if: needs.resolve.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    # run-command ограничен 90 минутами.
+    timeout-minutes: 100
+    environment:
+      name: dev
+      url: https://imbc-dev-e1cde8dd.polandcentral.cloudapp.azure.com
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      SHA: ${{ needs.resolve.outputs.sha }}
+    steps:
+      # Скрипт для VM берётся из развёртываемого коммита.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+      - name: Check deployment script
+        run: |
+          [[ "$(git rev-parse HEAD)" == "$SHA" ]] || { echo "::error::Checkout не совпадает с $SHA"; exit 1; }
+          for file in infrastructure/azure/vm-deploy.sh infrastructure/azure/check-deploy-result.sh; do
+            [[ -f "$file" ]] || { echo "::error::В коммите $SHA нет $file"; exit 1; }
+          done
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Check VM power state
+        run: |
+          state="$(az vm get-instance-view -g "$AZURE_RESOURCE_GROUP" -n "$AZURE_VM_NAME" \
+            --query "instanceView.statuses[?starts_with(code, 'PowerState/')].code | [0]" -o tsv)"
+          case "$state" in
+            PowerState/running) echo "VM $AZURE_VM_NAME запущена" ;;
+            PowerState/deallocated|PowerState/deallocating)
+              echo "::error::VM $AZURE_VM_NAME освобождена (deallocated). Запустите её: az vm start -g $AZURE_RESOURCE_GROUP -n $AZURE_VM_NAME — и повторите развёртывание"
+              exit 1 ;;
+            *)
+              echo "::error::VM $AZURE_VM_NAME в состоянии ${state:-неизвестно}; развёртывание возможно только на запущенной VM"
+              exit 1 ;;
+          esac
+      - name: Deploy on VM (run-command)
+        run: |
+          output="$RUNNER_TEMP/vm-deploy.txt"
+          # Код выхода скрипта run-command не передаёт: результат — строка IMBC_DEPLOY_RESULT.
+          az vm run-command invoke -g "$AZURE_RESOURCE_GROUP" -n "$AZURE_VM_NAME" \
+            --command-id RunShellScript --scripts @infrastructure/azure/vm-deploy.sh \
+            --parameters pipeline "$SHA" "$GITHUB_REPOSITORY" "$DEV_HOST" \
+            --query 'value[0].message' -o tsv > "$output"
+          bash infrastructure/azure/check-deploy-result.sh "$output" "$SHA"
+      - name: Check public readiness from runner
+        run: |
+          code="$(curl --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors --fail \
+            --connect-timeout 10 --max-time 20 -o /dev/null -w '%{http_code}' "https://$DEV_HOST/api/health/ready")"
+          echo "https://$DEV_HOST/api/health/ready → HTTP $code"
+          {
+            echo "### Dev-стенд обновлён"
+            echo "- Коммит: \`$SHA\`"
+            echo "- Адрес: https://$DEV_HOST"
+          } >> "$GITHUB_STEP_SUMMARY"

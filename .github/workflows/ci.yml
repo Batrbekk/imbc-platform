@@ -1,6 +1,8 @@
 # Сборочный конвейер (NFR-12, roadmap этап 0): типы, lint, тесты, сборка
 # и интеграционные тесты API на PostgreSQL 18 на каждый коммит.
-# Без секретов, развёртывания и публикации.
+# Без секретов, развёртывания и публикации. Развёртывание dev-стенда — отдельный
+# deploy-dev.yml после успешного запуска этого workflow для push в main: он ссылается
+# на имя «CI», поэтому при переименовании обновите и deploy-dev.yml.
 name: CI
 
 on:
@@ -42,6 +44,13 @@ jobs:
       # их выполнение проверяет job integration.
       - run: pnpm test
       - run: pnpm build
+      # Скрипты развёртывания dev-стенда (deploy-dev.yml, deploy.sh, setup-github-deploy.sh):
+      # аргументы, синхронизация, строка результата, порядок настройки. Docker, curl, az и gh —
+      # заглушки, несколько секунд.
+      - name: Deployment script self-test
+        run: |
+          bash infrastructure/azure/test/vm-deploy.test.sh
+          bash infrastructure/azure/test/setup-github-deploy.test.sh
 
   integration:
     name: API integration tests (PostgreSQL 18)

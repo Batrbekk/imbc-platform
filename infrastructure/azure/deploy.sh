@@ -2,6 +2,9 @@
 # Dev-стенд IMBC в Azure — запускать на машине с `az login`.
 #   ./infrastructure/azure/deploy.sh up        создать VM или обновить существующий HTTPS-стенд
 #   ./infrastructure/azure/deploy.sh redeploy  загрузить текущий код, пересобрать и проверить стенд
+#                                              (шаги на VM — vm-deploy.sh, общий с конвейером GitHub Actions)
+#   ./infrastructure/azure/deploy.sh preview <sha>  показать, что конвейер для коммита <sha> удалит
+#                                              и изменит в каталоге приложения; ничего не меняет
 #   ./infrastructure/azure/deploy.sh info      показать адреса (без паролей)
 #   ./infrastructure/azure/deploy.sh ssh       зайти на сервер
 #   ./infrastructure/azure/deploy.sh down      удалить resource group после подтверждения
@@ -31,11 +34,20 @@ CLOUD_INIT_FILE=""
 SSH_ALLOW_FROM=""
 ADMIN_ALLOW_OVERRIDE="${ADMIN_ALLOWED_IPS:-}"
 NSG_NAME=""
-COMPOSE='sudo docker compose -f compose.yaml -f compose.azure.yaml'
+STAGE=""
+REMOTE_SCRIPT=""
 
 log() { printf '\n▶ %s\n' "$*"; }
 die() { printf 'Ошибка: %s\n' "$*" >&2; exit 1; }
-cleanup() { [[ -z "$CLOUD_INIT_FILE" ]] || rm -f "$CLOUD_INIT_FILE"; }
+cleanup() {
+  [[ -z "$CLOUD_INIT_FILE" ]] || rm -f "$CLOUD_INIT_FILE"
+  # Временные файлы на VM после прерванной загрузки; пути созданы mktemp и проверены.
+  local path
+  for path in "$STAGE" "$REMOTE_SCRIPT"; do
+    [[ -n "$path" && -n "$VM_IP" ]] || continue
+    remote "rm -rf '$path'" 2>/dev/null || true
+  done
+}
 trap cleanup EXIT
 
 normalize_networks() {
@@ -89,6 +101,8 @@ load_vm() {
 
 remote() {
   [[ -n "$VM_IP" ]] || die 'Адрес VM ещё не получен'
+  # Команда собирается локально из проверенных значений и намеренно раскрывается до ssh.
+  # shellcheck disable=SC2029
   ssh "${SSH_OPTS[@]}" "${ADMIN_USER}@${VM_IP}" "$@"
 }
 
@@ -161,162 +175,64 @@ wait_for_docker() {
     || die 'cloud-init или установка Docker завершились ошибкой; проверьте /var/log/cloud-init-output.log на VM'
 }
 
+# Исходники загружаются во временный каталог на VM; каталог приложения меняет только
+# vm-deploy.sh под блокировкой — тот же скрипт, что выполняет конвейер GitHub Actions.
 upload_code() {
   log 'Загрузка исходного кода'
-  remote "mkdir -p '$APP_DIR'"
+  STAGE="$(remote "mktemp -d '/home/$ADMIN_USER/.imbc-stage.XXXXXXXX'")"
+  [[ "$STAGE" =~ ^/home/${ADMIN_USER}/\.imbc-stage\.[A-Za-z0-9]{8}$ ]] || die 'Не удалось создать каталог загрузки на VM'
+  remote "mkdir -m 0755 '$STAGE/src'"
   # Серверные .env, Git и данные сохраняются; локальные секреты не отправляются.
   COPYFILE_DISABLE=1 tar --no-xattrs -C "$ROOT" \
     --exclude=node_modules --exclude=.next --exclude=dist --exclude=dist_keycloak --exclude=.turbo --exclude=coverage --exclude=__pycache__ \
-    --exclude=.git --exclude='.env*' --exclude=.deployed-source-commit \
+    --exclude=.git --exclude='.env*' --exclude=.deployed-source-commit --exclude=.deployed-revision --exclude=.synced-revision \
     --exclude='*.pem' --exclude='*.key' --exclude='*.log' --exclude='*.tsbuildinfo' \
-    -czf - . | remote "tar -xzf - -C '$APP_DIR'"
+    -czf - . | remote "tar -xzf - -C '$STAGE/src'"
   # Шаблоны передаём отдельно: glob .env* исключает любой локальный файл секретов.
   git -C "$ROOT" ls-files -z -- .env.example '*/.env.example' |
-    COPYFILE_DISABLE=1 tar --no-xattrs -C "$ROOT" --null -T - -czf - | remote "tar -xzf - -C '$APP_DIR'"
-  git -C "$ROOT" rev-parse HEAD | remote "cat > '$APP_DIR/.deployed-source-commit'"
+    COPYFILE_DISABLE=1 tar --no-xattrs -C "$ROOT" --null -T - -czf - | remote "tar -xzf - -C '$STAGE/src'"
 }
 
-configure_env() {
+# Проверка .env, синхронизация, Compose, realm, готовность и закрытые маршруты — на VM,
+# одной командой под flock. Полный журнал остаётся в /var/log/imbc-deploy/ на VM.
+deploy_on_vm() {
   [[ -n "$VM_HOST" ]] || die 'Не удалось определить DNS-имя VM'
+  [[ -n "$STAGE" ]] || die 'Исходники ещё не загружены'
   resolve_ssh_allowlist
-  log 'Проверка HTTPS-конфигурации и серверных секретов'
-  # Генерация и проверка происходят на сервере; значения секретов не выводятся.
-  remote "python3 - '$APP_DIR' '$VM_HOST' '$SSH_ALLOW_FROM' '$ADMIN_ALLOW_OVERRIDE'" <<'PY'
-import ipaddress
-import os
-import re
-import secrets
-import sys
-import tempfile
-from pathlib import Path
-
-root, host = Path(sys.argv[1]), sys.argv[2]
-ssh_allow, admin_override = sys.argv[3:5]
-
-def admin_networks(value):
-    value = value.strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
-        value = value[1:-1]
-    try:
-        networks = list(dict.fromkeys(str(ipaddress.ip_network(item, strict=False)) for item in value.split()))
-        if not networks or any(ipaddress.ip_network(item).prefixlen == 0 for item in networks):
-            raise ValueError()
-    except ValueError:
-        raise SystemExit('ADMIN_ALLOWED_IPS должен содержать конкретные IP/CIDR; .env не изменён')
-    return ' '.join(networks)
-
-if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]*', host):
-    raise SystemExit('Некорректное DNS-имя')
-env_path = root / '.env'
-if env_path.exists():
-    raw = env_path.read_text()
-    values = dict(line.split('=', 1) for line in raw.splitlines() if line and not line.startswith('#') and '=' in line)
-    required = {
-        'PUBLIC_URL': 'https://' + host,
-        'PUBLIC_HOST': host,
-        'COOKIE_SECURE': 'true',
-        'SESSION_COOKIE_NAME': '__Host-imbc-session',
-        'DEVICE_COOKIE_NAME': '__Host-imbc-device',
-        'KEYCLOAK_SSL_REQUIRED': 'external',
-    }
-    invalid = [key for key, expected in required.items() if values.get(key) != expected]
-    if invalid:
-        raise SystemExit('Существующая .env требует ручной миграции HTTPS/hostname: ' + ', '.join(invalid) + '. Keycloak импортирует realm только один раз; файл не изменён.')
-    if not values.get('MAILPIT_UI_AUTH'):
-        raise SystemExit('MAILPIT_UI_AUTH должен защищать почту с кодами входа; .env не изменён.')
-    existing_admin = values.get('ADMIN_ALLOWED_IPS', '')
-    admin = admin_networks(admin_override or existing_admin or ssh_allow + ' 127.0.0.1/32 ::1/128')
-    if admin_override or not existing_admin:
-        if re.search(r'^ADMIN_ALLOWED_IPS=.*$', raw, flags=re.M):
-            raw = re.sub(r'^ADMIN_ALLOWED_IPS=.*$', 'ADMIN_ALLOWED_IPS=' + admin, raw, flags=re.M)
-        else:
-            raw = raw.rstrip('\n') + '\nADMIN_ALLOWED_IPS=' + admin + '\n'
-        fd, temporary = tempfile.mkstemp(prefix='.env.', dir=root)
-        try:
-            with os.fdopen(fd, 'w') as output:
-                output.write(raw)
-                output.flush()
-                os.fsync(output.fileno())
-            os.replace(temporary, env_path)
-        finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
-    os.chmod(env_path, 0o600)
-    print('HTTPS-конфигурация и секреты сохранены; IP-доступ администратора проверен')
-else:
-    raw = (root / '.env.example').read_text()
-    values = {
-        'PUBLIC_URL': 'https://' + host,
-        'PUBLIC_HOST': host,
-        'COOKIE_SECURE': 'true',
-        'SESSION_COOKIE_NAME': '__Host-imbc-session',
-        'DEVICE_COOKIE_NAME': '__Host-imbc-device',
-        'KEYCLOAK_SSL_REQUIRED': 'external',
-        'KEYCLOAK_DEV_USER_PASSWORD': 'Imbc-' + secrets.token_hex(16),
-        'S3_ACCESS_KEY': 'imbc-dev',
-        'MAILPIT_UI_AUTH': 'imbc:' + secrets.token_hex(24),
-        'ADMIN_ALLOWED_IPS': admin_networks(admin_override or ssh_allow + ' 127.0.0.1/32 ::1/128'),
-    }
-    for key in ['SESSION_SECRET', 'DB_OWNER_PASSWORD', 'DB_APP_PASSWORD', 'KEYCLOAK_DB_PASSWORD', 'S3_SECRET_KEY', 'KEYCLOAK_ADMIN_PASSWORD', 'OIDC_CLIENT_SECRET', 'KEYCLOAK_ADMIN_CLIENT_SECRET']:
-        values[key] = secrets.token_hex(32)
-    for key, value in values.items():
-        pattern = rf'^{re.escape(key)}=.*$'
-        if re.search(pattern, raw, flags=re.M):
-            raw = re.sub(pattern, key + '=' + value, raw, flags=re.M)
-        else:
-            raw += '\n' + key + '=' + value + '\n'
-    if 'change-me' in '\n'.join(line for line in raw.splitlines() if line and not line.startswith('#')):
-        raise SystemExit('В шаблоне остались значения change-me; файл не создан')
-    fd = os.open(env_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, 'w') as output:
-        output.write(raw)
-    print('Создана серверная .env с правами 0600')
-PY
+  local commit
+  commit="$(git -C "$ROOT" rev-parse HEAD)"
+  REMOTE_SCRIPT="$(remote "mktemp '/home/$ADMIN_USER/.imbc-vm-deploy.XXXXXXXX'")"
+  [[ "$REMOTE_SCRIPT" =~ ^/home/${ADMIN_USER}/\.imbc-vm-deploy\.[A-Za-z0-9]{8}$ ]] || die 'Не удалось передать скрипт развёртывания'
+  remote "cat > '$REMOTE_SCRIPT'" < "$HERE/vm-deploy.sh"
+  log 'Развёртывание на VM: .env, синхронизация, Compose, realm, HTTPS и маршруты'
+  remote "sudo bash '$REMOTE_SCRIPT' local '$ADMIN_USER' '$STAGE' '$VM_HOST' '$commit' '$SSH_ALLOW_FROM' '$ADMIN_ALLOW_OVERRIDE'" \
+    || die 'Развёртывание на VM не завершено; журнал — sudo ls -t /var/log/imbc-deploy/ на VM'
+  STAGE=""
+  remote "rm -f '$REMOTE_SCRIPT'"
+  REMOTE_SCRIPT=""
 }
 
-compose_up() {
-  log 'Проверка Compose, сборка и запуск'
-  remote "cd '$APP_DIR' && $COMPOSE config --quiet && $COMPOSE up -d --build --remove-orphans --wait --wait-timeout 600"
-  log 'Применение конфигурации HTTPS без прерывания соединений'
-  remote "cd '$APP_DIR' && $COMPOSE exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile"
-  log 'Синхронизация настроек входа и почты без повторного импорта пользователей'
-  remote "cd '$APP_DIR' && python3 infrastructure/azure/sync-realm.py --theme imbc"
-  log 'Проверка HTTPS и готовности API'
-  local ready=false
-  for _ in $(seq 1 30); do
-    if remote "curl --fail --silent --show-error --connect-timeout 5 --max-time 10 --resolve '$VM_HOST:443:127.0.0.1' 'https://$VM_HOST/api/health/ready'" >/dev/null 2>&1; then
-      ready=true; break
-    fi
-    sleep 5
-  done
-  [[ "$ready" == true ]] || die 'HTTPS/API не готовы; проверьте Caddy, DNS и сертификат'
-  log 'Проверка закрытых служебных маршрутов с недоверенного адреса Docker'
-  remote "cd '$APP_DIR' && $COMPOSE exec -T api node -" <<'JS'
-const https = require('node:https');
-const host = new URL(process.env.PUBLIC_URL).hostname;
-function status(path) {
-  return new Promise((resolve, reject) => {
-    const request = https.request({
-      hostname: 'caddy', port: 443, servername: host, path,
-      headers: { Host: host, 'X-Forwarded-For': '127.0.0.1' },
-      timeout: 8000,
-    }, response => { response.resume(); response.on('end', () => resolve(response.statusCode)); });
-    request.on('error', reject);
-    request.on('timeout', () => request.destroy(new Error('timeout')));
-    request.end();
-  });
-}
-(async () => {
-  for (const path of ['/dev-mail', '/dev-mail/', '/DEV-MAIL/api/v1/messages', '/dev-mail%2Fapi/v1/messages', '/kc/admin', '/KC/ADMIN/', '/kc/admin/realms', '/kc/%61dmin/', '/kc/admin;test/', '/kc/./admin/', '/kc//admin/', '/kc/realms/master/.well-known/openid-configuration']) {
-    if (![403, 404].includes(await status(path))) throw new Error('private route exposed');
-  }
-  for (const path of ['/api/health/ready', '/register', '/kc/realms/imbc/.well-known/openid-configuration']) {
-    if (await status(path) !== 200) throw new Error('public route unavailable');
-  }
-  console.log('Private routes denied; public product routes available; forwarded headers grant no access');
-})().catch(() => { console.error('Caddy access policy verification failed; public HTTPS was not enabled'); process.exitCode = 1; });
-JS
-  remote "cd '$APP_DIR' && $COMPOSE ps"
+# Предпросмотр синхронизации конвейера (архив коммита из GitHub, rsync -n с правилами
+# vm-deploy.sh из того же коммита). Каталог приложения, Compose и журналы на VM не меняются.
+preview_on_vm() {
+  local sha="$1"
+  local script="infrastructure/azure/vm-deploy.sh"
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die 'Нужен полный SHA отправленного коммита, например вывод git rev-parse origin/main'
+  git -C "$ROOT" cat-file -e "${sha}^{commit}" 2>/dev/null \
+    || die "Коммита $sha нет в локальном репозитории: выполните git fetch"
+  git -C "$ROOT" cat-file -e "${sha}:${script}" 2>/dev/null \
+    || die "В коммите $sha нет $script: предпросмотр для него невозможен"
+  local content
+  content="$(git -C "$ROOT" show "${sha}:${script}")"
+  grep -q '^    preview)' <<< "$content" || die "vm-deploy.sh коммита $sha не поддерживает режим preview"
+  REMOTE_SCRIPT="$(remote "mktemp '/home/$ADMIN_USER/.imbc-vm-deploy.XXXXXXXX'")"
+  [[ "$REMOTE_SCRIPT" =~ ^/home/${ADMIN_USER}/\.imbc-vm-deploy\.[A-Za-z0-9]{8}$ ]] || die 'Не удалось передать скрипт предпросмотра'
+  # Правила синхронизации — из самого коммита, а не из рабочего дерева оператора.
+  printf '%s\n' "$content" | remote "cat > '$REMOTE_SCRIPT'"
+  log "Предпросмотр синхронизации конвейера для $sha"
+  remote "sudo bash '$REMOTE_SCRIPT' preview '$sha' 'Batrbekk/imbc-platform'" || die 'Предпросмотр не выполнен'
+  remote "rm -f '$REMOTE_SCRIPT'"
+  REMOTE_SCRIPT=""
 }
 
 info() {
@@ -340,9 +256,10 @@ INFO
 validate_settings
 case "${1:-up}" in
   up)
-    ensure_login; create_vm; wait_for_docker; upload_code; configure_env; compose_up; publish_https; info ;;
+    ensure_login; create_vm; wait_for_docker; upload_code; deploy_on_vm; publish_https; info ;;
   redeploy)
-    ensure_login; load_vm; configure_env; upload_code; compose_up; info ;;
+    ensure_login; load_vm; upload_code; deploy_on_vm; info ;;
+  preview) ensure_login; load_vm; preview_on_vm "${2:-}" ;;
   info) ensure_login; load_vm; info ;;
   ssh) ensure_login; load_vm; remote ;;
   down)
@@ -352,5 +269,5 @@ case "${1:-up}" in
       az group delete -n "$RG" --yes --no-wait
       echo 'Удаление запущено'
     fi ;;
-  *) sed -n '2,12p' "$0"; exit 1 ;;
+  *) sed -n '2,14p' "$0"; exit 1 ;;
 esac

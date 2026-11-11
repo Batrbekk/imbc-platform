@@ -11,5 +11,7 @@ coverage/
 *.tsbuildinfo
 next-env.d.ts
 .deployed-source-commit
+.deployed-revision
+.synced-revision
 __pycache__/
 *.py[cod]

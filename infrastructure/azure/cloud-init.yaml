@@ -1,7 +1,7 @@
 #cloud-config
 # Ubuntu 24.04: Docker Engine + Compose, bounded local container logs.
 package_update: true
-packages: [ca-certificates, curl, make, openssl, python3, unzip]
+packages: [ca-certificates, curl, make, openssl, python3, rsync, unzip]
 write_files:
   - path: /etc/docker/daemon.json
     permissions: '0644'
