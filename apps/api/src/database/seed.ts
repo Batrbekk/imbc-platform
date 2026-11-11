@@ -3,6 +3,7 @@
  * Учётные записи совпадают с пользователями realm-файла Keycloak (infrastructure/keycloak/imbc-realm.json).
  * Все компании вымышленные; БИН сгенерированы с правильной контрольной цифрой.
  */
+import { pathToFileURL } from 'node:url';
 import { computeBinCheckDigit, normalizeCompanyName, type CommodityGroup, type Role } from '@imbc/contracts';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -25,7 +26,7 @@ const PEOPLE: { email: string; role: Role; org: 'imbc' | 'operator' | 'observer'
   { email: 'admin@imbc.local', role: 'administrator', org: 'imbc', name: 'Администратор IMBC' },
   { email: 'director@imbc.local', role: 'director', org: 'imbc', name: 'Директор IMBC' },
   { email: 'operator@operator.local', role: 'operator', org: 'operator', name: 'Специалист оператора' },
-  { email: 'spectator@spectator.local', role: 'observer', org: 'observer', name: 'Наблюдатель' },
+  { email: 'observer@observer.local', role: 'observer', org: 'observer', name: 'Наблюдатель' },
   { email: 'manufacturer@demo.local', role: 'manufacturer', org: 'manufacturer', name: 'Производитель (демо)' },
 ];
 
@@ -121,102 +122,117 @@ const COMPANIES: {
   },
 ];
 
+/** Записывает демо-данные в одной транзакции. Пул не закрывает. */
+export async function seedDemo(pool: pg.Pool): Promise<void> {
+  const db = drizzle(pool, { schema, casing: 'snake_case' });
+  await db.transaction(async (tx) => {
+    const orgIds: Record<string, string> = {};
+    for (const [key, name, type] of [
+      ['imbc', 'IMBC', 'imbc'],
+      ['operator', 'Оператор (демо)', 'operator'],
+      ['observer', 'Наблюдатель (демо)', 'observer'],
+    ] as const) {
+      const existing = await tx
+        .select({ id: organizations.id })
+        .from(organizations)
+        .where(sql`${organizations.name} = ${name}`);
+      orgIds[key] =
+        existing[0]?.id ??
+        (
+          await tx
+            .insert(organizations)
+            .values({ type, name, isMajorOperator: key === 'operator' })
+            .returning()
+        )[0]!.id;
+    }
+
+    for (const [i, c] of COMPANIES.entries()) {
+      const bin = demoBin(i + 1);
+      const [org] = await tx
+        .insert(organizations)
+        .values({ type: 'manufacturer', name: c.ru, bin })
+        .onConflictDoUpdate({ target: organizations.bin, targetWhere: sql`bin is not null`, set: { name: c.ru } })
+        .returning();
+      if (i === 0) orgIds.manufacturer = org!.id;
+      const verifiedAt = new Date(Date.now() - (i + 1) * 9 * 86_400_000);
+      const [profile] = await tx
+        .insert(manufacturerProfiles)
+        .values({
+          organizationId: org!.id,
+          status: 'verified',
+          updateStatus: 'active',
+          verifiedAt,
+          completenessPct: 100,
+        })
+        .onConflictDoUpdate({ target: manufacturerProfiles.organizationId, set: { status: 'verified' } })
+        .returning();
+      const until = new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10);
+      const row = {
+        profileId: profile!.id,
+        organizationId: org!.id,
+        bin,
+        nameEn: c.en,
+        nameRu: c.ru,
+        nameNormalized: normalizeCompanyName(c.ru),
+        region: c.region,
+        commodityGroups: c.groups,
+        commodityTypes: [],
+        tnvedCodes: c.tnved,
+        kpvedCodes: [],
+        okedCodes: [],
+        certificateTypes: c.certs,
+        certificatesValidUntil: Object.fromEntries(c.certs.map((k) => [k, until])),
+        mainTnved: c.tnved[0] ?? null,
+        headcountTotal: c.headcount,
+        siteSurveyed: c.surveyed,
+        unifiedRegister: i % 3 === 0,
+        updateStatus: 'active' as const,
+        verifiedAt,
+        card: { demo: true },
+      };
+      await tx.insert(catalogVisible).values(row).onConflictDoUpdate({ target: catalogVisible.profileId, set: row });
+    }
+
+    // Прежний адрес демо-наблюдателя (до v1.3, GEN-06) меняется на месте: id аккаунта не меняется,
+    // поэтому пара в DEV_FIXED_OTP_ACCOUNTS, idp_subject, принятая ответственность и доверенные
+    // устройства сохраняются. Если новый адрес уже занят, оба аккаунта остаются как были.
+    await tx.execute(sql`
+      UPDATE user_accounts SET email = 'observer@observer.local'
+      WHERE lower(email) = 'spectator@spectator.local'
+        AND NOT EXISTS (SELECT 1 FROM user_accounts WHERE lower(email) = 'observer@observer.local')`);
+
+    for (const p of PEOPLE) {
+      await tx
+        .insert(userAccounts)
+        .values({
+          organizationId: orgIds[p.org]!,
+          email: p.email,
+          role: p.role,
+          fullName: p.name,
+          state: 'invited',
+          locale: 'ru',
+        })
+        .onConflictDoNothing();
+    }
+  });
+}
+
 async function main(): Promise<void> {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL не задан');
   const pool = new pg.Pool({ connectionString: url, max: 1, application_name: 'imbc-seed' });
-  const db = drizzle(pool, { schema, casing: 'snake_case' });
-
   try {
-    await db.transaction(async (tx) => {
-      const orgIds: Record<string, string> = {};
-      for (const [key, name, type] of [
-        ['imbc', 'IMBC', 'imbc'],
-        ['operator', 'Оператор (демо)', 'operator'],
-        ['observer', 'Наблюдатель (демо)', 'observer'],
-      ] as const) {
-        const existing = await tx
-          .select({ id: organizations.id })
-          .from(organizations)
-          .where(sql`${organizations.name} = ${name}`);
-        orgIds[key] =
-          existing[0]?.id ??
-          (
-            await tx
-              .insert(organizations)
-              .values({ type, name, isMajorOperator: key === 'operator' })
-              .returning()
-          )[0]!.id;
-      }
-
-      for (const [i, c] of COMPANIES.entries()) {
-        const bin = demoBin(i + 1);
-        const [org] = await tx
-          .insert(organizations)
-          .values({ type: 'manufacturer', name: c.ru, bin })
-          .onConflictDoUpdate({ target: organizations.bin, targetWhere: sql`bin is not null`, set: { name: c.ru } })
-          .returning();
-        if (i === 0) orgIds.manufacturer = org!.id;
-        const verifiedAt = new Date(Date.now() - (i + 1) * 9 * 86_400_000);
-        const [profile] = await tx
-          .insert(manufacturerProfiles)
-          .values({
-            organizationId: org!.id,
-            status: 'verified',
-            updateStatus: 'active',
-            verifiedAt,
-            completenessPct: 100,
-          })
-          .onConflictDoUpdate({ target: manufacturerProfiles.organizationId, set: { status: 'verified' } })
-          .returning();
-        const until = new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10);
-        const row = {
-          profileId: profile!.id,
-          organizationId: org!.id,
-          bin,
-          nameEn: c.en,
-          nameRu: c.ru,
-          nameNormalized: normalizeCompanyName(c.ru),
-          region: c.region,
-          commodityGroups: c.groups,
-          commodityTypes: [],
-          tnvedCodes: c.tnved,
-          kpvedCodes: [],
-          okedCodes: [],
-          certificateTypes: c.certs,
-          certificatesValidUntil: Object.fromEntries(c.certs.map((k) => [k, until])),
-          mainTnved: c.tnved[0] ?? null,
-          headcountTotal: c.headcount,
-          siteSurveyed: c.surveyed,
-          unifiedRegister: i % 3 === 0,
-          updateStatus: 'active' as const,
-          verifiedAt,
-          card: { demo: true },
-        };
-        await tx.insert(catalogVisible).values(row).onConflictDoUpdate({ target: catalogVisible.profileId, set: row });
-      }
-
-      for (const p of PEOPLE) {
-        await tx
-          .insert(userAccounts)
-          .values({
-            organizationId: orgIds[p.org]!,
-            email: p.email,
-            role: p.role,
-            fullName: p.name,
-            state: 'invited',
-            locale: 'ru',
-          })
-          .onConflictDoNothing();
-      }
-    });
+    await seedDemo(pool);
     console.log(`Демо-данные: ${PEOPLE.length} учётных записей, ${COMPANIES.length} компаний в каталоге`);
   } finally {
     await pool.end();
   }
 }
 
-main().catch((error: unknown) => {
-  console.error(error);
-  process.exit(1);
-});
+// Запуск только при прямом вызове (`node dist/database/seed.js`), не при импорте из тестов.
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error: unknown) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

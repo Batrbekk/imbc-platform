@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Apply managed settings to an existing IMBC realm without importing users or secrets.
+"""Apply managed settings to an existing IMBC realm and rename listed legacy demo users, without importing users or secrets.
 
 Run from the repository on the VM after Keycloak is healthy:
     python3 infrastructure/azure/sync-realm.py --theme imbc
-Only the explicitly allowlisted fields below are sent to the admin API.
+Only the explicitly allowlisted fields below are sent to the admin API. A legacy demo user
+from LEGACY_DEMO_USERS is renamed in place, so its id (token subject) and password are kept.
 """
 from __future__ import annotations
 
@@ -31,6 +32,8 @@ REALM_FIELDS = frozenset({
 })
 CLIENT_FIELDS = frozenset({"rootUrl", "baseUrl", "redirectUris", "webOrigins", "attributes", "frontchannelLogout"})
 PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+# The realm file is imported only once, so renamed demo users are renamed here (GEN-06, v1.3 section 3.1).
+LEGACY_DEMO_USERS = {"spectator@spectator.local": "observer@observer.local"}
 
 
 class SyncError(Exception):
@@ -95,6 +98,12 @@ def desired_settings(source: dict[str, Any], env: dict[str, str], theme: str) ->
     return realm, realm_patch, client_patch
 
 
+def legacy_user_renames(source: dict[str, Any]) -> dict[str, str]:
+    """Pairs whose new username is a desired realm user and whose old username no longer is."""
+    usernames = {str(user.get("username", "")).lower() for user in source.get("users", []) if isinstance(user, dict)}
+    return {old: new for old, new in LEGACY_DEMO_USERS.items() if new in usernames and old not in usernames}
+
+
 def run(command: list[str], *, operation: str, root: Path, data: str | None = None) -> str:
     try:
         result = subprocess.run(command, cwd=root, input=data, text=True, capture_output=True, timeout=90, check=False)
@@ -113,6 +122,16 @@ def parse_result(raw: str, operation: str) -> Any:
         raise SyncError(f"{operation} returned invalid JSON") from None
 
 
+def find_user_id(cli: list[str], config_path: str, realm: str, username: str, root: Path) -> str | None:
+    users = parse_result(run(cli + ["get", "users", "--config", config_path, "-r", realm, "-q", f"username={username}", "-q", "exact=true", "--fields", "id,username"], operation="Find demo user", root=root), "Find demo user")
+    matches = [user for user in users if isinstance(user, dict) and user.get("username") == username] if isinstance(users, list) else []
+    if not matches:
+        return None
+    if len(matches) != 1 or not re.fullmatch(r"[A-Za-z0-9-]+", str(matches[0].get("id", ""))):
+        raise SyncError("Unexpected demo user lookup result")
+    return str(matches[0]["id"])
+
+
 def synchronize(root: Path, theme: str) -> None:
     if not re.fullmatch(r"[A-Za-z0-9._-]+", theme):
         raise SyncError("Invalid theme name")
@@ -122,6 +141,7 @@ def synchronize(root: Path, theme: str) -> None:
             raise SyncError(f"Missing required environment variable: {key}")
     source = parse_result((root / "infrastructure/keycloak/imbc-realm.json").read_text(), "Desired realm configuration")
     realm, realm_patch, client_patch = desired_settings(source, env, theme)
+    renames = legacy_user_renames(source)
     container_ids = run(["docker", "compose", "-f", "compose.yaml", "-f", "compose.azure.yaml", "ps", "-q", "keycloak"], operation="Find Keycloak container", root=root).split()
     if len(container_ids) != 1 or not re.fullmatch(r"[a-fA-F0-9]{12,64}", container_ids[0]):
         raise SyncError("Expected one running Keycloak container")
@@ -150,6 +170,16 @@ def synchronize(root: Path, theme: str) -> None:
         # kcadm accepts '-f -' for JSON on stdin. No desired users or client secrets are submitted.
         run(cli + ["update", f"realms/{realm}", "--config", config_path, "-f", "-"], operation="Update managed realm settings", root=root, data=json.dumps(realm_patch))
         run(cli + ["update", client_path, "--config", config_path, "-r", realm, "-f", "-"], operation="Update managed client settings", root=root, data=json.dumps(client_patch))
+        for old, new in renames.items():
+            legacy_id = find_user_id(cli, config_path, realm, old, root)
+            if legacy_id is None:
+                continue
+            if find_user_id(cli, config_path, realm, new, root) is not None:
+                print("Legacy demo user kept: target already exists")
+                continue
+            # Only username and email change; credentials and the id stay with the user.
+            run(cli + ["update", f"users/{legacy_id}", "--config", config_path, "-r", realm, "-s", f"username={new}", "-s", f"email={new}"], operation="Rename legacy demo user", root=root)
+            print("Renamed legacy demo user")
     except BaseException as error:
         original_error = error
         raise
@@ -164,7 +194,7 @@ def synchronize(root: Path, theme: str) -> None:
                 print("ERROR: Temporary admin configuration cleanup also failed", file=sys.stderr)
     print("Updated realm settings: " + ", ".join(sorted(realm_patch)))
     print("Updated imbc-bff settings: " + ", ".join(sorted(client_patch)))
-    print("Realm synchronization complete; existing users, client secrets and unrelated settings preserved")
+    print("Realm synchronization complete; legacy demo users renamed where present, other users, client secrets and unrelated settings preserved")
 
 
 def main() -> int:

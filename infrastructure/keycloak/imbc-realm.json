@@ -215,8 +215,8 @@
       ]
     },
     {
-      "username": "spectator@spectator.local",
-      "email": "spectator@spectator.local",
+      "username": "observer@observer.local",
+      "email": "observer@observer.local",
       "firstName": "Наблюдатель",
       "lastName": "Демо",
       "enabled": true,
