@@ -2,6 +2,7 @@
 # Web UI: статическая сборка Vite (спецификация 11.1), nginx без root на :3000 — адрес web:3000 прежний.
 ARG NODE_VERSION=26
 ARG PNPM_VERSION=10.28.0
+# USER 101 ниже — пользователь этого образа; другому базовому образу может понадобиться другой uid.
 ARG NGINX_IMAGE=nginxinc/nginx-unprivileged:1.29-alpine
 
 FROM node:${NODE_VERSION}-alpine AS build

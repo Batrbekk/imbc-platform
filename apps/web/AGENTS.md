@@ -25,7 +25,8 @@
 
 ## Components
 
-- Add shadcn/ui components only with the CLI, from this directory: `pnpm dlx shadcn@4.23.0 add <name>` — the CLI version pinned in `package.json`; the style `base-nova` comes from `components.json`, or inspect them first with the shadcn MCP tools (`.mcp.json` points here). Do not write them from memory.
+- Add shadcn/ui components only with the CLI, from this directory: `pnpm dlx shadcn@4.23.0 add <name>`. That is the version locked in `pnpm-lock.yaml` (`package.json` has the range `^4.23.0`); the style `base-nova` comes from `components.json`. Do not write components from memory.
+- You can inspect components first with the shadcn MCP tools (`.mcp.json` points here). The MCP server is started with `shadcn@latest` because it only reads the registry; files are added with the pinned CLI so that generated code stays reproducible.
 - Preserve local edits when a component is re-added. `src/components/ui/sidebar.tsx` has one, marked with a comment: the mobile Sheet title and description are props (`mobileTitle`, `mobileDescription`) so that they can be translated. Re-adding `sidebar` with `--overwrite` removes it; restore it afterwards.
 
 ## Translations and language
