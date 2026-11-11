@@ -33,6 +33,9 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # ID требований в файлах сверяются со спецификацией v1.3 (NFR-12).
+      - run: node --test scripts/check-requirements.test.mjs
+      - run: pnpm check:requirements
       - run: pnpm typecheck
       - run: pnpm lint
       # Без TEST_DATABASE_URL интеграционные тесты здесь пропускаются;

@@ -30,7 +30,7 @@ export type UpdateStatus = (typeof UPDATE_STATUSES)[number];
 export const PROFILE_TIERS = ['tier_1', 'tier_2'] as const;
 export type ProfileTier = (typeof PROFILE_TIERS)[number];
 
-/** Восемь секций профиля (раздел 5.2). Production — не входит в полноту (MAN-91). */
+/** Восемь секций профиля (раздел 5.2). Production — не входит в полноту (MAN-41). */
 export const PROFILE_SECTIONS = [
   'main',
   'contacts',
@@ -56,7 +56,7 @@ export type CommodityGroup = (typeof COMMODITY_GROUPS)[number];
 export const CONTACT_ROLES = ['management', 'technical', 'commercial'] as const;
 export type ContactRole = (typeof CONTACT_ROLES)[number];
 
-/** Единицы производственной мощности в год (MAN-50). */
+/** Единицы производственной мощности в год (MAN-23). */
 export const CAPACITY_UNITS = ['pieces', 'tonnes', 'metres', 'sets'] as const;
 export type CapacityUnit = (typeof CAPACITY_UNITS)[number];
 

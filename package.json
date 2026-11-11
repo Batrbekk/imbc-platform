@@ -12,6 +12,7 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "lint": "turbo run lint",
+    "check:requirements": "node scripts/check-requirements.mjs",
     "db:generate": "pnpm --filter @imbc/api db:generate",
     "db:migrate": "pnpm --filter @imbc/api db:migrate",
     "format": "prettier --write ."
