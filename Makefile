@@ -12,7 +12,7 @@ env:             ## Создать .env из шаблона (если его е�
 	@test -f .env || cp .env.example .env && echo ".env готов"
 
 secrets: env     ## Заменить все change-me в .env случайными значениями
-	@for key in $$(grep -oE '^[A-Z_]+=change-me[^ ]*' .env | cut -d= -f1); do \
+	@for key in $$(grep -oE '^[A-Z0-9_]+=change-me[^ ]*' .env | cut -d= -f1); do \
 	  val=$$(openssl rand -hex 24); sed -i.bak "s|^$$key=.*|$$key=$$val|" .env; done; rm -f .env.bak
 	@echo "Секреты сгенерированы"
 

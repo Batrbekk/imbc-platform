@@ -8,5 +8,7 @@
 !**/.env.example
 .git
 .github
+.claude
+.superpowers
 docs
 *.md

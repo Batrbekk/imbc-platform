@@ -24,7 +24,7 @@
 
 ## Components
 
-- Add shadcn/ui components only with the CLI, from this directory: `pnpm dlx shadcn@latest add <name>` (style `base-nova` from `components.json`), or inspect them first with the shadcn MCP tools (`.mcp.json` points here). Do not write them from memory.
+- Add shadcn/ui components only with the CLI, from this directory: `pnpm dlx shadcn@4.23.0 add <name>` — the CLI version pinned in `package.json`; the style `base-nova` comes from `components.json`, or inspect them first with the shadcn MCP tools (`.mcp.json` points here). Do not write them from memory.
 - Preserve local edits when a component is re-added. `src/components/ui/sidebar.tsx` has one, marked with a comment: the mobile Sheet title and description are props (`mobileTitle`, `mobileDescription`) so that they can be translated. Re-adding `sidebar` with `--overwrite` removes it; restore it afterwards.
 
 ## Translations and language
@@ -40,7 +40,7 @@
 ## Content-Security-Policy
 
 - The image sends `script-src 'self'` (see `infrastructure/nginx/web.conf`). Do not add inline scripts or inline event handlers to `index.html` or anywhere else; `test/index-html.test.ts` checks the template. Fonts, images and scripts are bundled from this origin; there are no third-party hosts.
-- Security headers other than CSP and `Cache-Control` (nosniff, Referrer-Policy, X-Frame-Options, HSTS) are set by the edge (`infrastructure/nginx/nginx.conf`, `infrastructure/azure/Caddyfile`); do not repeat them in `web.conf`.
+- The `web` container sets only `Content-Security-Policy` and `Cache-Control` (`infrastructure/nginx/web.conf`). The other security headers come from the edge proxies: `X-Content-Type-Options: nosniff`, `Referrer-Policy` and `X-Frame-Options` from both the local nginx (`infrastructure/nginx/nginx.conf`) and Caddy on the Azure stand (`infrastructure/azure/Caddyfile`); `Strict-Transport-Security` (HSTS) and `Permissions-Policy` only from Caddy on the Azure stand. Do not repeat them in `web.conf`.
 
 ## Local development
 
