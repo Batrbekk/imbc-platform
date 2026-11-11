@@ -2,14 +2,21 @@
 // Сверка ID требований со спецификацией (NFR-12): ID читаются из текста
 // спецификации, карта этапов roadmap и ссылки в отслеживаемых файлах
 // проверяются по ним. Устаревшие ссылки (нумерация v1.2) перечислены
-// в scripts/requirements-baseline.json; базовый список только сокращается.
+// в scripts/requirements-baseline.json с числом вхождений; базовый список
+// только сокращается.
+//
+// Скрипт проверяет только то, что ID существует. ID, который есть и в v1.2,
+// и в v1.3, но означает в них разное, он не заметит: проверка не заменяет
+// чтения требования в тексте спецификации.
 //
 // node scripts/check-requirements.mjs [--spec <файл>] [--map <roadmap>] [--report] [--update-baseline]
 //
+// Корень — корень git-репозитория текущего каталога; пути по умолчанию
+// берутся от него, пути из аргументов — от текущего каталога.
 // Код возврата 1 при любой ошибке. Без зависимостей.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const DEFAULT_SPEC = 'docs/analyst/2026-11-11/specification-v1.3.md';
@@ -68,6 +75,10 @@ const TEST_FILE = /(^|\/)(test|tests|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$/;
 // «IMBC-07…IMBC-14». Через «/» — перечисление: «ADM-10/11», «MAN-01/MAN-03».
 const RANGE_SEPARATORS = ['…', '...', '–'];
 
+const FIX_HINT =
+  'Что делать: замените ID на ID v1.3 по тексту спецификации; если файл переписывается на своём этапе — ' +
+  `перегенерируйте базовый список: node scripts/check-requirements.mjs --update-baseline (${BASELINE_FILE}).`;
+
 export function isInScope(path) {
   return SCOPE.some((re) => re.test(path)) && !EXCLUDED.some((re) => re.test(path));
 }
@@ -85,8 +96,10 @@ export function compareIds(a, b) {
   return Number(na) - Number(nb);
 }
 
+const compareStrings = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 const formatId = (prefix, n) => `${prefix}-${String(n).padStart(2, '0')}`;
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 // Определения требований в спецификации: «**GEN-01.**» в начале пункта
 // и первая ячейка строки таблицы «| NOT-01 | … |» (уведомления NOT-01–17).
@@ -103,40 +116,87 @@ export function parseSpecIds(text) {
   return [...new Set(specDefinitions(text))];
 }
 
-/** Ссылки на требования в тексте; диапазоны и перечисления разворачиваются в отдельные ID. */
-export function expandReferences(text, prefixes = REQUIREMENT_PREFIXES) {
-  if (prefixes.length === 0) return [];
+/**
+ * Ссылки на требования в тексте и записи, разобранные не полностью.
+ *
+ * ID — префикс раздела спецификации, дефис и ровно две цифры; перед префиксом
+ * не стоит латинская буква, цифра, «_» или «-» (так отсекаются «X-MAN-01»,
+ * «ADR-04», «D-51», «UTF-8»). Трёхзначные и однозначные номера («OPR-005»,
+ * «MAN-100», «OPR-5») и строчные формы («man-50», «tier-2») намеренно
+ * не считаются ID: в спецификации их нет, а похожих чужих обозначений много.
+ *
+ * Продолжения сразу после ID: диапазон («…», «...», «–», правый конец — номер
+ * или ID того же раздела) и перечисление через «/». Ошибкой («issues»)
+ * считается то, что похоже на продолжение, но не разворачивается: обратный
+ * диапазон, хвост другого вида (одна цифра, ID другого раздела, дефис-минус
+ * вместо тире) и номера без префикса после запятой, как в нотации карты.
+ * Примеры — в scripts/check-requirements.test.mjs (здесь они сработали бы).
+ */
+export function scanReferences(text, prefixes = REQUIREMENT_PREFIXES) {
+  const refs = [];
+  const issues = [];
+  if (prefixes.length === 0) return { refs, issues };
   const alternatives = [...prefixes]
     .sort((a, b) => b.length - a.length)
     .map(escape)
     .join('|');
   const head = new RegExp(`(?<![A-Za-z0-9_-])(${alternatives})-(\\d{2})(?!\\d)`, 'g');
   const separators = [...RANGE_SEPARATORS, '/'].map(escape).join('|');
-  const refs = [];
+  const rangeSeparators = RANGE_SEPARATORS.map(escape).join('|');
+  const brokenTail = new RegExp(`^(?:(?:${rangeSeparators})(?=\\d|[A-Z]+-\\d)|\\/(?=\\d))`);
+  const hyphenTail = /^-\d{2}(?!\d)/;
+  const bareNumbers = new RegExp(`^\\s*[,;]\\s*\\d{2}(?!\\d)\\s*(?:${rangeSeparators}|-)\\s*\\d{2}(?!\\d)`);
+
   text.split('\n').forEach((lineText, index) => {
     const line = index + 1;
     head.lastIndex = 0;
     let m;
     while ((m = head.exec(lineText))) {
       const prefix = m[1];
+      const start = m.index;
       let last = Number(m[2]);
-      refs.push({ id: formatId(prefix, last), line });
+      const run = [formatId(prefix, last)];
+      let ranged = false;
+      let pos = head.lastIndex;
       const tail = new RegExp(`(${separators})(?:${escape(prefix)}-)?(\\d{2})(?!\\d)`, 'y');
-      tail.lastIndex = head.lastIndex;
-      let t;
-      while ((t = tail.exec(lineText))) {
+      for (;;) {
+        tail.lastIndex = pos;
+        const t = tail.exec(lineText);
+        if (!t) break;
         const n = Number(t[2]);
-        if (t[1] !== '/' && n > last) {
-          for (let k = last + 1; k <= n; k++) refs.push({ id: formatId(prefix, k), line });
+        if (t[1] !== '/') ranged = true;
+        if (t[1] === '/') {
+          run.push(formatId(prefix, n));
+        } else if (n > last) {
+          for (let k = last + 1; k <= n; k++) run.push(formatId(prefix, k));
         } else {
-          refs.push({ id: formatId(prefix, n), line });
+          issues.push({ line, message: `«${lineText.slice(start, tail.lastIndex)}» — обратный диапазон` });
         }
         last = n;
-        head.lastIndex = tail.lastIndex;
+        pos = tail.lastIndex;
       }
+      const rest = lineText.slice(pos);
+      const snippet = () => `«${lineText.slice(start, pos + 12).trim()}»`;
+      if (brokenTail.test(rest)) {
+        issues.push({ line, message: `${snippet()} — продолжение после ${run.at(-1)} не разворачивается` });
+      } else if (hyphenTail.test(rest)) {
+        issues.push({ line, message: `${snippet()} — диапазон через дефис; пишите «${prefix}-NN–NN»` });
+      } else if (bareNumbers.test(rest)) {
+        issues.push({ line, message: `${snippet()} — номера без префикса; пишите каждый ID или диапазон полностью` });
+      }
+      const source = pos > head.lastIndex ? lineText.slice(start, pos) : null;
+      for (const id of run) {
+        refs.push(source ? { id, line, source, kind: ranged ? 'диапазона' : 'перечня' } : { id, line });
+      }
+      head.lastIndex = pos;
     }
   });
-  return refs;
+  return { refs, issues };
+}
+
+/** Ссылки на требования в тексте; диапазоны и перечисления разворачиваются в отдельные ID. */
+export function expandReferences(text, prefixes = REQUIREMENT_PREFIXES) {
+  return scanReferences(text, prefixes).refs;
 }
 
 // --- Карта требований в roadmap ---------------------------------------------
@@ -145,17 +205,15 @@ function lines(text) {
   return text.split('\n');
 }
 
+// Заголовок раздела узнаётся по тексту: «## 11. Карта требований (v1.3)» тоже подходит.
 function mapSectionLines(roadmap) {
   const all = lines(roadmap);
-  const start = all.findIndex((l) => /^#{2,3}\s+(?:\d+\.\s*)?Карта требований\s*$/.test(l));
+  const start = all.findIndex((l) => /^#{1,6}\s+.*Карта требований/.test(l));
   if (start < 0) return null;
+  const level = /^#+/.exec(all[start])[0].length;
   const rest = all.slice(start + 1);
-  const end = rest.findIndex((l) => /^#{1,3}\s/.test(l));
+  const end = rest.findIndex((l) => new RegExp(`^#{1,${level}}\\s`).test(l));
   return { lines: end < 0 ? rest : rest.slice(0, end), offset: start + 2 };
-}
-
-export function hasStageMap(roadmap) {
-  return mapSectionLines(roadmap) !== null;
 }
 
 // «GEN 03–04, 07; UPD 06» → GEN-03, GEN-04, GEN-07, UPD-06.
@@ -211,15 +269,16 @@ function parseStageLines(roadmap) {
     }
     const req = /^(?:\*\*Требования\.\*\*|Требования:)\s*(.*)$/.exec(l);
     if (current && req && stages.get(current) === null) {
-      stages.set(current, { ids: expandReferences(req[1], prefixesOf([req[1]])).map((r) => r.id), line: i + 1 });
+      const { refs, issues } = scanReferences(req[1], prefixesOf(req[1]));
+      stages.set(current, { ids: refs.map((r) => r.id), issues, line: i + 1 });
     }
   });
   return stages;
 }
 
-function prefixesOf(texts) {
+function prefixesOf(text) {
   const set = new Set(REQUIREMENT_PREFIXES);
-  for (const t of texts) for (const m of t.matchAll(/(?<![A-Za-z0-9_-])([A-Z]{2,})-\d{2}(?!\d)/g)) set.add(m[1]);
+  for (const m of text.matchAll(/(?<![A-Za-z0-9_-])([A-Z]{2,})-\d{2}(?!\d)/g)) set.add(m[1]);
   return [...set];
 }
 
@@ -232,6 +291,7 @@ export function parseStageMap(roadmap) {
 
 /** Ошибки карты требований относительно списка ID спецификации. */
 export function checkMap(roadmap, specIds) {
+  if (!mapSectionLines(roadmap)) return ['карта: нет раздела «Карта требований»'];
   const errors = [];
   const known = new Set(specIds);
   const rows = parseMapRows(roadmap);
@@ -256,6 +316,8 @@ export function checkMap(roadmap, specIds) {
     } else if (section === null) {
       errors.push(`${where}: в разделе этапа нет строки «Требования.»`);
     } else {
+      for (const issue of section.issues)
+        errors.push(`${where}: строка «Требования.» (строка ${section.line}): ${issue.message}`);
       const inLine = new Set(section.ids);
       const onlyLine = [...inLine].filter((id) => !unique.includes(id)).sort(compareIds);
       const onlyMap = unique.filter((id) => !inLine.has(id)).sort(compareIds);
@@ -282,14 +344,33 @@ export function checkMap(roadmap, specIds) {
 
 // --- Ссылки в файлах ----------------------------------------------------------
 
+/** Корень git-репозитория, в котором лежит каталог cwd. */
+export function repositoryRoot(cwd) {
+  return execFileSync('git', ['rev-parse', '--show-toplevel'], {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  }).trim();
+}
+
+/** Отслеживаемые файлы в области проверки; пути от корня репозитория. */
 export function trackedFiles(root) {
-  const out = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const out = execFileSync('git', ['ls-files', '-z', '--full-name'], {
+    cwd: root,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
   return out.split('\0').filter(Boolean).filter(isInScope);
 }
 
-/** Ссылки по файлам: Map<путь, { id, line }[]>. Двоичные и отсутствующие файлы пропускаются. */
+/**
+ * Ссылки по файлам: refs — Map<путь, { id, line, source? }[]>; issues — записи,
+ * разобранные не полностью: { file, line, message }. Двоичные и отсутствующие
+ * файлы пропускаются.
+ */
 export function collectReferences(root, files, prefixes = REQUIREMENT_PREFIXES) {
   const refs = new Map();
+  const issues = [];
   for (const file of files) {
     if (BINARY_EXTENSIONS.test(file)) continue;
     let buffer;
@@ -300,61 +381,129 @@ export function collectReferences(root, files, prefixes = REQUIREMENT_PREFIXES) 
       throw error;
     }
     if (buffer.includes(0)) continue;
-    const found = expandReferences(buffer.toString('utf8'), prefixes);
-    if (found.length) refs.set(file, found);
+    const found = scanReferences(buffer.toString('utf8'), prefixes);
+    if (found.refs.length) refs.set(file, found.refs);
+    for (const issue of found.issues) issues.push({ file, ...issue });
   }
-  return refs;
+  return { refs, issues };
 }
 
+const label = (ref) => (ref.source ? `${ref.id} (из ${ref.kind} ${ref.source})` : ref.id);
+
 /**
- * Неизвестные ID вне базового списка и записи базового списка, которым
- * в файле больше не соответствует неизвестная ссылка, — ошибки.
+ * Несуществующие ID сверяются с базовым списком «файл → { ID: число вхождений }».
+ * Ошибки: ID вне списка; вхождений больше записанного (новая ссылка на
+ * устаревший ID); вхождений меньше записанного или ни одного (список
+ * нужно сократить).
  */
 export function checkReferences(refs, specIds, baseline) {
   const errors = [];
-  const unknownSets = new Map();
+  const unknownRefs = new Map();
   for (const [file, list] of refs) {
-    const allowed = new Set(baseline[file] ?? []);
-    for (const { id, line } of list) {
-      if (specIds.has(id)) continue;
-      if (!unknownSets.has(file)) unknownSets.set(file, new Set());
-      unknownSets.get(file).add(id);
-      if (!allowed.has(id)) errors.push(`${file}:${line}: ${id} нет в спецификации`);
+    for (const ref of list) {
+      if (specIds.has(ref.id)) continue;
+      if (!unknownRefs.has(file)) unknownRefs.set(file, new Map());
+      const byId = unknownRefs.get(file);
+      if (!byId.has(ref.id)) byId.set(ref.id, []);
+      byId.get(ref.id).push(ref);
     }
   }
-  for (const file of Object.keys(baseline).sort()) {
-    for (const id of baseline[file]) {
-      if (!unknownSets.get(file)?.has(id)) {
+  for (const [file, byId] of unknownRefs) {
+    for (const [id, list] of byId) {
+      const allowed = baseline[file]?.[id] ?? 0;
+      if (allowed === 0) {
+        for (const ref of list) errors.push(`${file}:${ref.line}: ${label(ref)} нет в спецификации`);
+      } else if (list.length > allowed) {
+        const extra = list[allowed];
+        errors.push(
+          `${file}:${extra.line}: ${label(extra)} нет в спецификации — вхождений ${list.length} ` +
+            `(строки ${list.map((r) => r.line).join(', ')}), в базовом списке ${allowed}: новые ссылки на него не допускаются`,
+        );
+      } else if (list.length < allowed) {
+        errors.push(
+          `${BASELINE_FILE}: ${file}: ${id} — вхождений ${list.length}, в базовом списке ${allowed}: сократите базовый список`,
+        );
+      }
+    }
+  }
+  for (const file of Object.keys(baseline).sort(compareStrings)) {
+    for (const id of Object.keys(baseline[file])) {
+      if (!unknownRefs.get(file)?.has(id)) {
         errors.push(`${BASELINE_FILE}: ${file}: ${id} — такой устаревшей ссылки в файле больше нет, уберите запись`);
       }
     }
   }
   const unknown = {};
-  for (const file of [...unknownSets.keys()].sort()) unknown[file] = [...unknownSets.get(file)].sort(compareIds);
+  for (const file of [...unknownRefs.keys()].sort(compareStrings)) {
+    unknown[file] = {};
+    for (const id of [...unknownRefs.get(file).keys()].sort(compareIds))
+      unknown[file][id] = unknownRefs.get(file).get(id).length;
+  }
   return { errors, unknown };
 }
 
 /**
- * Базовый список в том виде, в каком его оставляет Prettier (printWidth 120):
- * список ID в одну строку, если помещается, иначе по ID на строку.
+ * Базовый список в каноническом виде: файлы и ID по порядку, по строке на файл,
+ * если она помещается в 120 символов, иначе по ID на строку — как оставляет Prettier.
  */
 export function formatBaseline(unknown) {
-  const entries = Object.entries(unknown);
-  if (entries.length === 0) return '{}\n';
-  const body = entries.map(([file, ids], i) => {
-    const comma = i < entries.length - 1 ? ',' : '';
+  const files = Object.keys(unknown).sort(compareStrings);
+  if (files.length === 0) return '{}\n';
+  const body = files.map((file, i) => {
+    const comma = i < files.length - 1 ? ',' : '';
     const key = JSON.stringify(file);
-    const inline = `  ${key}: [${ids.map((id) => JSON.stringify(id)).join(', ')}]${comma}`;
+    const pairs = Object.keys(unknown[file])
+      .sort(compareIds)
+      .map((id) => `${JSON.stringify(id)}: ${unknown[file][id]}`);
+    const inline = `  ${key}: { ${pairs.join(', ')} }${comma}`;
     if (inline.length <= 120) return inline;
-    return `  ${key}: [\n${ids.map((id) => `    ${JSON.stringify(id)}`).join(',\n')}\n  ]${comma}`;
+    return `  ${key}: {\n${pairs.map((p) => `    ${p}`).join(',\n')}\n  }${comma}`;
   });
   return `{\n${body.join('\n')}\n}\n`;
+}
+
+/** Разбор базового списка: форма «файл → { ID: целое > 0 }» и канонический вид (без повторов, по порядку). */
+export function parseBaseline(raw) {
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    return {
+      baseline: {},
+      errors: [`${BASELINE_FILE}: не разобран JSON (${e.message}); перегенерируйте его: --update-baseline`],
+    };
+  }
+  const valid =
+    isPlainObject(parsed) &&
+    Object.values(parsed).every(
+      (ids) =>
+        isPlainObject(ids) &&
+        Object.keys(ids).length > 0 &&
+        Object.entries(ids).every(([id, n]) => idPattern.test(id) && Number.isInteger(n) && n > 0),
+    );
+  if (!valid) {
+    return {
+      baseline: {},
+      errors: [
+        `${BASELINE_FILE}: ожидается объект «файл → { ID: число вхождений }»; перегенерируйте его: --update-baseline`,
+      ],
+    };
+  }
+  if (formatBaseline(parsed) !== raw) {
+    return {
+      baseline: parsed,
+      errors: [
+        `${BASELINE_FILE}: не в каноническом виде (повторы, порядок файлов или ID, формат); перегенерируйте его: --update-baseline`,
+      ],
+    };
+  }
+  return { baseline: parsed, errors: [] };
 }
 
 // --- Запуск --------------------------------------------------------------------
 
 function parseArgs(argv) {
-  const options = { spec: DEFAULT_SPEC, map: null, report: false, updateBaseline: false };
+  const options = { spec: null, map: null, report: false, updateBaseline: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--spec' || arg === '--map') {
@@ -388,7 +537,7 @@ function printReport(specIds, refs, stageMap, log) {
   log('| ID | Этап | Тесты |');
   log('|---|---|---|');
   for (const id of specIds) {
-    const files = [...tests.get(id)].sort();
+    const files = [...tests.get(id)].sort(compareStrings);
     log(`| ${id} | ${stageMap?.get(id) ?? '—'} | ${files.length ? files.join(', ') : '—'} |`);
   }
   if (!stageMap) {
@@ -401,75 +550,88 @@ function printReport(specIds, refs, stageMap, log) {
   }
 }
 
-export function main(argv, { root = process.cwd(), log = console.log, error = console.error } = {}) {
+function readText(path, what) {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch (e) {
+    throw new Error(`${what} ${path} не прочитан: ${e.code ?? e.message}`);
+  }
+}
+
+function countValues(unknown) {
+  return Object.values(unknown).reduce((sum, ids) => sum + Object.keys(ids).length, 0);
+}
+
+export function main(argv, { cwd = process.cwd(), log = console.log, error = console.error } = {}) {
   let options;
+  let root;
+  let specText;
+  let roadmap = null;
   try {
     options = parseArgs(argv);
+    try {
+      root = repositoryRoot(cwd);
+    } catch {
+      throw new Error(`${cwd} не внутри git-репозитория`);
+    }
+    const specPath = options.spec ? resolve(cwd, options.spec) : resolve(root, DEFAULT_SPEC);
+    specText = readText(specPath, 'файл спецификации');
+    options.specName = relative(root, specPath);
+    if (options.map) roadmap = readText(resolve(cwd, options.map), 'файл roadmap');
   } catch (e) {
     error(`check-requirements: ${e.message}`);
     return 1;
   }
   const errors = [];
+  let referenceErrors = 0;
 
-  const specText = readFileSync(resolve(root, options.spec), 'utf8');
   const definitions = specDefinitions(specText);
   const specIds = parseSpecIds(specText);
-  if (specIds.length === 0) errors.push(`${options.spec}: не найдено ни одного ID требования`);
+  if (specIds.length === 0) errors.push(`${options.specName}: не найдено ни одного ID требования`);
   const repeated = [...new Set(definitions.filter((id, i) => definitions.indexOf(id) !== i))];
-  for (const id of repeated) errors.push(`${options.spec}: ${id} определён больше одного раза`);
-  log(`Спецификация ${options.spec}: ${specIds.length} требований (${countByPrefix(specIds)})`);
+  for (const id of repeated) errors.push(`${options.specName}: ${id} определён больше одного раза`);
+  log(`Спецификация ${options.specName}: ${specIds.length} требований (${countByPrefix(specIds)})`);
   const known = new Set(specIds);
   const prefixes = [...new Set(specIds.map((id) => id.split('-')[0]))];
 
   let stageMap = null;
-  if (options.map) {
-    const roadmap = readFileSync(resolve(root, options.map), 'utf8');
-    if (hasStageMap(roadmap)) {
-      const mapErrors = checkMap(roadmap, specIds);
-      errors.push(...mapErrors.map((e) => `${options.map}: ${e}`));
-      stageMap = parseStageMap(roadmap);
-      log(`Карта ${options.map}: ${stageMap.size} ID${mapErrors.length ? '' : ', каждый ровно в одном этапе'}`);
-    } else {
-      log(`Карта ${options.map}: раздела «Карта требований» нет, сверка карты пропущена`);
-    }
+  if (roadmap !== null) {
+    const mapErrors = checkMap(roadmap, specIds);
+    errors.push(...mapErrors.map((e) => `${options.map}: ${e}`));
+    stageMap = parseStageMap(roadmap);
+    log(`Карта ${options.map}: ${stageMap.size} ID${mapErrors.length ? '' : ', каждый ровно в одном этапе'}`);
   }
 
   // Без ID спецификации сверять ссылки не с чем: ошибка уже записана выше.
-  const files = specIds.length ? trackedFiles(root) : [];
-  const refs = collectReferences(root, files, prefixes);
-  const baselinePath = join(root, BASELINE_FILE);
-  let baseline = {};
-  if (existsSync(baselinePath)) {
-    try {
-      baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
-    } catch (e) {
-      errors.push(`${BASELINE_FILE}: не разобран JSON: ${e.message}`);
+  let refs = new Map();
+  if (specIds.length) {
+    const files = trackedFiles(root);
+    if (files.length === 0) errors.push(`в ${root} не найдено ни одного отслеживаемого файла для проверки`);
+    const collected = collectReferences(root, files, prefixes);
+    refs = collected.refs;
+    for (const issue of collected.issues) errors.push(`${issue.file}:${issue.line}: ${issue.message}`);
+    referenceErrors += collected.issues.length;
+    const total = [...refs.values()].reduce((sum, list) => sum + list.length, 0);
+    const baselinePath = join(root, BASELINE_FILE);
+    if (options.updateBaseline) {
+      const { unknown } = checkReferences(refs, known, {});
+      mkdirSync(dirname(baselinePath), { recursive: true });
+      writeFileSync(baselinePath, formatBaseline(unknown));
+      log(
+        `Базовый список ${BASELINE_FILE} записан: ${countValues(unknown)} ID в ${Object.keys(unknown).length} файлах`,
+      );
+    } else {
+      const parsed = existsSync(baselinePath)
+        ? parseBaseline(readFileSync(baselinePath, 'utf8'))
+        : { baseline: {}, errors: [] };
+      const result = checkReferences(refs, known, parsed.baseline);
+      errors.push(...parsed.errors, ...result.errors);
+      referenceErrors += parsed.errors.length + result.errors.length;
+      log(
+        `Ссылки: ${total} в ${refs.size} из ${files.length} файлов; ` +
+          `несуществующих ID (по базовому списку): ${countValues(result.unknown)} в ${Object.keys(result.unknown).length} файлах`,
+      );
     }
-    const valid =
-      baseline !== null &&
-      typeof baseline === 'object' &&
-      !Array.isArray(baseline) &&
-      Object.values(baseline).every((ids) => Array.isArray(ids) && ids.every((id) => typeof id === 'string'));
-    if (!valid) {
-      errors.push(`${BASELINE_FILE}: ожидается объект «файл → список ID»`);
-      baseline = {};
-    }
-  }
-  const total = [...refs.values()].reduce((sum, list) => sum + list.length, 0);
-  if (options.updateBaseline) {
-    const { unknown } = checkReferences(refs, known, {});
-    mkdirSync(dirname(baselinePath), { recursive: true });
-    writeFileSync(baselinePath, formatBaseline(unknown));
-    const count = Object.values(unknown).reduce((sum, ids) => sum + ids.length, 0);
-    log(`Базовый список ${BASELINE_FILE} записан: ${count} ID в ${Object.keys(unknown).length} файлах`);
-  } else {
-    const result = checkReferences(refs, known, baseline);
-    errors.push(...result.errors);
-    const count = Object.values(result.unknown).reduce((sum, ids) => sum + ids.length, 0);
-    log(
-      `Ссылки: ${total} в ${refs.size} из ${files.length} файлов; ` +
-        `несуществующих ID (по базовому списку): ${count} в ${Object.keys(result.unknown).length} файлах`,
-    );
   }
 
   if (options.report) printReport(specIds, refs, stageMap, log);
@@ -477,6 +639,7 @@ export function main(argv, { root = process.cwd(), log = console.log, error = co
   for (const e of errors) error(e);
   if (errors.length) {
     error(`check-requirements: ошибок ${errors.length}`);
+    if (referenceErrors) error(FIX_HINT);
     return 1;
   }
   log('check-requirements: OK');

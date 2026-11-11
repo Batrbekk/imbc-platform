@@ -52,7 +52,7 @@ export type DocumentStatus = (typeof DOCUMENT_STATUSES)[number];
 export const COMMODITY_GROUPS = ['A', 'B', 'C', 'D', 'E'] as const;
 export type CommodityGroup = (typeof COMMODITY_GROUPS)[number];
 
-/** Роль контакта (MAN-20). */
+/** Роль контакта (MAN-13). */
 export const CONTACT_ROLES = ['management', 'technical', 'commercial'] as const;
 export type ContactRole = (typeof CONTACT_ROLES)[number];
 
