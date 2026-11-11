@@ -1,9 +1,9 @@
-"use client";
-
 import type { OrganizationType, Role } from "@imbc/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
+import { useNavigate } from "react-router";
+
 import { api, ApiError } from "./api";
+import { leaveApp } from "./leave-app";
 
 export { authDestination } from "./auth-navigation";
 
@@ -30,17 +30,18 @@ export function useMe() {
 
 export function useLogout() {
   const client = useQueryClient();
-  const router = useRouter();
+  const navigate = useNavigate();
   return useMutation({
     mutationFn: () => api<{ redirectTo: string }>("/auth/logout", { method: "POST" }),
     onSuccess: ({ redirectTo }) => {
       client.clear();
-      window.location.assign(redirectTo);
+      // Адрес выхода из IdP обслуживает не SPA.
+      leaveApp(redirectTo);
     },
     onError: (error) => {
       if (error instanceof ApiError && error.status === 401) {
         client.clear();
-        router.replace("/login");
+        void navigate("/login", { replace: true });
       }
     },
   });

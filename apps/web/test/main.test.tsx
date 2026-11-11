@@ -16,7 +16,7 @@ vi.mock("@/app", () => ({ App: () => <p>app</p> }));
 
 const FLAG = "imbc:startup-reload";
 
-// vitest запускается из каталога пакета (apps/web-spa).
+// vitest запускается из каталога пакета (apps/web).
 const INDEX_HTML = resolve(process.cwd(), "index.html");
 
 // Тело настоящего index.html: статичное сообщение о сбое старта живёт в нём, без файла переводов.

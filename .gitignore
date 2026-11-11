@@ -1,6 +1,5 @@
 node_modules/
 dist/
-.next/
 .turbo/
 coverage/
 *.log
@@ -9,7 +8,6 @@ coverage/
 !.env.example
 .DS_Store
 *.tsbuildinfo
-next-env.d.ts
 .deployed-source-commit
 __pycache__/
 *.py[cod]

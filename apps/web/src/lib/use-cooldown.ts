@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /** Uses a deadline so switching tabs does not extend a resend cooldown. */

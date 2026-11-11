@@ -1,6 +1,5 @@
 **/node_modules
 **/dist
-**/.next
 **/.turbo
 **/coverage
 **/*.tsbuildinfo
@@ -11,4 +10,3 @@
 .github
 docs
 *.md
-!apps/web/AGENTS.md

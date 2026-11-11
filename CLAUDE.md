@@ -1,6 +1,6 @@
 # IMBC Platform
 
-Реестр проверенных казахстанских производителей для IMBC, операторов и наблюдателей. Монорепозиторий: `apps/api` (NestJS: API + BFF, worker, migrate), `apps/web` (Next.js App Router, shadcn/ui), `packages/contracts` (общие схемы, перечисления, матрица прав).
+Реестр проверенных казахстанских производителей для IMBC, операторов и наблюдателей. Монорепозиторий: `apps/api` (NestJS: API + BFF, worker, migrate), `apps/web` (React + Vite SPA, React Router, shadcn/ui на Base UI `base-nova`), `packages/contracts` (общие схемы, перечисления, матрица прав).
 
 @AGENTS.md
 

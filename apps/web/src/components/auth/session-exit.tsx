@@ -1,11 +1,11 @@
-"use client";
+import { useTranslations } from "use-intl";
 
-import { useTranslations } from "next-intl";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useLogout } from "@/lib/session";
 
+/** Выход или вход другим адресом со страниц второго фактора и ответственности. */
 export function SessionExit({ changeAccount = false }: { changeAccount?: boolean }) {
   const t = useTranslations("auth");
   const logout = useLogout();
