@@ -27,10 +27,17 @@ export function safeReturnTo(value: unknown, fallback = '/'): string {
  * Стартовая страница роли после входа. У оператора, наблюдателя и директора IMBC — дашборд
  * (OPR-31). У SME — каталог, пока нет очереди проверки. Роль вправе открыть свою
  * стартовую страницу по матрице прав: `/dashboard` — `dashboard.read`, `/catalog` — `catalog.search`.
+ * Таблица по всем ролям: новая роль без стартовой страницы не компилируется.
  */
+const ROLE_HOME: Record<Role, string> = {
+  manufacturer: '/profile',
+  expert: '/catalog',
+  administrator: '/account',
+  director: '/dashboard',
+  operator: '/dashboard',
+  observer: '/dashboard',
+};
+
 export function roleHome(role: Role): string {
-  if (role === 'manufacturer') return '/profile';
-  if (role === 'administrator') return '/account';
-  if (role === 'expert') return '/catalog';
-  return '/dashboard';
+  return ROLE_HOME[role];
 }

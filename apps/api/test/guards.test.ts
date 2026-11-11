@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ProblemException } from '../src/common/problem.js';
 import type { AuthContext } from '../src/modules/auth/auth.types.js';
 import { Can, Public, SessionGuard } from '../src/modules/auth/guards.js';
+import { ORGANIZATION_TYPE } from './support/organization-type.js';
 
 class Routes {
   @Public() open() {}
@@ -37,8 +38,7 @@ function auth(role: AuthContext['user']['role'], over: Partial<AuthContext> = {}
       fullName: null,
       role,
       organizationId: 'o',
-      // Наблюдатель состоит в организации типа observer (раздел 3.1).
-      organizationType: role === 'observer' ? 'observer' : 'operator',
+      organizationType: ORGANIZATION_TYPE[role],
       locale: 'kk',
     },
     ...over,

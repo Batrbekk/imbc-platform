@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, Inject, Logger, Post, Query, Req, Res 
 import { ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { can, LOCALES, roleHome, safeReturnTo } from '@imbc/contracts';
+import { LOCALES, roleHome, safeReturnTo } from '@imbc/contracts';
 import { AuditService } from '../../common/audit.service.js';
 import { parseOrThrow, ProblemException } from '../../common/problem.js';
 import { ENV, type Env } from '../../config/env.js';
@@ -10,6 +10,7 @@ import { MailService } from '../../mail/mail.service.js';
 import type { AuthContext } from './auth.types.js';
 import { sign, unsign } from './crypto.js';
 import { otpDeliveryFor } from './development-otp.js';
+import { postLoginPath } from './post-login.js';
 import { AllowMfaPending, AllowResponsibilityPending, Auth, Public, SignedBackchannel } from './guards.js';
 import { OidcService } from './oidc.service.js';
 import { ABSOLUTE_TIMEOUT_MS, OTP_TTL_MS, SessionService, TRUSTED_DEVICE_MS } from './session.service.js';
@@ -167,13 +168,7 @@ export class AuthController {
       ...this.sessions.cookieBase,
       maxAge: ABSOLUTE_TIMEOUT_MS,
     });
-    let returnTo = safeReturnTo(flow.r, roleHome(current.role));
-    if (
-      returnTo === '/' ||
-      (returnTo.startsWith('/catalog') && !can(current.role, 'catalog.search')) ||
-      (returnTo.startsWith('/dashboard') && !can(current.role, 'dashboard.read'))
-    )
-      returnTo = roleHome(current.role);
+    const returnTo = postLoginPath(current.role, flow.r);
     const next = session.mfaPassed ? returnTo : `/auth/verify?returnTo=${encodeURIComponent(returnTo)}`;
     return res.redirect(302, next);
   }

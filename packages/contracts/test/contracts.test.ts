@@ -236,7 +236,7 @@ describe('PolicyMatrix (раздел 4 v1.3; GEN-03, GEN-04, GEN-10, GEN-13)', (
     },
   };
 
-  it('матрица целиком совпадает с разделом 4 (GEN-08, GEN-10)', () => {
+  it('матрица целиком совпадает с разделом 4 (GEN-10)', () => {
     // Сначала имена: опечатка в таблице даёт понятное сообщение, а не только разницу матриц.
     const known = new Set(Object.values(POLICY_MATRIX).flatMap((r) => Object.keys(r)));
     for (const action of Object.values(SECTION_4).flatMap((r) => Object.keys(r) as Action[]))
