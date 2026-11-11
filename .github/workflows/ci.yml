@@ -35,7 +35,8 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # ID требований в файлах сверяются со спецификацией v1.3 (NFR-12).
+      # ID требований в файлах сверяются со спецификацией v1.3, карта этапов
+      # docs/development-roadmap.md — с ней же: каждый ID ровно в одном этапе (NFR-12).
       - run: node --test scripts/check-requirements.test.mjs
       - run: pnpm check:requirements
       - run: pnpm typecheck
@@ -51,6 +52,12 @@ jobs:
         run: |
           bash infrastructure/azure/test/vm-deploy.test.sh
           bash infrastructure/azure/test/setup-github-deploy.test.sh
+      # Синтаксис web.conf — nginx из того же образа, что в web.Dockerfile: ошибка в файле
+      # останавливает сборку, а не развёртывание.
+      - name: nginx -t for web.conf
+        run: |
+          image="$(sed -n 's/^ARG NGINX_IMAGE=//p' infrastructure/docker/web.Dockerfile)"
+          docker run --rm --entrypoint nginx -v "$PWD/infrastructure/nginx/web.conf:/etc/nginx/conf.d/default.conf:ro" "$image" -t
 
   integration:
     name: API integration tests (PostgreSQL 18)

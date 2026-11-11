@@ -138,7 +138,8 @@ export function parseSpecIds(text) {
  * - дефис-минус и ровно две цифры вместо тире;
  * - после «,» или «;» — диапазон из двух номеров без префикса, как в нотации
  *   карты, если за ним конец строки, знак препинания или ID (за ним слово —
- *   «15–20 минут» — это обычный текст, не ошибка).
+ *   «15–20 минут» — это обычный текст, не ошибка; точка с цифрой после неё —
+ *   дата «11–12.11.2026», тоже не ошибка).
  * Примеры — в scripts/check-requirements.test.mjs (здесь они сработали бы).
  */
 export function scanReferences(text, prefixes = REQUIREMENT_PREFIXES) {
@@ -155,7 +156,7 @@ export function scanReferences(text, prefixes = REQUIREMENT_PREFIXES) {
   const brokenTail = new RegExp(`^(?:(?:${rangeSeparators})(?=\\d(?!\\d)|[A-Z]+-\\d)|\\/(?=\\d(?!\\d)))`);
   const hyphenTail = /^-\d{2}(?!\d)/;
   const bareNumbers = new RegExp(
-    `^\\s*[,;]\\s*\\d{2}(?!\\d)\\s*(?:${rangeSeparators}|-)\\s*\\d{2}(?!\\d)(?=\\s*(?:$|[,;.)\\]|]|[A-Z]+-\\d{2}))`,
+    `^\\s*[,;]\\s*\\d{2}(?!\\d)\\s*(?:${rangeSeparators}|-)\\s*\\d{2}(?!\\d)(?=\\s*(?:$|[,;)\\]|]|\\.(?!\\d)|[A-Z]+-\\d{2}))`,
   );
   const dateTail = /^\/\d{3,}/;
 

@@ -137,6 +137,7 @@ test('запись, разобранная не полностью, — ошиб
   assert.match(issues('AUTH-01–05, 08–10').join('\n'), /без префикса/);
   assert.match(issues('AUTH-01–05, 08–10).').join('\n'), /без префикса/);
   assert.match(issues('AUTH-01–05; 08–10, AUTH-12').join('\n'), /без префикса/);
+  assert.match(issues('GEN-08, 15–20.').join('\n'), /без префикса/);
   assert.match(issues('AUTH-01-05').join('\n'), /дефис/);
   assert.match(issues('OPR-35…31').join('\n'), /обратный/);
   assert.match(issues('OPR-31…3').join('\n'), /не разворачивается/);
@@ -169,6 +170,7 @@ test('обычный текст рядом с ID ошибкой не счита�
     'UPD-04 – профиль остаётся',
     'IMBC-10 v1.3',
     'AUTH-03 от 11-11-2026',
+    'AUTH-03, 11–12.11.2026',
   ]) {
     assert.deepEqual(scanReferences(text).issues, [], text);
   }
