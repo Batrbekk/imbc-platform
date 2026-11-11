@@ -36,6 +36,16 @@ describe("файлы переводов", () => {
     }
   });
 
+  it("числа и даты не форматируются внутри сообщений: только готовые строки из useFormat (LANG-04)", () => {
+    // `#`, `{x, number}`, `{x, date}`, `{x, time}` форматирует Intl с языком интерфейса —
+    // для kk в Chrome это корневой шаблон («1,234»). Готовую строку даёт src/i18n/format.ts.
+    for (const locale of LOCALES) {
+      for (const [path, text] of entries(messages[locale])) {
+        expect(String(text), `${locale}: ${path}`).not.toMatch(/#|,\s*(number|date|time)\s*[,}]/);
+      }
+    }
+  });
+
   it("пустых строк нет", () => {
     for (const locale of LOCALES) {
       for (const [path, text] of entries(messages[locale])) {

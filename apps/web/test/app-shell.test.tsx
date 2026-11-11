@@ -145,9 +145,11 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     stubApi({ "GET /api/auth/me": () => new Promise<Response>(() => {}) as unknown as Response });
     renderRoute("/dashboard", { locale: "ru" });
 
-    expect(await screen.findByText(ru.auth.checkingSession)).toBeTruthy();
+    // Тот же индикатор показывает и HydrateFallback, пока грузятся чанки, — с названием платформы;
+    // заголовок страницы ставит оболочка, когда её чанк загрузился, а сеанс ещё проверяется.
+    await waitFor(() => expect(document.title).toBe(`${ru.dashboard.title} · ${ru.common.appName}`));
+    expect(screen.getByText(ru.auth.checkingSession)).toBeTruthy();
     expect(document.querySelectorAll("title")).toHaveLength(1);
-    expect(document.title).toBe(`${ru.dashboard.title} · ${ru.common.appName}`);
     expect(screen.queryByRole("heading", { name: ru.dashboard.title })).toBeNull();
   });
 
@@ -293,5 +295,24 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     const alert = await screen.findByRole("alert");
     expect(within(alert).getByText(kk.auth.logoutError)).toBeTruthy();
     expect(leaveApp).not.toHaveBeenCalled();
+  });
+
+  it("кнопка выхода в подвале меню называет действие и содержит видимый адрес (WCAG 2.5.3)", async () => {
+    for (const [locale, messages] of [
+      ["kk", kk],
+      ["ru", ru],
+      ["en", en],
+    ] as const) {
+      stubWorkspace(me("observer"));
+      renderRoute("/catalog", { locale });
+
+      const visible = await screen.findByText("observer@observer.local");
+      const button = visible.closest("button")!;
+      const name = messages.nav.signOutAs.replace("{email}", "observer@observer.local");
+      expect(screen.getByRole("button", { name })).toBe(button);
+      expect(name).toContain(messages.common.signOut);
+      expect(name).toContain(visible.textContent);
+      cleanup();
+    }
   });
 });

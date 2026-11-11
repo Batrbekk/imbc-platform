@@ -1,9 +1,10 @@
 import type { Locale } from "@imbc/contracts";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useFormatter, useTranslations } from "use-intl";
+import { useTranslations } from "use-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { LocaleSwitcher } from "@/components/app/locale-switcher";
+import { useFormat } from "@/i18n/format";
 import { loadMessages } from "@/i18n/messages";
 import { I18nProvider, useLocaleSwitch } from "@/i18n/provider";
 import { reloadApp } from "@/lib/leave-app";
@@ -20,17 +21,21 @@ vi.mock("@/i18n/messages", async (importOriginal) => {
 });
 vi.mock("@/lib/leave-app", () => ({ leaveApp: vi.fn(), reloadApp: vi.fn() }));
 
-const INSTANT = new Date("2026-11-11T20:00:00Z");
+// 19:30 UTC 14 октября — уже 15 октября в Алматы (UTC+5).
+const INSTANT = new Date("2026-10-14T19:30:00Z");
 
 function FormatProbe() {
-  const format = useFormatter();
+  const format = useFormat();
   return (
     <>
       <p data-testid="number">{format.number(1234567.5)}</p>
-      <p data-testid="date">{format.dateTime(INSTANT, { dateStyle: "medium" })}</p>
+      <p data-testid="date">{format.date(INSTANT)}</p>
+      <p data-testid="dateTime">{format.dateTime(INSTANT)}</p>
     </>
   );
 }
+
+const text = (id: string) => screen.getByTestId(id).textContent;
 
 function SwitcherProbe() {
   const t = useTranslations("common");
@@ -71,7 +76,7 @@ afterEach(() => {
 });
 
 describe("языки интерфейса", () => {
-  it("числа и даты следуют языку и часовому поясу Asia/Almaty (LANG-04)", () => {
+  it("ru и en: числа и даты по правилам языка в часовом поясе Asia/Almaty (LANG-04, DATA-08)", () => {
     const cases: [Locale, typeof en][] = [
       ["ru", ru],
       ["en", en],
@@ -82,13 +87,32 @@ describe("языки интерфейса", () => {
           <FormatProbe />
         </I18nProvider>,
       );
-      expect(screen.getByTestId("number").textContent).toBe(new Intl.NumberFormat(locale).format(1234567.5));
-      expect(screen.getByTestId("date").textContent).toBe(
-        new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone: "Asia/Almaty" }).format(INSTANT),
+      const zone = { timeZone: "Asia/Almaty" } as const;
+      expect(text("number")).toBe(new Intl.NumberFormat(locale).format(1234567.5));
+      expect(text("date")).toBe(new Intl.DateTimeFormat(locale, { dateStyle: "medium", ...zone }).format(INSTANT));
+      expect(text("dateTime")).toBe(
+        new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short", ...zone }).format(INSTANT),
       );
-      if (locale === "en") expect(screen.getByTestId("date").textContent).toBe("Nov 12, 2026");
       unmount();
     }
+    render(
+      <I18nProvider initialLocale="en" initialMessages={en}>
+        <FormatProbe />
+      </I18nProvider>,
+    );
+    expect(text("date")).toBe("Oct 15, 2026");
+  });
+
+  it("kk: дата dd.MM.yyyy, дата и время dd.MM.yyyy, HH:mm, число с пробелом и запятой (LANG-01, LANG-04)", () => {
+    render(
+      <I18nProvider initialLocale="kk" initialMessages={kk}>
+        <FormatProbe />
+      </I18nProvider>,
+    );
+    expect(text("date")).toBe("15.10.2026");
+    expect(text("dateTime")).toBe("15.10.2026, 00:30");
+    // Разделитель разрядов — пробел (какой именно, не важно), дробная часть — после запятой.
+    expect(text("number")).toMatch(/^1\s234\s567,5$/);
   });
 
   it("переключатель меняет язык без перезагрузки и не трогает адрес (LANG-01, OPR-05)", async () => {

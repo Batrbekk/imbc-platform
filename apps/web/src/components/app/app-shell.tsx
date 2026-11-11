@@ -129,10 +129,12 @@ export function AppShell() {
           )}
           <SidebarMenu>
             <SidebarMenuItem>
+              {/* Видимый текст — адрес; имя кнопки называет действие и содержит этот адрес (WCAG 2.5.3). */}
               <SidebarMenuButton
                 onClick={() => logout.mutate()}
                 disabled={logout.isPending}
                 tooltip={t("common.signOut")}
+                aria-label={t("nav.signOutAs", { email: me.data.user.email })}
               >
                 <LogOutIcon />
                 <span className="truncate">{me.data.user.email}</span>
@@ -144,7 +146,10 @@ export function AppShell() {
       <SidebarInset>
         <header className="flex h-14 items-center gap-2 border-b px-4">
           <SidebarTrigger aria-label={t("nav.toggleSidebar")} />
-          <Separator orientation="vertical" className="mr-2 h-4" />
+          {/* base-nova задаёт вертикальному разделителю data-vertical:self-stretch: с явной высотой
+              stretch не растягивает, и линия встаёт к верху шапки, а не по центру. Высота и выравнивание —
+              как в блоке sidebar-07 base-nova. */}
+          <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" />
           <div className="flex-1" />
           <LocaleSwitcher />
         </header>

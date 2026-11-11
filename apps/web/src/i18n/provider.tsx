@@ -4,6 +4,7 @@ import { IntlProvider } from "use-intl";
 
 import { reloadApp } from "@/lib/leave-app";
 
+import { TIME_ZONE } from "./format";
 import { localeCookie } from "./locale";
 import { loadMessages, type Messages } from "./messages";
 
@@ -17,7 +18,8 @@ const LocaleSwitchContext = createContext<LocaleSwitch | null>(null);
 
 /**
  * Переводы и форматы для всего приложения. Даты и числа — по выбранному языку
- * и в часовом поясе Казахстана (LANG-04, DATA-08).
+ * и в часовом поясе Казахстана (LANG-04, DATA-08); страницы форматируют их через
+ * `useFormat` (`./format.ts`), а не `useFormatter`.
  */
 export function I18nProvider({
   initialLocale,
@@ -58,7 +60,7 @@ export function I18nProvider({
 
   return (
     <LocaleSwitchContext value={value}>
-      <IntlProvider locale={current.locale} messages={current.messages} timeZone="Asia/Almaty">
+      <IntlProvider locale={current.locale} messages={current.messages} timeZone={TIME_ZONE}>
         {children}
       </IntlProvider>
     </LocaleSwitchContext>

@@ -22,6 +22,7 @@
     "account": "Моя учётная запись",
     "toggleSidebar": "Показать или скрыть меню",
     "sheetTitle": "Меню",
+    "signOutAs": "Выйти ({email})",
     "sheetDescription": "Разделы платформы"
   },
   "login": {
@@ -125,7 +126,7 @@
     "sortName": "По названию",
     "sortVerified": "По дате верификации",
     "sortRegion": "По региону",
-    "found": "{count, plural, one {Найдена # компания} few {Найдено # компании} many {Найдено # компаний} other {Найдено # компании}}",
+    "found": "{count, plural, one {Найдена {total} компания} few {Найдено {total} компании} many {Найдено {total} компаний} other {Найдено {total} компании}}",
     "empty": "Ничего не найдено. Измените фильтры.",
     "copyLink": "Скопировать ссылку",
     "linkCopied": "Ссылка с фильтрами скопирована",

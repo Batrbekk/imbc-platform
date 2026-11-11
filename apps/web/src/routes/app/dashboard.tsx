@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
-import { useFormatter, useTranslations } from "use-intl";
+import { useTranslations } from "use-intl";
 
 import { PageTitle } from "@/components/app/page-title";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useFormat } from "@/i18n/format";
 import { api } from "@/lib/api";
 import { serializeCatalog } from "@/lib/catalog-params";
 
@@ -34,7 +35,7 @@ export function DashboardPage() {
 function DashboardView() {
   const t = useTranslations("dashboard");
   const common = useTranslations("common");
-  const format = useFormatter();
+  const format = useFormat();
   const { data, isError, refetch } = useQuery({
     queryKey: ["dashboard"],
     queryFn: () => api<Dashboard>("/v1/dashboard"),
@@ -137,7 +138,7 @@ function DashboardView() {
 
       <p className="text-xs text-muted-foreground">
         {t("generatedAt", {
-          time: format.dateTime(new Date(data.generatedAt), { timeStyle: "short", dateStyle: "short" }),
+          time: format.dateTime(data.generatedAt),
         })}
       </p>
     </div>

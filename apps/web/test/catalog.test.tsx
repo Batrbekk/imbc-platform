@@ -158,8 +158,23 @@ describe("каталог (OPR-04, OPR-05)", () => {
     await user.click(await screen.findByRole("button", { name: en.catalog.copyLink }));
 
     expect(await screen.findByText(en.catalog.linkCopied)).toBeTruthy();
-    const copied = new URL(await navigator.clipboard.readText());
-    expect(copied.pathname + copied.search).toBe("/catalog?region=KZ-ATY,KZ-MAN&surveyed=true");
+    // Абсолютный адрес, как его даёт сам браузер.
+    expect(await navigator.clipboard.readText()).toBe(
+      `${window.location.origin}/catalog?region=KZ-ATY,KZ-MAN&surveyed=true`,
+    );
+  });
+
+  it("«Скопировать ссылку»: кириллица в поиске закодирована, как в адресной строке (OPR-05)", async () => {
+    stubCatalog();
+    const { user } = renderRoute("/catalog?region=KZ-ATY", { locale: "en" });
+
+    await user.type(await screen.findByPlaceholderText(en.catalog.query), "труба");
+    await user.click(screen.getByRole("button", { name: en.catalog.copyLink }));
+
+    expect(await screen.findByText(en.catalog.linkCopied)).toBeTruthy();
+    expect(await navigator.clipboard.readText()).toBe(
+      `${window.location.origin}/catalog?q=%D1%82%D1%80%D1%83%D0%B1%D0%B0&region=KZ-ATY`,
+    );
   });
 
   it("быстрый ввод пяти символов — один запрос после задержки, с query string страницы (OPR-05)", async () => {
@@ -186,8 +201,7 @@ describe("каталог (OPR-04, OPR-05)", () => {
     await user.click(screen.getByRole("button", { name: en.catalog.copyLink }));
 
     expect(await screen.findByText(en.catalog.linkCopied)).toBeTruthy();
-    const copied = new URL(await navigator.clipboard.readText());
-    expect(copied.pathname + copied.search).toBe("/catalog?q=pipe&region=KZ-ATY");
+    expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/catalog?q=pipe&region=KZ-ATY`);
   });
 
   it("буфер обмена недоступен — сообщение об ошибке вместо необработанного отказа", async () => {

@@ -5,7 +5,7 @@ import { CheckIcon, ChevronsUpDownIcon, LinkIcon, SearchIcon, XIcon } from "luci
 import { createLoader, debounce, useQueryStates } from "nuqs";
 import { useLocation } from "react-router";
 import { toast } from "sonner";
-import { useFormatter, useTranslations } from "use-intl";
+import { useTranslations } from "use-intl";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useFormat } from "@/i18n/format";
 import { api } from "@/lib/api";
 import { catalogParsers, serializeCatalog } from "@/lib/catalog-params";
 
@@ -29,7 +30,7 @@ const fromTri = (v: string): boolean | null => (v === "any" ? null : v === "true
 export function CatalogView() {
   const t = useTranslations("catalog");
   const common = useTranslations("common");
-  const format = useFormatter();
+  const format = useFormat();
   // Каждое изменение фильтра — новый адрес; history: push, чтобы «назад» возвращал прошлый поиск.
   // shallow: false — адаптер nuqs сообщает адрес и роутеру: иначе useLocation() в AppShell не видел бы
   // новых фильтров, и возврат после истёкшего сеанса потерял бы их.
@@ -72,7 +73,8 @@ export function CatalogView() {
 
   const copyLink = async () => {
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}${pathname}${shown}`);
+      // Адрес строит URL, как и сам браузер: абсолютный, не-ASCII символы закодированы (OPR-05).
+      await navigator.clipboard.writeText(new URL(pathname + shown, window.location.origin).href);
       toast.success(t("linkCopied"));
     } catch {
       // Буфер обмена недоступен (нет разрешения, не HTTPS): сообщение вместо необработанной ошибки.
@@ -186,7 +188,9 @@ export function CatalogView() {
         </Button>
       </div>
 
-      <div className="text-sm text-muted-foreground">{result.data && t("found", { count: total })}</div>
+      <div className="text-sm text-muted-foreground">
+        {result.data && t("found", { count: total, total: format.number(total) })}
+      </div>
 
       <div className={cn("rounded-lg border", result.isFetching && "opacity-70 transition-opacity")}>
         <Table>
@@ -226,9 +230,7 @@ export function CatalogView() {
                   ))}
                 </TableCell>
                 <TableCell className="text-xs">{c.certificateTypes.join(", ") || "—"}</TableCell>
-                <TableCell className="text-xs">
-                  {c.verifiedAt ? format.dateTime(new Date(c.verifiedAt), { dateStyle: "medium" }) : "—"}
-                </TableCell>
+                <TableCell className="text-xs">{c.verifiedAt ? format.date(c.verifiedAt) : "—"}</TableCell>
                 <TableCell>
                   <Badge variant={c.updateStatus === "active" ? "default" : "outline"}>
                     {t(`status.${c.updateStatus}`)}

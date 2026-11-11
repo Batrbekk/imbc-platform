@@ -22,6 +22,7 @@
     "account": "My account",
     "toggleSidebar": "Show or hide the menu",
     "sheetTitle": "Menu",
+    "signOutAs": "Sign out ({email})",
     "sheetDescription": "Platform sections"
   },
   "login": {
@@ -125,7 +126,7 @@
     "sortName": "By name",
     "sortVerified": "By verification date",
     "sortRegion": "By region",
-    "found": "{count, plural, one {# company found} other {# companies found}}",
+    "found": "{count, plural, one {{total} company found} other {{total} companies found}}",
     "empty": "Nothing found. Change the filters.",
     "copyLink": "Copy link",
     "linkCopied": "Link with filters copied",

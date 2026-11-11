@@ -22,6 +22,7 @@
     "account": "Менің тіркелгім",
     "toggleSidebar": "Мәзірді көрсету немесе жасыру",
     "sheetTitle": "Мәзір",
+    "signOutAs": "Шығу ({email})",
     "sheetDescription": "Платформа бөлімдері"
   },
   "login": {
@@ -125,7 +126,7 @@
     "sortName": "Атауы бойынша",
     "sortVerified": "Верификация күні бойынша",
     "sortRegion": "Өңір бойынша",
-    "found": "{count, plural, other {# компания табылды}}",
+    "found": "{count, plural, other {{total} компания табылды}}",
     "empty": "Ештеңе табылмады. Сүзгілерді өзгертіңіз.",
     "copyLink": "Сілтемені көшіру",
     "linkCopied": "Сүзгілері бар сілтеме көшірілді",

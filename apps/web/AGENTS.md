@@ -12,6 +12,7 @@
 
 - All routes are in `src/router.tsx`. Keep the existing addresses: `/`, `/login`, `/register`, `/auth/verify`, `/auth/responsibility`, `/catalog`, `/dashboard`, `/account`, `/profile`. BFF redirects point at them.
 - Application pages and the `AppShell` layout are `lazy` routes (one chunk each); the root route has `ErrorBoundary` (`src/routes/route-error.tsx`, one guarded reload on a failed chunk) and `HydrateFallback`. `"*"` stays last.
+- Each page renders one `PageTitle` (`src/components/app/page-title.tsx`). It sets `document.title`, which updates the single `<title>` of `index.html`; do not render `<title>` elements, React 19 would hoist a second one into `<head>`.
 - Links to `/api/*` and `/kc/*` are plain `<a href>` or `leaveApp()` from `src/lib/leave-app.ts` — never React Router `Link` or `navigate`: the BFF and Keycloak serve them, not the SPA.
 
 ## Base UI rules (differences from Radix)
@@ -30,7 +31,8 @@
 ## Translations and language
 
 - Texts live in `messages/{en,kk,ru}.json`. English is the source file; the three files have the same keys (a test checks this). Every new text is added in all three languages at once.
-- Dates and numbers go through `useFormatter`; `IntlProvider` (`src/i18n/provider.tsx`) sets `timeZone="Asia/Almaty"`.
+- Dates and numbers go through `useFormat` from `src/i18n/format.ts` (`date`, `dateTime`, `number`), never `useFormatter`, `Intl` or `toLocale*String` directly (ESLint enforces it). Chrome has no ICU data for `kk` and silently falls back to the root pattern (`2026 M10 15`, `1,234,567.5`), so Kazakh is formatted there without locale data: `dd.MM.yyyy`, `dd.MM.yyyy, HH:mm`, a no-break space between digit groups and a comma before decimals. Russian and English go through use-intl. The time zone is `TIME_ZONE` (`Asia/Almaty`), also set on `IntlProvider` (`src/i18n/provider.tsx`).
+- Messages do not format numbers or dates themselves: no `#`, `{x, number}`, `{x, date}` or `{x, time}` (a test checks this). Pass the plural count and a ready string, e.g. `t("found", { count, total: format.number(count) })` with `{count, plural, other {{total} …}}`.
 - The language is the cookie `NEXT_LOCALE` (no locale prefix in the address). Do not rename it: the IMBC Keycloak theme (`infrastructure/keycloak/identity`) writes the same cookie. An unknown value or no cookie means Kazakh (`DEFAULT_LOCALE` from `@imbc/contracts`).
 
 ## Catalog filters
