@@ -41,4 +41,25 @@ describe("состояние страницы входа", () => {
     expect(resolveLoginState(new URLSearchParams("logged_out=1&error=oidc"), "kk")).toMatchObject({ kind: "error" });
     expect(resolveLoginState(new URLSearchParams("logged_out=0"), "kk")).toMatchObject({ kind: "redirect" });
   });
+
+  it("пустой error — как без ошибки; повторённый error — по первому значению", () => {
+    expect(resolveLoginState(new URLSearchParams("error=&returnTo=/catalog"), "kk")).toEqual({
+      kind: "redirect",
+      url: "/api/auth/login?returnTo=%2Fcatalog&locale=kk",
+    });
+    expect(resolveLoginState(new URLSearchParams("error=&logged_out=1"), "kk")).toEqual({
+      kind: "signedOut",
+      target: "/",
+    });
+    // Next в этом случае получал массив и уводил в BFF; BFF такой адрес не формирует.
+    expect(resolveLoginState(new URLSearchParams("error=no_account&error=oidc"), "kk")).toEqual({
+      kind: "error",
+      error: "no_account",
+      target: "/",
+    });
+    expect(resolveLoginState(new URLSearchParams("error=whatever&error=no_account"), "kk")).toMatchObject({
+      kind: "error",
+      error: "oidc",
+    });
+  });
 });

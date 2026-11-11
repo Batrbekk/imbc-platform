@@ -33,6 +33,30 @@ function me(gates: Me["gates"], role: Me["user"]["role"] = "operator", homePath 
   };
 }
 
+/** Адреса, по которым прошёл роутер, — чтобы проверить переход, даже если следующая страница уведёт дальше. */
+function visited(router: ReturnType<typeof renderRoute>["router"]): string[] {
+  const paths: string[] = [];
+  router.subscribe((state) => paths.push(`${state.location.pathname}${state.location.search}`));
+  return paths;
+}
+
+const FIRST11 = "98054000038";
+const BIN = `${FIRST11}${computeBinCheckDigit(FIRST11)}`;
+
+async function fillRegistration(user: ReturnType<typeof renderRoute>["user"], email = "owner@company.local") {
+  await user.type(await screen.findByLabelText(kk.register.companyName), "ТОО Тест");
+  await user.type(screen.getByLabelText(kk.register.bin), BIN);
+  await user.type(screen.getByLabelText(kk.register.email), email);
+  await user.click(screen.getByRole("checkbox", { name: kk.register.acceptTerms }));
+  await user.click(screen.getByRole("button", { name: kk.register.submit }));
+}
+
+const tooManyRequests = (seconds: number) => () =>
+  Response.json(
+    { type: "about:blank", title: "rate_limited", status: 429, code: "rate_limited" },
+    { status: 429, headers: { "retry-after": String(seconds) } },
+  );
+
 describe("вход (ADR-04, AUTH-01)", () => {
   it("/login без ошибки уводит в BFF с returnTo и языком (ADR-04)", async () => {
     renderRoute("/login?returnTo=%2Fcatalog");
@@ -57,8 +81,15 @@ describe("вход (ADR-04, AUTH-01)", () => {
       "/api/auth/password-reset?returnTo=%2F&locale=kk",
     );
     expect(document.title).toBe(`${kk.login.title} · ${kk.common.appName}`);
-    // Логотип IMBC без перерисовки (NFR-15): в шапке и в левой колонке.
-    expect(screen.getAllByRole("img", { name: kk.common.logoAlt }).length).toBeGreaterThan(0);
+    // Логотип IMBC (NFR-15) в шапке и в левой колонке декоративный: имя ссылки в шапке — название
+    // платформы на языке интерфейса при любой ширине, в колонке название идёт текстом рядом.
+    const home = screen.getByRole("link", { name: kk.common.appName });
+    expect(home.getAttribute("href")).toBe("/login");
+    expect(home.querySelector("img")?.getAttribute("alt")).toBe("");
+    const logos = [...document.querySelectorAll<HTMLImageElement>('img[src*="imbc-logo"]')];
+    expect(logos).toHaveLength(2);
+    for (const logo of logos) expect(logo.getAttribute("alt")).toBe("");
+    expect(screen.queryByRole("img", { name: kk.common.logoAlt })).toBeNull();
 
     await user.click(screen.getByRole("link", { name: kk.common.register }));
     expect(router.state.location.pathname).toBe("/register");
@@ -154,6 +185,52 @@ describe("переходы по состоянию сеанса (AUTH-03, AUTH-1
     expect(JSON.parse(String(verify?.[1]?.body))).toEqual({ code: "123456" });
   });
 
+  it("/auth/verify: 401 на отправке кода → вход с session_expired и тем же returnTo", async () => {
+    stubApi({
+      "GET /api/auth/me": { body: me({ mfa: false, responsibility: false }) },
+      "POST /api/auth/otp/send": problem(401, "unauthorized"),
+    });
+    const { router } = renderRoute("/auth/verify?returnTo=%2Fdashboard");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+    expect(router.state.location.search).toBe("?error=session_expired&returnTo=%2Fdashboard");
+    expect(leaveApp).not.toHaveBeenCalled();
+  });
+
+  it("/auth/verify: 401 на проверке кода → вход с session_expired и тем же returnTo", async () => {
+    stubApi({
+      "GET /api/auth/me": { body: me({ mfa: false, responsibility: false }) },
+      "POST /api/auth/otp/send": { body: { sent: true, retryAfter: 60 } },
+      "POST /api/auth/otp/verify": problem(401, "unauthorized"),
+    });
+    const { router, user } = renderRoute("/auth/verify?returnTo=%2Fdashboard");
+
+    await user.type(await screen.findByLabelText(kk.verify.codeLabel), "123456");
+    await user.click(screen.getByRole("button", { name: kk.verify.button }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+    expect(router.state.location.search).toBe("?error=session_expired&returnTo=%2Fdashboard");
+  });
+
+  it("/auth/verify: 429 на повторной отправке запускает отсчёт и блокирует кнопку (AUTH-03)", async () => {
+    let sends = 0;
+    stubApi({
+      "GET /api/auth/me": { body: me({ mfa: false, responsibility: false }) },
+      // Первый код уже запрошен раньше, пауза истекла — повтор доступен сразу.
+      "POST /api/auth/otp/send": () =>
+        ++sends === 1 ? Response.json({ sent: false, reason: "too_soon", retryAfter: 0 }) : tooManyRequests(30)(),
+    });
+    const { user } = renderRoute("/auth/verify?returnTo=%2Fcatalog");
+
+    expect(await screen.findByText(kk.verify.alreadyRequested)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: kk.verify.resend }));
+
+    const countdown = await screen.findByRole("button", { name: kk.verify.resendIn.replace("{seconds}", "30") });
+    expect((countdown as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("alert").textContent).toBe(kk.verify.tooSoon);
+    expect(sends).toBe(2);
+  });
+
   it("/auth/verify с пройденным вторым фактором и ответственностью → стартовая страница роли", async () => {
     stubApi({ "GET /api/auth/me": { body: me({ mfa: true, responsibility: true }) } });
     const { router } = renderRoute("/auth/verify?returnTo=/catalog");
@@ -179,6 +256,34 @@ describe("переходы по состоянию сеанса (AUTH-03, AUTH-1
     expect(
       api.mock.calls.some(([url, init]) => String(url) === "/api/auth/responsibility" && init?.method === "POST"),
     ).toBe(true);
+  });
+
+  it("/auth/responsibility: 401 mfa_required при согласии → /auth/verify с тем же returnTo", async () => {
+    stubApi({
+      "GET /api/auth/me": { body: me({ mfa: true, responsibility: false }) },
+      "POST /api/auth/responsibility": problem(401, "mfa_required"),
+    });
+    const { router, user } = renderRoute("/auth/responsibility?returnTo=%2Fdashboard");
+    const paths = visited(router);
+
+    await user.click(await screen.findByRole("button", { name: kk.responsibility.accept }));
+
+    await waitFor(() => expect(paths[0]).toBe("/auth/verify?returnTo=%2Fdashboard"));
+  });
+
+  it("/auth/responsibility: 401 истёкшего сеанса при согласии → /login?error=session_expired с тем же returnTo", async () => {
+    stubApi({
+      "GET /api/auth/me": { body: me({ mfa: true, responsibility: false }) },
+      "POST /api/auth/responsibility": problem(401, "session_expired"),
+    });
+    const { router, user } = renderRoute("/auth/responsibility?returnTo=%2Fdashboard");
+
+    await user.click(await screen.findByRole("button", { name: kk.responsibility.accept }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+    expect(router.state.location.search).toBe("?error=session_expired&returnTo=%2Fdashboard");
+    expect((await screen.findByRole("alert")).textContent).toBe(kk.login.errors.session_expired);
+    expect(leaveApp).not.toHaveBeenCalled();
   });
 
   it("/auth/responsibility без второго фактора → /auth/verify с тем же returnTo", async () => {
@@ -210,23 +315,17 @@ describe("регистрация производителя (MAN-02, AUTH-01)", 
   });
 
   it("регистрация отправляет форму с языком интерфейса и показывает ошибку БИН с сервера", async () => {
-    const first11 = "98054000038";
-    const bin = `${first11}${computeBinCheckDigit(first11)}`;
     const api = stubApi({ "POST /api/v1/registrations": problem(409, "bin_exists") });
     const { user } = renderRoute("/register");
 
-    await user.type(await screen.findByLabelText(kk.register.companyName), "ТОО Тест");
-    await user.type(screen.getByLabelText(kk.register.bin), bin);
-    await user.type(screen.getByLabelText(kk.register.email), "owner@company.local");
-    await user.click(screen.getByRole("checkbox", { name: kk.register.acceptTerms }));
-    await user.click(screen.getByRole("button", { name: kk.register.submit }));
+    await fillRegistration(user);
 
     expect(await screen.findByText(kk.register.errors.bin_exists)).toBeTruthy();
     expect(screen.getByLabelText(kk.register.bin).getAttribute("aria-invalid")).toBe("true");
     const [, init] = api.mock.calls.find(([url]) => String(url) === "/api/v1/registrations") ?? [];
     expect(JSON.parse(String(init?.body))).toEqual({
       companyName: "ТОО Тест",
-      bin,
+      bin: BIN,
       email: "owner@company.local",
       acceptTerms: true,
       locale: "kk",
@@ -243,5 +342,47 @@ describe("регистрация производителя (MAN-02, AUTH-01)", 
     expect(screen.getByText(kk.register.errors.bin_format)).toBeTruthy();
     expect(screen.getByText(kk.register.errors.terms_required)).toBeTruthy();
     expect(api).not.toHaveBeenCalled();
+  });
+
+  it("занятая почта: ошибка под полем и ссылка восстановления доступа в BFF", async () => {
+    stubApi({ "POST /api/v1/registrations": problem(409, "email_exists") });
+    const { user } = renderRoute("/register");
+
+    await fillRegistration(user);
+
+    expect(await screen.findByText(kk.register.errors.email_exists)).toBeTruthy();
+    expect(screen.getByLabelText(kk.register.email).getAttribute("aria-invalid")).toBe("true");
+    // Обычная ссылка: восстановление обслуживает BFF, а не роутер SPA.
+    const recover = screen.getByRole("link", { name: kk.register.recoverAccount });
+    expect(recover.tagName).toBe("A");
+    expect(recover.getAttribute("href")).toBe("/api/auth/password-reset?returnTo=%2F&locale=kk");
+  });
+
+  it("429 на повторной отправке письма запускает отсчёт и блокирует кнопку", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const api = stubApi({
+        "POST /api/v1/registrations": { status: 202, body: { status: "accepted" } },
+        "POST /api/v1/registrations/resend": tooManyRequests(120),
+      });
+      const { user } = renderRoute("/register");
+
+      await fillRegistration(user);
+      expect(await screen.findByText(kk.register.successTitle)).toBeTruthy();
+      // После заявки повтор доступен через минуту.
+      const resendIn = (seconds: number) => kk.register.resendIn.replace("{seconds}", String(seconds));
+      expect((screen.getByRole("button", { name: resendIn(60) }) as HTMLButtonElement).disabled).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(61_000);
+      await user.click(await screen.findByRole("button", { name: kk.register.resend }));
+
+      const countdown = await screen.findByRole("button", { name: resendIn(120) });
+      expect((countdown as HTMLButtonElement).disabled).toBe(true);
+      expect(screen.getByRole("alert").textContent).toBe(kk.register.rateLimited);
+      const [, init] = api.mock.calls.find(([url]) => String(url) === "/api/v1/registrations/resend") ?? [];
+      expect(JSON.parse(String(init?.body))).toEqual({ email: "owner@company.local" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -138,9 +138,10 @@ export function VerifyForm({ returnTo }: { returnTo: string }) {
       >
         <Field data-invalid={verify.isError || undefined} className="items-center">
           <FieldLabel htmlFor="email-code">{t("codeLabel")}</FieldLabel>
+          {/* Класс cn-input-otp в base-nova без стилей: промежуток между группами — как в Next (gap-2). */}
           <InputOTP
             id="email-code"
-            containerClassName="justify-center"
+            containerClassName="justify-center gap-2"
             maxLength={6}
             value={code}
             onChange={setCode}

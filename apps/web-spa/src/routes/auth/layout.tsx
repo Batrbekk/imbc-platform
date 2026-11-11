@@ -12,17 +12,18 @@ export function AuthLayout() {
   return (
     <div className="flex min-h-svh flex-col bg-linear-to-br from-blue-50/70 via-background to-background">
       <header className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-4 py-5 sm:px-8">
-        <Link to="/login" className="flex items-center gap-2 font-semibold tracking-tight">
-          <Logo plate className="h-6" />
+        {/* Имя ссылки — название платформы на языке интерфейса при любой ширине; логотип рядом декоративный. */}
+        <Link to="/login" aria-label={t("appName")} className="flex items-center gap-2 font-semibold tracking-tight">
+          <Logo plate decorative className="h-6" />
           <span className="hidden sm:inline">{t("appName")}</span>
         </Link>
         <LocaleSwitcher />
       </header>
       <main className="mx-auto grid w-full max-w-6xl flex-1 items-center gap-12 px-4 py-8 sm:px-8 lg:grid-cols-2 lg:gap-20">
         <section className="hidden space-y-8 lg:block">
-          {/* Логотип IMBC вместо плитки со значком (NFR-15). */}
+          {/* Логотип IMBC вместо плитки со значком (NFR-15); одна подложка. Название — в тексте ниже. */}
           <div className="inline-flex rounded-2xl bg-sidebar p-4 shadow-lg shadow-primary/15">
-            <Logo plate className="h-12" />
+            <Logo decorative className="h-12" />
           </div>
           <div className="space-y-4">
             <p className="text-sm font-semibold tracking-wide text-primary">IMBC</p>
