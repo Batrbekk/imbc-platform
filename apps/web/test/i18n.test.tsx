@@ -4,6 +4,7 @@ import { useTranslations } from "use-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { LocaleSwitcher } from "@/components/app/locale-switcher";
+import { Providers } from "@/components/app/providers";
 import { useFormat } from "@/i18n/format";
 import { loadMessages } from "@/i18n/messages";
 import { I18nProvider, useLocaleSwitch } from "@/i18n/provider";
@@ -189,7 +190,24 @@ describe("языки интерфейса", () => {
 
     expect(await screen.findByRole("heading", { name: "Страница не найдена" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "На главную" }).getAttribute("href")).toBe("/");
-    // Заголовок вкладки по шаблону Next: «%s · Платформа IMBC».
+    // Заголовок вкладки: «страница · название платформы».
     expect(document.title).toBe("Страница не найдена · Платформа IMBC");
+  });
+
+  it("область уведомлений названа на языке интерфейса", () => {
+    for (const [locale, messages] of [
+      ["kk", kk],
+      ["ru", ru],
+      ["en", en],
+    ] as const) {
+      const { unmount } = render(
+        <Providers initialLocale={locale} initialMessages={messages}>
+          <p>page</p>
+        </Providers>,
+      );
+      const region = document.querySelector("section[aria-live]");
+      expect(region?.getAttribute("aria-label"), locale).toMatch(new RegExp(`^${messages.common.notifications} `));
+      unmount();
+    }
   });
 });

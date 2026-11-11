@@ -1,4 +1,4 @@
-// Замена rewrites прежнего Next.js-приложения (next.config.ts): dev-прокси Vite на тот же origin.
+// Dev-прокси Vite: /api и /kc на том же origin, что и приложение, как за nginx на стенде.
 import { describe, expect, it } from "vitest";
 
 import { devProxy } from "../dev-proxy";
@@ -6,7 +6,7 @@ import { devProxy } from "../dev-proxy";
 const env = { API_PROXY_URL: "http://localhost:3001", KEYCLOAK_PROXY_URL: "http://localhost:8180" };
 
 describe("devProxy", () => {
-  it("проксирует /api и /kc на заданные адреса, как rewrites Next.js", () => {
+  it("проксирует /api и /kc на заданные адреса", () => {
     expect(devProxy(env)).toEqual({
       "^/api(?:[/?#]|$)": { target: "http://localhost:3001", changeOrigin: false, xfwd: true },
       "^/kc(?:[/?#]|$)": { target: "http://localhost:8180", changeOrigin: false, xfwd: true },

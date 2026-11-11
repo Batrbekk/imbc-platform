@@ -230,7 +230,7 @@ export function CatalogView() {
                   ))}
                 </TableCell>
                 <TableCell className="text-xs">{c.certificateTypes.join(", ") || "—"}</TableCell>
-                <TableCell className="text-xs">{c.verifiedAt ? format.date(c.verifiedAt) : "—"}</TableCell>
+                <TableCell className="text-xs">{format.date(c.verifiedAt)}</TableCell>
                 <TableCell>
                   <Badge variant={c.updateStatus === "active" ? "default" : "outline"}>
                     {t(`status.${c.updateStatus}`)}
@@ -260,7 +260,9 @@ export function CatalogView() {
 
       {pages > 1 && (
         <div className="flex items-center justify-end gap-2 text-sm">
-          <span className="text-muted-foreground">{t("page", { page: filters.page, pages })}</span>
+          <span className="text-muted-foreground">
+            {t("page", { page: format.number(filters.page), pages: format.number(pages) })}
+          </span>
           <Button
             variant="outline"
             size="sm"

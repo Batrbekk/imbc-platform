@@ -2,7 +2,7 @@ import { DEFAULT_LOCALE, LOCALES, type Locale } from "@imbc/contracts";
 
 /**
  * Язык интерфейса без префикса в адресе: ссылки с фильтрами одинаковы для всех языков
- * (OPR-05). Имя cookie общее с темой Keycloak, поэтому остаётся прежним (LANG-01).
+ * (OPR-05). Имя cookie общее с темой Keycloak: она пишет то же имя, и выбор языка у них общий (LANG-01).
  */
 export const LOCALE_COOKIE = "NEXT_LOCALE";
 
@@ -14,7 +14,7 @@ export function isLocale(value: unknown): value is Locale {
 
 /**
  * Язык из `document.cookie`. Браузер ставит первой cookie с более точным Path, её и берём.
- * Неизвестное значение или его отсутствие — казахский (LANG-01, GEN-20).
+ * Неизвестное значение или его отсутствие — казахский: он язык по умолчанию (LANG-01).
  */
 export function readLocale(cookie: string): Locale {
   for (const part of cookie.split(";")) {

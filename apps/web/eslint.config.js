@@ -5,6 +5,8 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
+const FORMAT_MESSAGE = "Форматируйте даты и числа через useFormat из @/i18n/format.";
+
 export default defineConfig([
   globalIgnores(["dist", "coverage"]),
   {
@@ -28,21 +30,28 @@ export default defineConfig([
       "no-restricted-imports": [
         "error",
         {
-          paths: [
-            {
-              name: "use-intl",
-              importNames: ["useFormatter", "createFormatter"],
-              message: "Форматируйте даты и числа через useFormat из @/i18n/format.",
-            },
-          ],
+          // use-intl/react и use-intl/core экспортируют те же форматтеры, что и корень пакета.
+          paths: ["use-intl", "use-intl/react", "use-intl/core"].map((name) => ({
+            name,
+            importNames: ["useFormatter", "createFormatter"],
+            message: FORMAT_MESSAGE,
+          })),
         },
       ],
       "no-restricted-properties": [
         "error",
-        { object: "Intl", message: "Форматируйте даты и числа через useFormat из @/i18n/format." },
-        { property: "toLocaleString", message: "Форматируйте даты и числа через useFormat из @/i18n/format." },
-        { property: "toLocaleDateString", message: "Форматируйте даты через useFormat из @/i18n/format." },
-        { property: "toLocaleTimeString", message: "Форматируйте время через useFormat из @/i18n/format." },
+        { property: "toLocaleString", message: FORMAT_MESSAGE },
+        { property: "toLocaleDateString", message: FORMAT_MESSAGE },
+        { property: "toLocaleTimeString", message: FORMAT_MESSAGE },
+      ],
+      "no-restricted-syntax": [
+        "error",
+        {
+          // Intl как значение: Intl.NumberFormat, globalThis.Intl, window.Intl, const { Intl } = self.
+          // Типы (Intl.DateTimeFormatOptions, typeof Intl) ничего не форматируют и разрешены.
+          selector: "Identifier[name='Intl']:not(TSQualifiedName > Identifier, TSTypeQuery > Identifier)",
+          message: FORMAT_MESSAGE,
+        },
       ],
     },
   },

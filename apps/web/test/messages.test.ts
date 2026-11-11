@@ -55,7 +55,7 @@ describe("файлы переводов", () => {
     }
   });
 
-  it("переводы v1.3 на месте, прежних ключей нет", () => {
+  it("ключи по глоссарию: observer и unresponsive, без spectator и inactive", () => {
     // Раздел 3.1 и UPD-06: observer вместо spectator, unresponsive вместо inactive.
     for (const locale of LOCALES) {
       const keys = keyPaths(locale);

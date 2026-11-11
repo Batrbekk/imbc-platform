@@ -32,7 +32,7 @@ export const routes: RouteObject[] = [
     children: [
       { index: true, element: <HomePage /> },
       {
-        // Экраны входа на прежних адресах: на них ведут редиректы BFF (ADR-04).
+        // Экраны входа: на эти адреса ведут редиректы BFF, поэтому они не меняются (ADR-04).
         element: <AuthLayout />,
         children: [
           { path: "login", element: <LoginPage /> },

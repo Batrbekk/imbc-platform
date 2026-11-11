@@ -91,6 +91,21 @@ describe("старт приложения", () => {
     expect(html).not.toMatch(/\son[a-z]+=/i);
   });
 
+  it("вкладка, восстановленная из back/forward cache, перезагружается (NFR-11)", async () => {
+    vi.mocked(loadMessages).mockResolvedValue(en);
+    const listen = vi.spyOn(window, "addEventListener");
+    try {
+      await start();
+      const handlers = listen.mock.calls.filter(([type]) => type === "pageshow").map(([, handler]) => handler);
+      expect(handlers).toHaveLength(1);
+      // Подписка этого запуска: прежние запуски в этом файле подписались своими экземплярами модуля.
+      (handlers[0] as EventListener)(new PageTransitionEvent("pageshow", { persisted: true }));
+      expect(reloadApp).toHaveBeenCalledTimes(1);
+    } finally {
+      listen.mockRestore();
+    }
+  });
+
   it("после успешного рендера флаг снимается", async () => {
     vi.mocked(loadMessages).mockResolvedValue(en);
     sessionStorage.setItem(FLAG, "1");

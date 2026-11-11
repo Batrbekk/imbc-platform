@@ -12,6 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import { useFormat } from "@/i18n/format";
 import { api, ApiError, passwordResetUrl } from "@/lib/api";
 import { useCooldown } from "@/lib/use-cooldown";
 
@@ -37,6 +38,7 @@ type ErrorCode =
 /** Заявка производителя: БИН с контрольной цифрой (MAN-02), письмо для пароля уходит с сервера (AUTH-01). */
 export function RegisterForm() {
   const t = useTranslations("register");
+  const format = useFormat();
   const common = useTranslations("common");
   const locale = useLocale();
   const [form, setForm] = useState({ companyName: "", bin: "", email: "", heardAboutUs: "", acceptTerms: false });
@@ -138,7 +140,7 @@ export function RegisterForm() {
           onClick={() => resend.mutate()}
         >
           {resend.isPending && <Spinner />}
-          {cooldown.seconds > 0 ? t("resendIn", { seconds: cooldown.seconds }) : t("resend")}
+          {cooldown.seconds > 0 ? t("resendIn", { seconds: format.number(cooldown.seconds) }) : t("resend")}
         </Button>
         <Link className={buttonVariants({ className: "w-full" })} to="/login">
           {common("signIn")}
@@ -240,7 +242,7 @@ export function RegisterForm() {
         )}
         <Button type="submit" className="w-full" size="lg" disabled={submit.isPending || cooldown.seconds > 0}>
           {submit.isPending && <Spinner />}
-          {cooldown.seconds > 0 ? t("resendIn", { seconds: cooldown.seconds }) : t("submit")}
+          {cooldown.seconds > 0 ? t("resendIn", { seconds: format.number(cooldown.seconds) }) : t("submit")}
         </Button>
         <p className="text-center text-sm text-muted-foreground">
           {t("alreadyRegistered")}{" "}

@@ -51,7 +51,7 @@ describe("состояние страницы входа", () => {
       kind: "signedOut",
       target: "/",
     });
-    // Next в этом случае получал массив и уводил в BFF; BFF такой адрес не формирует.
+    // BFF такой адрес не формирует; если он всё же пришёл, показывается ошибка по первому значению.
     expect(resolveLoginState(new URLSearchParams("error=no_account&error=oidc"), "kk")).toEqual({
       kind: "error",
       error: "no_account",

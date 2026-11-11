@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { InputOTP, InputOTPGroup, InputOTPSeparator, InputOTPSlot } from "@/components/ui/input-otp";
 import { Spinner } from "@/components/ui/spinner";
+import { useFormat } from "@/i18n/format";
 import { api, ApiError } from "@/lib/api";
 import { authDestination, meKey, useMe } from "@/lib/session";
 import { useCooldown } from "@/lib/use-cooldown";
@@ -19,6 +20,7 @@ type SendResult = { sent: boolean; reason?: string; retryAfter?: number; expires
 
 export function VerifyForm({ returnTo }: { returnTo: string }) {
   const t = useTranslations("verify");
+  const format = useFormat();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const me = useMe();
@@ -138,7 +140,7 @@ export function VerifyForm({ returnTo }: { returnTo: string }) {
       >
         <Field data-invalid={verify.isError || undefined} className="items-center">
           <FieldLabel htmlFor="email-code">{t("codeLabel")}</FieldLabel>
-          {/* Класс cn-input-otp в base-nova без стилей: промежуток между группами — как в Next (gap-2). */}
+          {/* Класс cn-input-otp в base-nova без стилей: промежуток между группами цифр задаёт gap-2. */}
           <InputOTP
             id="email-code"
             containerClassName="justify-center gap-2"
@@ -189,7 +191,7 @@ export function VerifyForm({ returnTo }: { returnTo: string }) {
         >
           {send.isPending && <Spinner />}
           {cooldown.seconds > 0
-            ? t(developmentCode ? "developmentResendIn" : "resendIn", { seconds: cooldown.seconds })
+            ? t(developmentCode ? "developmentResendIn" : "resendIn", { seconds: format.number(cooldown.seconds) })
             : t(developmentCode ? "developmentResend" : "resend")}
         </Button>
         {!developmentCode && (

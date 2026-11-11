@@ -55,8 +55,8 @@ export function AppShell() {
     }
   }, [me.error, me.data, pathname, search, navigate]);
 
-  // Пока страница не показана, заголовок вкладки — её собственный, как у Next (metadata страницы).
-  // Когда страница на экране, заголовок ставит она: оболочка свой не рендерит.
+  // Пока страница не показана (проверка сеанса, переход по шлюзу), во вкладке уже её заголовок
+  // из handle маршрута. Когда страница на экране, заголовок ставит она: оболочка свой не рендерит.
   const handle = useMatches().at(-1)?.handle as AppRouteHandle | undefined;
   const gateTitle = <PageTitle title={handle?.title ? t(handle.title) : undefined} />;
 

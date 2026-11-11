@@ -1,9 +1,10 @@
-// Каталог: фильтры в адресе страницы уходят в API без преобразований (OPR-04, OPR-05).
-import type { CatalogItem, CatalogPage } from "@imbc/contracts";
+// Каталог: фильтры в адресе страницы уходят в API в формате catalogFilterSchema (OPR-04, OPR-05).
+import { type CatalogItem, catalogFilterSchema, type CatalogPage } from "@imbc/contracts";
 import { screen, waitFor, within } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, describe, expect, it, type Mock, vi } from "vitest";
 
+import { catalogParsers } from "@/lib/catalog-params";
 import type { Me } from "@/lib/session";
 
 import en from "../messages/en.json";
@@ -78,7 +79,7 @@ const searches = (api: Mock<typeof fetch>) =>
   api.mock.calls.map(([url]) => String(url)).filter((url) => url.startsWith("/api/v1/catalog/search"));
 
 describe("каталог (OPR-04, OPR-05)", () => {
-  it("фильтры из адреса уходят в API без преобразований", async () => {
+  it("фильтры из адреса уходят в API тем же query string", async () => {
     const query = "?region=KZ-ATY,KZ-MAN&group=A,B&surveyed=true&sort=verified_at&page=2";
     const api = stubCatalog();
     renderRoute(`/catalog${query}`);
@@ -88,7 +89,7 @@ describe("каталог (OPR-04, OPR-05)", () => {
     expect(document.title).toBe(`${kk.catalog.title} · ${kk.common.appName}`);
   });
 
-  it("закодированная запятая в ссылке даёт тот же запрос (Review Focus 1)", async () => {
+  it("закодированная запятая в ссылке даёт тот же запрос", async () => {
     const api = stubCatalog();
     const { router } = renderRoute("/catalog?region=KZ-ATY%2CKZ-MAN");
 
@@ -99,7 +100,7 @@ describe("каталог (OPR-04, OPR-05)", () => {
     expect(router.state.location.pathname).toBe("/catalog");
   });
 
-  it("селект показывает подпись, а не значение из адреса (Review Focus 5)", async () => {
+  it("селект показывает подпись, а не значение из адреса", async () => {
     stubCatalog();
     renderRoute("/catalog?surveyed=true", { locale: "ru" });
 
@@ -341,5 +342,69 @@ describe("каталог (OPR-04, OPR-05)", () => {
     await user.click(await screen.findByRole("button", { name: new RegExp(en.catalog.region) }));
     const options = await screen.findAllByRole("option");
     expect(options.map((o) => o.textContent)).toEqual(["KZ-ATY", "KZ-MAN"]);
+  });
+});
+
+/**
+ * Ключи catalogFilterSchema, у которых в интерфейсе пока нет поля. Страница строит запрос из
+ * catalogParsers, поэтому такой ключ из адреса в API не уходит. Добавляя поле, перенесите ключ
+ * в catalogParsers (src/lib/catalog-params.ts) и в SAMPLES ниже.
+ */
+const KEYS_WITHOUT_CONTROL = [
+  // Общие фильтры OPR-02 без поля: тип продукции и тип сертификата (ждут справочников, ADM-08).
+  "type",
+  "cert",
+  // Расширенные фильтры OPR-03 без поля.
+  "kpved",
+  "oked",
+  "worksWith",
+  "headcountMin",
+  "headcountMax",
+  "certValidUntil",
+  "certAnyStatus",
+  "verifiedFrom",
+  "verifiedTo",
+  // Размер страницы не выбирается: сервер отдаёт 25 по умолчанию схемы.
+  "pageSize",
+];
+
+/** Значение каждого ключа, который знает интерфейс, — не по умолчанию, в формате адреса. */
+const SAMPLES: Record<keyof typeof catalogParsers, string> = {
+  q: "металл",
+  region: "KZ-ATY,KZ-MAN",
+  group: "A,B",
+  surveyed: "true",
+  unifiedRegister: "false",
+  tnved: "7308",
+  sort: "verified_at",
+  page: "2",
+};
+
+describe("контракт адреса каталога и catalogFilterSchema (OPR-05)", () => {
+  it("каждый ключ схемы либо обрабатывает интерфейс, либо явно назван ключом без поля", () => {
+    const handled = Object.keys(catalogParsers);
+    const schema = Object.keys(catalogFilterSchema.shape);
+    expect(schema.filter((key) => !handled.includes(key) && !KEYS_WITHOUT_CONTROL.includes(key))).toEqual([]);
+    // Списки не устаревают: ключ не в обоих сразу, и в каждом — только ключи схемы.
+    expect(handled.filter((key) => !schema.includes(key))).toEqual([]);
+    expect(KEYS_WITHOUT_CONTROL.filter((key) => !schema.includes(key) || handled.includes(key))).toEqual([]);
+  });
+
+  it("адрес с каждым известным ключом даёт в API тот же запрос; схема разбирает его без ошибок", async () => {
+    const query = `?${new URLSearchParams(SAMPLES)}`;
+    expect(catalogFilterSchema.safeParse(Object.fromEntries(new URLSearchParams(SAMPLES))).success).toBe(true);
+    const api = stubCatalog();
+    renderRoute(`/catalog${query}`);
+
+    await waitFor(() => expect(searches(api)).toHaveLength(1));
+    const sent = new URL(searches(api)[0], window.location.origin).searchParams;
+    expect([...sent].sort()).toEqual(Object.entries(SAMPLES).sort());
+  });
+
+  it("ключи без поля в интерфейсе в запрос не попадают", async () => {
+    const api = stubCatalog();
+    renderRoute("/catalog?region=KZ-ATY&kpved=25.1&pageSize=100");
+
+    await waitFor(() => expect(searches(api)).toEqual(["/api/v1/catalog/search?region=KZ-ATY"]));
   });
 });

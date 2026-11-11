@@ -6,7 +6,7 @@ import { PageTitle } from "@/components/app/page-title";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-/** Рабочее место производителя. Своего заголовка вкладки у страницы нет — как у Next. */
+/** Рабочее место производителя. Во вкладке — только название платформы: PageTitle без заголовка страницы. */
 export function ProfilePage() {
   const t = useTranslations("profile");
   const nav = useTranslations("nav");

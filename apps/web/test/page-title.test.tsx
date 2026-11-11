@@ -4,7 +4,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { screen } from "@testing-library/react";
+import { useLayoutEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { PageTitle } from "@/components/app/page-title";
 
 import type { Me } from "@/lib/session";
 
@@ -83,5 +86,54 @@ describe("заголовок вкладки", () => {
     await router.navigate("/dashboard");
     expect(await screen.findByRole("heading", { name: kk.dashboard.title })).toBeTruthy();
     expect(titles()).toEqual([`${kk.dashboard.title} · ${kk.common.appName}`]);
+  });
+
+  it("страница без PageTitle после страницы с ним — название платформы, а не прежний заголовок", async () => {
+    const { router } = renderRoute("/first", {
+      routes: [
+        {
+          path: "/first",
+          element: (
+            <>
+              <PageTitle title="Первая" />
+              <h1>first</h1>
+            </>
+          ),
+        },
+        { path: "/second", element: <h1>second</h1> },
+      ],
+    });
+    expect(await screen.findByRole("heading", { name: "first" })).toBeTruthy();
+    expect(titles()).toEqual([`Первая · ${kk.common.appName}`]);
+
+    await router.navigate("/second");
+    expect(await screen.findByRole("heading", { name: "second" })).toBeTruthy();
+    expect(titles()).toEqual([kk.common.appName]);
+  });
+
+  it("заголовок стоит уже до отрисовки кадра (layout effect), а не после", async () => {
+    const seen: string[] = [];
+    // Компонент после PageTitle читает заголовок в своём layout effect — до того, как браузер нарисует кадр.
+    function Probe() {
+      useLayoutEffect(() => {
+        seen.push(document.title);
+      }, []);
+      return <h1>probe</h1>;
+    }
+    renderRoute("/probe", {
+      routes: [
+        {
+          path: "/probe",
+          element: (
+            <>
+              <PageTitle title="Новая" />
+              <Probe />
+            </>
+          ),
+        },
+      ],
+    });
+    expect(await screen.findByRole("heading", { name: "probe" })).toBeTruthy();
+    expect(seen[0]).toBe(`Новая · ${kk.common.appName}`);
   });
 });

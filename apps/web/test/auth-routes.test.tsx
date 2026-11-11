@@ -325,7 +325,7 @@ describe("переходы по состоянию сеанса (AUTH-03, AUTH-1
 });
 
 describe("регистрация производителя (MAN-02, AUTH-01)", () => {
-  it("согласие с условиями ставится кликом по подписи и пробелом (Review Focus 4)", async () => {
+  it("согласие с условиями ставится кликом по подписи и пробелом", async () => {
     const { user } = renderRoute("/register");
 
     const checkbox = await screen.findByRole("checkbox", { name: kk.register.acceptTerms });
