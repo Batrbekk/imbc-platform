@@ -17,14 +17,24 @@ import { migrateThrough, openTestPool, resetDatabase } from './support/database.
 /**
  * Семь видимых профилей проекции. Названия и даты подобраны так, что без правила UPD-04 unresponsive шли бы первыми.
  * Две «Дельты» совпадают по названию, дате верификации, региону и статусу: при любой сортировке их разделяет
- * только profile_id (OPR-01).
+ * только profile_id (OPR-01). Вторая вставляется позже, но её profile_id меньше: без ключа profile_id
+ * порядок вставки поставил бы их наоборот.
  */
-const COMPANIES: { name: string; region: string; status: UpdateStatus; surveyed: boolean; daysAgo: number }[] = [
+const DELTA = { first: '00000000-0000-4000-8000-000000000002', second: '00000000-0000-4000-8000-000000000001' };
+
+const COMPANIES: {
+  name: string;
+  region: string;
+  status: UpdateStatus;
+  surveyed: boolean;
+  daysAgo: number;
+  id?: string;
+}[] = [
   { name: 'Альфа', region: 'KZ-ATY', status: 'active', surveyed: true, daysAgo: 30 },
   { name: 'Бета', region: 'KZ-MAN', status: 'outdated', surveyed: false, daysAgo: 20 },
   { name: 'Гамма', region: 'KZ-ATY', status: 'active', surveyed: false, daysAgo: 10 },
-  { name: 'Дельта', region: 'KZ-ATY', status: 'active', surveyed: false, daysAgo: 15 },
-  { name: 'Дельта', region: 'KZ-ATY', status: 'active', surveyed: false, daysAgo: 15 },
+  { name: 'Дельта', region: 'KZ-ATY', status: 'active', surveyed: false, daysAgo: 15, id: DELTA.first },
+  { name: 'Дельта', region: 'KZ-ATY', status: 'active', surveyed: false, daysAgo: 15, id: DELTA.second },
   { name: 'Аааа Первая', region: 'KZ-AKM', status: 'unresponsive', surveyed: true, daysAgo: 1 },
   { name: 'Яяя', region: 'KZ-ZAP', status: 'unresponsive', surveyed: false, daysAgo: 40 },
 ];
@@ -47,14 +57,21 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('каталог и дашбор�
   /** profile_id каждой строки COMPANIES, в том же порядке. */
   const profileIds: string[] = [];
 
-  async function manufacturer(seed: number, name: string, status: UpdateStatus, verifiedAt: Date) {
+  async function manufacturer(seed: number, name: string, status: UpdateStatus, verifiedAt: Date, id?: string) {
     const [org] = await db
       .insert(schema.organizations)
       .values({ type: 'manufacturer', name, bin: bin(seed) })
       .returning();
     const [profile] = await db
       .insert(schema.manufacturerProfiles)
-      .values({ organizationId: org!.id, status: 'verified', updateStatus: status, verifiedAt, completenessPct: 100 })
+      .values({
+        id,
+        organizationId: org!.id,
+        status: 'verified',
+        updateStatus: status,
+        verifiedAt,
+        completenessPct: 100,
+      })
       .returning();
     return { org: org!, profile: profile! };
   }
@@ -69,7 +86,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('каталог и дашбор�
     const now = Date.now();
     for (const [i, c] of COMPANIES.entries()) {
       const verifiedAt = new Date(now - c.daysAgo * 86_400_000);
-      const { org, profile } = await manufacturer(i + 1, c.name, c.status, verifiedAt);
+      const { org, profile } = await manufacturer(i + 1, c.name, c.status, verifiedAt, c.id);
       profileIds.push(profile.id);
       await db.insert(schema.catalogVisible).values({
         profileId: profile.id,
@@ -108,6 +125,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('каталог и дашбор�
 
   const names = (page: { items: { nameRu: string }[] }) => page.items.map((i) => i.nameRu);
   const tail = ['Аааа Первая', 'Яяя'];
+  /** profile_id компании с единственным в фикстуре названием. */
+  const idOf = (name: string) => profileIds[COMPANIES.findIndex((c) => c.name === name)]!;
 
   it.each(['name', 'verified_at', 'region'] as const)(
     'unresponsive остаётся в выдаче и идёт ниже active и outdated при сортировке %s (UPD-04, OPR-01, OPR-33)',
@@ -132,14 +151,27 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('каталог и дашбор�
     expect(names(page)).toEqual(expected);
   });
 
-  it('порядок сохраняется между страницами', async () => {
+  it.each(['name', 'verified_at', 'region'] as const)(
+    'при сортировке %s равные по всем ключам строки идут по возрастанию profile_id (OPR-01)',
+    async (sort) => {
+      const page = await catalog.search(catalogFilterSchema.parse({ sort }), 'visible');
+      const deltas = page.items.filter((i) => i.nameRu === 'Дельта').map((i) => i.profileId);
+      expect(deltas).toEqual([DELTA.second, DELTA.first]);
+    },
+  );
+
+  it('порядок сохраняется между страницами; «Дельты» на границе страниц различаются по profile_id', async () => {
     const pages = [];
     for (const page of [1, 2, 3, 4]) {
-      pages.push(
-        names(await catalog.search(catalogFilterSchema.parse({ sort: 'name', page, pageSize: 2 }), 'visible')),
-      );
+      const result = await catalog.search(catalogFilterSchema.parse({ sort: 'name', page, pageSize: 2 }), 'visible');
+      pages.push(result.items.map((i) => i.profileId));
     }
-    expect(pages).toEqual([['Альфа', 'Бета'], ['Гамма', 'Дельта'], ['Дельта', 'Аааа Первая'], ['Яяя']]);
+    expect(pages).toEqual([
+      [idOf('Альфа'), idOf('Бета')],
+      [idOf('Гамма'), DELTA.second],
+      [DELTA.first, idOf('Аааа Первая')],
+      [idOf('Яяя')],
+    ]);
   });
 
   it.each(['name', 'verified_at', 'region'] as const)(
@@ -172,6 +204,16 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('каталог и дашбор�
     expect(await byTier('tier_2')).toEqual(['Альфа', 'Аааа Первая']);
     expect(await byTier('tier_1')).toEqual(['Бета', 'Гамма', 'Дельта', 'Дельта', 'Яяя']);
     expect(await byTier('tier_1,tier_2')).toHaveLength(COMPANIES.length);
+  });
+
+  it('фильтр тира и региона сочетаются через AND (OPR-04)', async () => {
+    // KZ-ATY в фикстуре: Альфа (обследована, tier_2), Гамма и две «Дельты» (tier_1).
+    const page = await catalog.search(
+      catalogFilterSchema.parse({ tier: 'tier_1', region: 'KZ-ATY', sort: 'name' }),
+      'visible',
+    );
+    expect(page.items.map((i) => i.profileId)).toEqual([idOf('Гамма'), DELTA.second, DELTA.first]);
+    expect(page.total).toBe(3);
   });
 
   it('тир не зависит от статуса актуальности', async () => {
@@ -234,8 +276,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('каталог и дашбор�
   it('кеш dashboard:v2 верной формы отдаётся без запроса к базе', async () => {
     const cached = { ...staleDashboard(), tier: { tier_1: 98, tier_2: 1 } };
     valkey.get.mockResolvedValue(JSON.stringify(cached));
+    const database = { select: vi.fn(), execute: vi.fn() };
 
-    expect(await catalog.dashboard()).toEqual(cached);
+    expect(await new CatalogService(database as never, valkey as never).dashboard()).toEqual(cached);
+    expect(database.select).not.toHaveBeenCalled();
+    expect(database.execute).not.toHaveBeenCalled();
     expect(valkey.set).not.toHaveBeenCalled();
   });
 });
