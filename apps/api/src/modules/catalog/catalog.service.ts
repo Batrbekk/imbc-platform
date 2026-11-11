@@ -19,7 +19,8 @@ const DASHBOARD_CACHE_KEY = 'dashboard:v2';
 
 /**
  * Порядок выдачи: unresponsive ниже active и outdated при любой сортировке (UPD-04, OPR-01, OPR-33),
- * затем ключи выбранной сортировки. Между active и outdated порядка нет.
+ * затем ключи выбранной сортировки. Между active и outdated порядка нет. Последний ключ — первичный
+ * ключ проекции profile_id: смысла не несёт, только делает страницы устойчивыми при равных ключах.
  */
 export function catalogOrder(sort: CatalogFilter['sort']): SQL[] {
   const keys = {
@@ -27,7 +28,7 @@ export function catalogOrder(sort: CatalogFilter['sort']): SQL[] {
     verified_at: [desc(t.verifiedAt)],
     region: [asc(t.region), asc(t.nameRu)],
   }[sort];
-  return [sql`(${t.updateStatus} = 'unresponsive') asc`, ...keys];
+  return [sql`(${t.updateStatus} = 'unresponsive') asc`, ...keys, asc(t.profileId)];
 }
 
 /**

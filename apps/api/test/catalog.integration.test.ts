@@ -125,6 +125,18 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('каталог и дашбор�
     expect(pages).toEqual([['Альфа', 'Бета'], ['Гамма', 'Аааа Первая'], ['Яяя']]);
   });
 
+  it.each(['name', 'verified_at', 'region'] as const)(
+    'обход всех страниц при сортировке %s возвращает каждую компанию ровно один раз (OPR-01)',
+    async (sort) => {
+      const seen: string[] = [];
+      for (const page of [1, 2, 3, 4]) {
+        seen.push(...names(await catalog.search(catalogFilterSchema.parse({ sort, page, pageSize: 2 }), 'visible')));
+      }
+      expect(seen).toHaveLength(COMPANIES.length);
+      expect([...seen].sort()).toEqual(COMPANIES.map((c) => c.name).sort());
+    },
+  );
+
   it('дашборд считает все три статуса и оставляет unresponsive на карте (OPR-32, OPR-33)', async () => {
     const d = dashboardSchema.parse(await catalog.dashboard());
     expect(d.total).toBe(5);

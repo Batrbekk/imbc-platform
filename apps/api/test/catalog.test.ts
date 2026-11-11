@@ -19,6 +19,15 @@ describe('порядок выдачи каталога (UPD-04, OPR-01, OPR-33)'
     ['verified_at', '"catalog_visible"."verified_at" desc'],
     ['region', '"catalog_visible"."region" asc, "catalog_visible"."name_ru" asc'],
   ] as const)('после статуса — прежние ключи сортировки %s, без ключа между active и outdated', (sort, rest) => {
-    expect(orderText(sort)).toBe(`("catalog_visible"."update_status" = 'unresponsive') asc, ${rest}`);
+    expect(orderText(sort)).toBe(
+      `("catalog_visible"."update_status" = 'unresponsive') asc, ${rest}, "catalog_visible"."profile_id" asc`,
+    );
   });
+
+  it.each(['name', 'verified_at', 'region'] as const)(
+    'сортировка %s заканчивается уникальным profile_id: страницы устойчивы при равных ключах (OPR-01)',
+    (sort) => {
+      expect(orderText(sort)).toMatch(/, "catalog_visible"\."profile_id" asc$/);
+    },
+  );
 });
