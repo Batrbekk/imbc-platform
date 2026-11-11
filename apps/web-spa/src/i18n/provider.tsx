@@ -1,5 +1,5 @@
 import type { Locale } from "@imbc/contracts";
-import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useMemo, useRef, useState } from "react";
 import { IntlProvider } from "use-intl";
 
 import { reloadApp } from "@/lib/leave-app";
@@ -30,20 +30,25 @@ export function I18nProvider({
 }) {
   const [current, setCurrent] = useState({ locale: initialLocale, messages: initialMessages });
   const [pending, setPending] = useState(false);
+  // Последний запрошенный язык: файл, пришедший позже более нового выбора, отбрасывается.
+  const requested = useRef<Locale | null>(null);
 
   // Язык меняется на месте: адрес и состояние страницы сохраняются (LANG-01, OPR-05).
   const change = useCallback(async (next: Locale) => {
+    requested.current = next;
     document.cookie = localeCookie(next, window.location.protocol === "https:");
     setPending(true);
     let messages: Messages;
     try {
       messages = await loadMessages(next);
     } catch {
+      if (requested.current !== next) return;
       // Чанка языка нет — вкладка старше выката. Cookie уже записан, после перезагрузки
       // страница откроется на выбранном языке.
       reloadApp();
       return;
     }
+    if (requested.current !== next) return;
     setCurrent({ locale: next, messages });
     setPending(false);
     document.documentElement.lang = next;

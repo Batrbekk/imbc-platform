@@ -1,14 +1,15 @@
 import type { Locale } from "@imbc/contracts";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useFormatter, useTranslations } from "use-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { LocaleSwitcher } from "@/components/app/locale-switcher";
 import { loadMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { I18nProvider, useLocaleSwitch } from "@/i18n/provider";
 import { reloadApp } from "@/lib/leave-app";
 
 import en from "../messages/en.json";
+import kk from "../messages/kk.json";
 import ru from "../messages/ru.json";
 import { renderRoute } from "./support/render";
 
@@ -42,6 +43,27 @@ function SwitcherProbe() {
 }
 
 const probeRoutes = [{ path: "/catalog", element: <SwitcherProbe /> }];
+
+/** Два переключения подряд, раньше чем загрузится первый файл. */
+function RaceProbe() {
+  const { change, pending } = useLocaleSwitch();
+  const t = useTranslations("common");
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          void change("ru");
+          void change("en");
+        }}
+      >
+        switch
+      </button>
+      <p data-testid="pending">{String(pending)}</p>
+      <p data-testid="name">{t("appName")}</p>
+    </>
+  );
+}
 
 afterEach(() => {
   document.cookie = "NEXT_LOCALE=; Path=/; Max-Age=0";
@@ -93,6 +115,49 @@ describe("языки интерфейса", () => {
 
     await waitFor(() => expect(reloadApp).toHaveBeenCalledTimes(1));
     expect(document.cookie).toContain("NEXT_LOCALE=en");
+  });
+
+  it("два переключения подряд — побеждает последний выбранный язык", async () => {
+    let finishRu: (messages: typeof ru) => void = () => {};
+    vi.mocked(loadMessages)
+      .mockImplementationOnce(() => new Promise((resolve) => (finishRu = resolve)))
+      .mockImplementationOnce(async () => en);
+    render(
+      <I18nProvider initialLocale="kk" initialMessages={kk}>
+        <RaceProbe />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "switch" }));
+    await waitFor(() => expect(screen.getByTestId("name").textContent).toBe(en.common.appName));
+    expect(screen.getByTestId("pending").textContent).toBe("false");
+
+    // Файл русского языка пришёл позже — он уже не нужен.
+    finishRu(ru);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.getByTestId("name").textContent).toBe(en.common.appName);
+    expect(document.documentElement.lang).toBe("en");
+    expect(document.cookie).toContain("NEXT_LOCALE=en");
+    expect(reloadApp).not.toHaveBeenCalled();
+  });
+
+  it("устаревший запрос языка, завершившийся отказом, не перезагружает страницу", async () => {
+    let failRu: (error: Error) => void = () => {};
+    vi.mocked(loadMessages)
+      .mockImplementationOnce(() => new Promise((_, reject) => (failRu = reject)))
+      .mockImplementationOnce(async () => en);
+    render(
+      <I18nProvider initialLocale="kk" initialMessages={kk}>
+        <RaceProbe />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "switch" }));
+    await waitFor(() => expect(screen.getByTestId("name").textContent).toBe(en.common.appName));
+    failRu(new Error("Failed to fetch dynamically imported module"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reloadApp).not.toHaveBeenCalled();
+    expect(screen.getByTestId("name").textContent).toBe(en.common.appName);
   });
 
   it("неизвестный адрес показывает страницу «не найдено» на языке пользователя", async () => {

@@ -21,3 +21,20 @@ if (typeof window !== "undefined" && !window.matchMedia) {
 if (typeof document !== "undefined" && !document.elementFromPoint) {
   document.elementFromPoint = () => null;
 }
+
+// ScrollRestoration корня прокручивает окно, а jsdom вместо прокрутки пишет «Not implemented».
+if (typeof window !== "undefined") {
+  window.scrollTo = () => {};
+}
+
+// В jsdom нет ResizeObserver и scrollIntoView, а ими пользуется список cmdk (фильтры каталога).
+if (typeof window !== "undefined" && !window.ResizeObserver) {
+  window.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+if (typeof Element !== "undefined" && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}
