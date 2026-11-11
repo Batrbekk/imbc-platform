@@ -18,7 +18,8 @@ const developmentOtpAccounts = z
       z
         .object({
           id: z.uuid().transform((value) => value.toLowerCase()),
-          role: z.enum(ROLES),
+          // Раздел 3.1 v1.3: spectator → observer. Переходный псевдоним, удалить вместе с миграцией contract.
+          role: z.preprocess((value) => (value === 'spectator' ? 'observer' : value), z.enum(ROLES)),
         })
         .strict(),
     ),

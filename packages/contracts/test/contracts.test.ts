@@ -6,8 +6,18 @@ import {
   computeBinCheckDigit,
   normalizeCompanyName,
   POLICY_MATRIX,
+  ORGANIZATION_TYPES,
   ROLES,
+  UPDATE_STATUSES,
 } from '../src/index.js';
+
+describe('перечисления v1.3 (раздел 3.1, UPD-06)', () => {
+  it('observer вместо spectator, unresponsive вместо inactive', () => {
+    expect(ROLES).toEqual(['manufacturer', 'expert', 'administrator', 'director', 'operator', 'observer']);
+    expect(ORGANIZATION_TYPES).toEqual(['manufacturer', 'operator', 'observer', 'imbc']);
+    expect(UPDATE_STATUSES).toEqual(['active', 'outdated', 'unresponsive']);
+  });
+});
 
 describe('БИН (MAN-02, MIG-05)', () => {
   it('принимает БИН с верным контрольным разрядом', () => {
@@ -75,7 +85,7 @@ describe('PolicyMatrix (GEN-03, GEN-04, GEN-13…15)', () => {
   });
 
   it('наблюдатель не выгружает, не подписывается и не пишет (GEN-15)', () => {
-    expect(Object.keys(POLICY_MATRIX.spectator).sort()).toEqual(['catalog.search', 'dashboard.read']);
+    expect(Object.keys(POLICY_MATRIX.observer).sort()).toEqual(['catalog.search', 'dashboard.read']);
   });
 
   it('оператор видит только видимые профили и не видит прогноз (OPR-01, D-24)', () => {

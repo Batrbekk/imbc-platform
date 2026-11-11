@@ -20,12 +20,12 @@ function demoBin(seed: number): string {
   throw new Error('не удалось подобрать БИН');
 }
 
-const PEOPLE: { email: string; role: Role; org: 'imbc' | 'operator' | 'spectator' | 'manufacturer'; name: string }[] = [
+const PEOPLE: { email: string; role: Role; org: 'imbc' | 'operator' | 'observer' | 'manufacturer'; name: string }[] = [
   { email: 'expert@imbc.local', role: 'expert', org: 'imbc', name: 'Эксперт IMBC' },
   { email: 'admin@imbc.local', role: 'administrator', org: 'imbc', name: 'Администратор IMBC' },
   { email: 'director@imbc.local', role: 'director', org: 'imbc', name: 'Директор IMBC' },
   { email: 'operator@operator.local', role: 'operator', org: 'operator', name: 'Специалист оператора' },
-  { email: 'spectator@spectator.local', role: 'spectator', org: 'spectator', name: 'Наблюдатель' },
+  { email: 'spectator@spectator.local', role: 'observer', org: 'observer', name: 'Наблюдатель' },
   { email: 'manufacturer@demo.local', role: 'manufacturer', org: 'manufacturer', name: 'Производитель (демо)' },
 ];
 
@@ -133,7 +133,7 @@ async function main(): Promise<void> {
       for (const [key, name, type] of [
         ['imbc', 'IMBC', 'imbc'],
         ['operator', 'Оператор (демо)', 'operator'],
-        ['spectator', 'Наблюдатель (демо)', 'spectator'],
+        ['observer', 'Наблюдатель (демо)', 'observer'],
       ] as const) {
         const existing = await tx
           .select({ id: organizations.id })

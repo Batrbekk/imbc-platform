@@ -69,6 +69,17 @@ describe('explicit development OTP configuration', () => {
     expect(otpDeliveryFor({ ...env, DEPLOYMENT_ENV: 'production' }, account)).toBe('email');
   });
 
+  it('accepts the legacy spectator role name from a pre-v1.3 server .env as observer', () => {
+    const env = loadEnv({
+      ...source,
+      DEPLOYMENT_ENV: 'development',
+      DEV_FIXED_OTP_ENABLED: 'true',
+      DEV_FIXED_OTP_ACCOUNTS: JSON.stringify([{ id: accountId, role: 'spectator' }]),
+    });
+    expect(env.DEV_FIXED_OTP_ACCOUNTS).toEqual([{ id: accountId, role: 'observer' }]);
+    expect(otpDeliveryFor(env, { id: accountId, role: 'observer' })).toBe('development_code');
+  });
+
   it('combines listed accounts with the separate administrator-only legacy setting', () => {
     const listedId = '09544cc6-ef1f-41fb-916e-cab7f50da4dc';
     const env = loadEnv({
@@ -90,7 +101,7 @@ describe('explicit development OTP configuration', () => {
     'null',
     '["not-an-account"]',
     JSON.stringify([{ id: 'not-a-uuid', role: 'operator' }]),
-    JSON.stringify([{ id: accountId, role: 'observer' }]),
+    JSON.stringify([{ id: accountId, role: 'viewer' }]),
     JSON.stringify([{ id: accountId }]),
     JSON.stringify([{ role: 'operator' }]),
     JSON.stringify([{ id: accountId, role: 'operator', email: 'unused@example.invalid' }]),

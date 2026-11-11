@@ -111,7 +111,7 @@ export const POLICY_MATRIX: PolicyMatrix = {
     'imbc_request.send': 'own',
     'operator_request.send': 'visible',
   },
-  spectator: {
+  observer: {
     'catalog.search': 'visible',
     'dashboard.read': 'visible',
   },

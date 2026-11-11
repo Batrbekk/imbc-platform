@@ -19,7 +19,6 @@ describe('authentication navigation', () => {
   it('chooses a home that each role can access', () => {
     expect(roleHome('manufacturer')).toBe('/profile');
     expect(roleHome('administrator')).toBe('/account');
-    for (const role of ['operator', 'spectator', 'expert', 'director'] as const)
-      expect(roleHome(role)).toBe('/catalog');
+    for (const role of ['operator', 'observer', 'expert', 'director'] as const) expect(roleHome(role)).toBe('/catalog');
   });
 });

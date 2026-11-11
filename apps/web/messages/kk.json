@@ -137,7 +137,7 @@
     "status": {
       "active": "Өзекті",
       "outdated": "Жаңартуды қажет етеді",
-      "inactive": "Белсенді емес"
+      "unresponsive": "Жауап бермейді"
     },
     "pending": "Тексерудегі өзгерістер бар",
     "prev": "Артқа",
@@ -151,7 +151,7 @@
     "unifiedRegister": "Бірыңғай тізілімде",
     "active": "Өзекті",
     "outdated": "Жаңартуды қажет етеді",
-    "inactive": "Белсенді емес",
+    "unresponsive": "Жауап бермейді",
     "byRegion": "Өңірлер бойынша",
     "byGroup": "Тауар топтары бойынша",
     "generatedAt": "Жаңартылды: {time}"
@@ -187,7 +187,7 @@
     "administrator": "IMBC әкімшісі",
     "director": "IMBC директоры",
     "operator": "Оператор",
-    "spectator": "Бақылаушы"
+    "observer": "Бақылаушы"
   },
   "profile": {
     "welcome": "Өндіруші кабинетіне қош келдіңіз.",

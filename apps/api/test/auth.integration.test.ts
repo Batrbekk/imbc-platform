@@ -69,7 +69,7 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
     const [org] = await db
       .insert(schema.organizations)
       .values({
-        type: role === 'manufacturer' || role === 'operator' || role === 'spectator' ? role : 'imbc',
+        type: role === 'manufacturer' || role === 'operator' || role === 'observer' ? role : 'imbc',
         name: 'Auth test',
       })
       .returning();

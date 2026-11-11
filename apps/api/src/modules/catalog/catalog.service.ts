@@ -12,7 +12,7 @@ const DASHBOARD_TTL_S = 60;
 /**
  * Каталог и дашборд читают только проекцию catalog_visible (архитектура §10):
  * в ней нет записей IMBC, заметок операторов и ожидающих значений (DATA-34),
- * а скрытые профили (inactive) в неё не попадают (UPD-04).
+ * а скрытые профили (unresponsive) в неё не попадают (UPD-04).
  */
 @Injectable()
 export class CatalogService {
@@ -134,11 +134,11 @@ export class CatalogService {
     const byGroup = await this.db.execute<{ group: string; count: number }>(
       sql`select g as "group", count(*)::int as count from ${t}, unnest(${t.commodityGroups}) g group by g order by g`,
     );
-    // Inactive не на карте, но в счётчиках — чтобы было видно изменение общего числа (OPR-72).
-    const [inactive] = await this.db
+    // Unresponsive не на карте, но в счётчиках — чтобы было видно изменение общего числа (OPR-72).
+    const [unresponsive] = await this.db
       .select({ count: sql<number>`count(*)`.mapWith(Number) })
       .from(manufacturerProfiles)
-      .where(and(eq(manufacturerProfiles.status, 'verified'), eq(manufacturerProfiles.updateStatus, 'inactive')));
+      .where(and(eq(manufacturerProfiles.status, 'verified'), eq(manufacturerProfiles.updateStatus, 'unresponsive')));
 
     const result = {
       total: totals?.total ?? 0,
@@ -146,7 +146,11 @@ export class CatalogService {
       byCommodityGroup: byGroup.rows,
       siteSurveyed: totals?.siteSurveyed ?? 0,
       unifiedRegister: totals?.unifiedRegister ?? 0,
-      updateStatus: { active: totals?.active ?? 0, outdated: totals?.outdated ?? 0, inactive: inactive?.count ?? 0 },
+      updateStatus: {
+        active: totals?.active ?? 0,
+        outdated: totals?.outdated ?? 0,
+        unresponsive: unresponsive?.count ?? 0,
+      },
       generatedAt: new Date().toISOString(),
     };
     await this.valkey

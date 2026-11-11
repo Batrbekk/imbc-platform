@@ -137,7 +137,7 @@
     "status": {
       "active": "Up to date",
       "outdated": "Needs update",
-      "inactive": "Inactive"
+      "unresponsive": "Unresponsive"
     },
     "pending": "Changes under review",
     "prev": "Previous",
@@ -151,7 +151,7 @@
     "unifiedRegister": "In the unified register",
     "active": "Up to date",
     "outdated": "Need update",
-    "inactive": "Inactive",
+    "unresponsive": "Unresponsive",
     "byRegion": "By region",
     "byGroup": "By commodity group",
     "generatedAt": "Updated {time}"
@@ -187,7 +187,7 @@
     "administrator": "IMBC administrator",
     "director": "IMBC director",
     "operator": "Operator",
-    "spectator": "Observer"
+    "observer": "Observer"
   },
   "profile": {
     "welcome": "Welcome to your manufacturer workspace.",

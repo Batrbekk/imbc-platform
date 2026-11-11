@@ -283,7 +283,7 @@ export const reviewDecisions = pgTable('review_decisions', {
   decidedAt: timestamp('decided_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
-/** Подтверждения актуальности (UPD-05): каждая секция при возврате из inactive. */
+/** Подтверждения актуальности (UPD-05): каждая секция при возврате из unresponsive. */
 export const updateConfirmations = pgTable('update_confirmations', {
   id: id(),
   profileId: uuid('profile_id')

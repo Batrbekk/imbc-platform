@@ -1,14 +1,14 @@
 /**
- * Перечисления предметной области. Источник — спецификация v1.2
- * (разделы 3, 6.3, 5.5) и архитектура v0.4 (разделы 6–9).
+ * Перечисления предметной области. Источник — спецификация v1.3
+ * (разделы 3.1, 5.5, 6.3, 6.10) и архитектура v0.4 (разделы 6–9).
  */
 
 /** Тип организации (GEN-01…06). */
-export const ORGANIZATION_TYPES = ['manufacturer', 'operator', 'spectator', 'imbc'] as const;
+export const ORGANIZATION_TYPES = ['manufacturer', 'operator', 'observer', 'imbc'] as const;
 export type OrganizationType = (typeof ORGANIZATION_TYPES)[number];
 
 /** Роли (раздел 3.1, D-51). У IMBC три роли, суперпользователя нет. */
-export const ROLES = ['manufacturer', 'expert', 'administrator', 'director', 'operator', 'spectator'] as const;
+export const ROLES = ['manufacturer', 'expert', 'administrator', 'director', 'operator', 'observer'] as const;
 export type Role = (typeof ROLES)[number];
 
 /** Состояние аккаунта (раздел 9.1). */
@@ -20,7 +20,7 @@ export const PROFILE_STATUSES = ['draft', 'submitted', 'under_review', 'verified
 export type ProfileStatus = (typeof PROFILE_STATUSES)[number];
 
 /** Статус актуальности верифицированного профиля (UPD-01…06). */
-export const UPDATE_STATUSES = ['active', 'outdated', 'inactive'] as const;
+export const UPDATE_STATUSES = ['active', 'outdated', 'unresponsive'] as const;
 export type UpdateStatus = (typeof UPDATE_STATUSES)[number];
 
 /** Восемь секций профиля (раздел 5.2). Production — не входит в полноту (MAN-91). */

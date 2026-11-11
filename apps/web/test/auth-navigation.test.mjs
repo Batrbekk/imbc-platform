@@ -9,7 +9,7 @@ test("all six roles land on a page they can open", () => {
     expert: "/catalog",
     director: "/catalog",
     operator: "/catalog",
-    spectator: "/catalog",
+    observer: "/catalog",
   };
   for (const [role, homePath] of Object.entries(homes)) {
     assert.equal(authDestination({ user: { role }, homePath }), homePath);

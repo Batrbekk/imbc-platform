@@ -14,7 +14,7 @@ interface Dashboard {
   byCommodityGroup: { group: string; count: number }[];
   siteSurveyed: number;
   unifiedRegister: number;
-  updateStatus: { active: number; outdated: number; inactive: number };
+  updateStatus: { active: number; outdated: number; unresponsive: number };
   generatedAt: string;
 }
 
@@ -44,7 +44,7 @@ export function DashboardView() {
     },
     { label: t("active"), value: data.updateStatus.active },
     { label: t("outdated"), value: data.updateStatus.outdated },
-    { label: t("inactive"), value: data.updateStatus.inactive },
+    { label: t("unresponsive"), value: data.updateStatus.unresponsive },
   ];
   const maxRegion = Math.max(1, ...data.byRegion.map((r) => r.count));
 
