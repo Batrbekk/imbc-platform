@@ -21,12 +21,15 @@ function demoBin(seed: number): string {
   throw new Error('не удалось подобрать БИН');
 }
 
+/** Адрес демо-наблюдателя до v1.3 и после (GEN-06), в нижнем регистре. */
+const OBSERVER_EMAIL = { legacy: 'spectator@spectator.local', current: 'observer@observer.local' } as const;
+
 const PEOPLE: { email: string; role: Role; org: 'imbc' | 'operator' | 'observer' | 'manufacturer'; name: string }[] = [
   { email: 'expert@imbc.local', role: 'expert', org: 'imbc', name: 'Эксперт IMBC' },
   { email: 'admin@imbc.local', role: 'administrator', org: 'imbc', name: 'Администратор IMBC' },
   { email: 'director@imbc.local', role: 'director', org: 'imbc', name: 'Директор IMBC' },
   { email: 'operator@operator.local', role: 'operator', org: 'operator', name: 'Специалист оператора' },
-  { email: 'observer@observer.local', role: 'observer', org: 'observer', name: 'Наблюдатель' },
+  { email: OBSERVER_EMAIL.current, role: 'observer', org: 'observer', name: 'Наблюдатель' },
   { email: 'manufacturer@demo.local', role: 'manufacturer', org: 'manufacturer', name: 'Производитель (демо)' },
 ];
 
@@ -197,9 +200,9 @@ export async function seedDemo(pool: pg.Pool): Promise<void> {
     // поэтому пара в DEV_FIXED_OTP_ACCOUNTS, idp_subject, принятая ответственность и доверенные
     // устройства сохраняются. Если новый адрес уже занят, оба аккаунта остаются как были.
     await tx.execute(sql`
-      UPDATE user_accounts SET email = 'observer@observer.local'
-      WHERE lower(email) = 'spectator@spectator.local'
-        AND NOT EXISTS (SELECT 1 FROM user_accounts WHERE lower(email) = 'observer@observer.local')`);
+      UPDATE user_accounts SET email = ${OBSERVER_EMAIL.current}
+      WHERE lower(email) = ${OBSERVER_EMAIL.legacy}
+        AND NOT EXISTS (SELECT 1 FROM user_accounts WHERE lower(email) = ${OBSERVER_EMAIL.current})`);
 
     for (const p of PEOPLE) {
       await tx

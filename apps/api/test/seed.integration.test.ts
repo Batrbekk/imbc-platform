@@ -20,14 +20,14 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
     ).rows;
 
   /** Демо-организация и аккаунт наблюдателя, как их оставила предыдущая версия после переноса данных. */
-  const legacyObserver = async () => {
+  const legacyObserver = async (email = 'spectator@spectator.local') => {
     const org = await pool.query<{ id: string }>(
       "insert into organizations (type, name) values ('observer', 'Наблюдатель (демо)') returning id",
     );
     const subject = randomUUID();
     const account = await pool.query<{ id: string }>(
-      "insert into user_accounts (organization_id, email, role, state, idp_subject) values ($1, 'spectator@spectator.local', 'observer', 'active', $2) returning id",
-      [org.rows[0]!.id, subject],
+      "insert into user_accounts (organization_id, email, role, state, idp_subject) values ($1, $2, 'observer', 'active', $3) returning id",
+      [org.rows[0]!.id, email, subject],
     );
     return { organization: org.rows[0]!.id, account: account.rows[0]!.id, subject };
   };
@@ -60,6 +60,21 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
     ]);
     const orgs = await pool.query("select id from organizations where name = 'Наблюдатель (демо)'");
     expect(orgs.rows).toEqual([{ id: legacy.organization }]);
+  });
+
+  it('находит прежний адрес без учёта регистра', async () => {
+    const legacy = await legacyObserver('Spectator@Spectator.local');
+
+    await seedDemo(pool);
+
+    expect(await accounts()).toEqual([
+      {
+        id: legacy.account,
+        email: 'observer@observer.local',
+        organization_id: legacy.organization,
+        idp_subject: legacy.subject,
+      },
+    ]);
   });
 
   it('не трогает аккаунты, если observer@observer.local уже существует', async () => {

@@ -122,9 +122,12 @@ def parse_result(raw: str, operation: str) -> Any:
         raise SyncError(f"{operation} returned invalid JSON") from None
 
 
-def find_user_id(cli: list[str], config_path: str, realm: str, username: str, root: Path) -> str | None:
-    users = parse_result(run(cli + ["get", "users", "--config", config_path, "-r", realm, "-q", f"username={username}", "-q", "exact=true", "--fields", "id,username"], operation="Find demo user", root=root), "Find demo user")
-    matches = [user for user in users if isinstance(user, dict) and user.get("username") == username] if isinstance(users, list) else []
+def find_user_id(cli: list[str], config_path: str, realm: str, field: str, value: str, root: Path) -> str | None:
+    """Id of the user whose username or email is exactly value, or None. Anything unexpected is an error, not "absent"."""
+    users = parse_result(run(cli + ["get", "users", "--config", config_path, "-r", realm, "-q", f"{field}={value}", "-q", "exact=true", "--fields", f"id,{field}"], operation="Find demo user", root=root), "Find demo user")
+    if not isinstance(users, list) or not all(isinstance(user, dict) for user in users):
+        raise SyncError("Unexpected demo user lookup result")
+    matches = [user for user in users if str(user.get(field, "")).lower() == value.lower()]
     if not matches:
         return None
     if len(matches) != 1 or not re.fullmatch(r"[A-Za-z0-9-]+", str(matches[0].get("id", ""))):
@@ -171,10 +174,11 @@ def synchronize(root: Path, theme: str) -> None:
         run(cli + ["update", f"realms/{realm}", "--config", config_path, "-f", "-"], operation="Update managed realm settings", root=root, data=json.dumps(realm_patch))
         run(cli + ["update", client_path, "--config", config_path, "-r", realm, "-f", "-"], operation="Update managed client settings", root=root, data=json.dumps(client_patch))
         for old, new in renames.items():
-            legacy_id = find_user_id(cli, config_path, realm, old, root)
+            legacy_id = find_user_id(cli, config_path, realm, "username", old, root)
             if legacy_id is None:
                 continue
-            if find_user_id(cli, config_path, realm, new, root) is not None:
+            # The new address may already belong to another user as username or as email.
+            if any(find_user_id(cli, config_path, realm, field, new, root) is not None for field in ("username", "email")):
                 print("Legacy demo user kept: target already exists")
                 continue
             # Only username and email change; credentials and the id stay with the user.
