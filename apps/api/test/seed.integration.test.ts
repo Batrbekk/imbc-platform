@@ -120,4 +120,33 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
     expect(first).toEqual({ organizations: 11, accounts: 6, visible: 8 });
     expect((await accounts()).map((a) => a.email)).toEqual(['observer@observer.local']);
   });
+
+  it('статус актуальности профиля и его строки в проекции совпадают после первого и повторного запуска (UPD-04, UPD-06)', async () => {
+    const statuses = async () =>
+      (
+        await pool.query<{ name: string; profile: string; visible: string }>(
+          `select o.name, p.update_status as profile, c.update_status as visible
+           from catalog_visible c
+           join manufacturer_profiles p on p.id = c.profile_id
+           join organizations o on o.id = p.organization_id
+           order by o.name`,
+        )
+      ).rows;
+    const byStatus = (rows: { name: string; visible: string }[], status: string) =>
+      rows.filter((r) => r.visible === status).map((r) => r.name);
+
+    for (const run of ['первый', 'повторный']) {
+      await seedDemo(pool);
+      const rows = await statuses();
+      expect(rows, run).toHaveLength(8);
+      expect(
+        rows.filter((r) => r.profile !== r.visible),
+        run,
+      ).toEqual([]);
+      // Компании, которые seed объявляет unresponsive и outdated; остальные — active.
+      expect(byStatus(rows, 'unresponsive'), run).toEqual(['ТОО «Тест Химия»']);
+      expect(byStatus(rows, 'outdated'), run).toEqual(['ТОО «Степь Пластик»']);
+      expect(byStatus(rows, 'active'), run).toHaveLength(6);
+    }
+  });
 });

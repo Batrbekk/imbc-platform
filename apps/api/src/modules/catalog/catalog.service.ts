@@ -2,6 +2,7 @@ import {
   type CatalogFilter,
   type CatalogPage,
   type Dashboard,
+  dashboardSchema,
   normalizeCompanyName,
   type Scope,
 } from '@imbc/contracts';
@@ -16,6 +17,17 @@ const t = catalogVisible;
 const DASHBOARD_TTL_S = 60;
 /** v2: счётчики по статусу актуальности v1.3 (UPD-06). Кеш прежней формы (dashboard:v1) не читается. */
 const DASHBOARD_CACHE_KEY = 'dashboard:v2';
+
+/** Запись кеша дашборда, если она разбирается и проходит dashboardSchema; иначе null — считаем заново. */
+function cachedDashboard(raw: string | null): Dashboard | null {
+  if (!raw) return null;
+  try {
+    const parsed = dashboardSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Порядок выдачи: unresponsive ниже active и outdated при любой сортировке (UPD-04, OPR-01, OPR-33),
@@ -135,11 +147,11 @@ export class CatalogService {
   /**
    * Дашборд оператора, наблюдателя и директора (OPR-31…35). Все счётчики — из проекции:
    * unresponsive остаётся на карте и в счётчиках по статусу (OPR-33), счётчики по тиру — OPR-32.
-   * Кеш Valkey на 60 секунд.
+   * Кеш Valkey на 60 секунд; запись не той формы или не JSON не отдаётся и перезаписывается.
    */
   async dashboard(): Promise<Dashboard> {
-    const cached = await this.valkey.get(DASHBOARD_CACHE_KEY).catch(() => null);
-    if (cached) return JSON.parse(cached) as Dashboard;
+    const cached = cachedDashboard(await this.valkey.get(DASHBOARD_CACHE_KEY).catch(() => null));
+    if (cached) return cached;
 
     const [totals] = await this.db
       .select({
