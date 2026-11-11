@@ -1,0 +1,2 @@
+CREATE TYPE "public"."profile_tier" AS ENUM('tier_1', 'tier_2');--> statement-breakpoint
+ALTER TABLE "catalog_visible" ADD COLUMN "tier" "profile_tier" GENERATED ALWAYS AS (case when "catalog_visible"."site_surveyed" then 'tier_2'::profile_tier else 'tier_1'::profile_tier end) STORED NOT NULL;

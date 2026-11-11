@@ -4,12 +4,14 @@ import {
   can,
   catalogFilterSchema,
   catalogFilterToSearchParams,
+  catalogItemSchema,
   checkBin,
   computeBinCheckDigit,
   dashboardSchema,
   normalizeCompanyName,
   POLICY_MATRIX,
   ORGANIZATION_TYPES,
+  PROFILE_TIERS,
   ROLES,
   UPDATE_STATUSES,
 } from '../src/index.js';
@@ -19,6 +21,10 @@ describe('перечисления v1.3 (раздел 3.1, UPD-06)', () => {
     expect(ROLES).toEqual(['manufacturer', 'expert', 'administrator', 'director', 'operator', 'observer']);
     expect(ORGANIZATION_TYPES).toEqual(['manufacturer', 'operator', 'observer', 'imbc']);
     expect(UPDATE_STATUSES).toEqual(['active', 'outdated', 'unresponsive']);
+  });
+
+  it('тир профиля — tier_1 и tier_2; tier 3 принадлежит продукту (IMBC-19, IMBC-20, IMBC-21)', () => {
+    expect(PROFILE_TIERS).toEqual(['tier_1', 'tier_2']);
   });
 });
 
@@ -67,6 +73,48 @@ describe('фильтры каталога (OPR-02…05)', () => {
   it('отклоняет неизвестную товарную группу', () => {
     expect(() => catalogFilterSchema.parse({ group: 'Z' })).toThrow();
   });
+
+  it('фильтр tier: список в адресе, OR внутри фильтра (OPR-02, OPR-04, OPR-05)', () => {
+    expect(catalogFilterSchema.parse({ tier: 'tier_1,tier_2' }).tier).toEqual(['tier_1', 'tier_2']);
+    expect(catalogFilterSchema.parse({ tier: 'tier_2' }).tier).toEqual(['tier_2']);
+    expect(catalogFilterToSearchParams({ tier: ['tier_2'] }).toString()).toBe('tier=tier_2');
+  });
+
+  it('неизвестный тир отклоняется, пустое значение — без фильтра', () => {
+    expect(() => catalogFilterSchema.parse({ tier: 'tier_3' })).toThrow();
+    expect(() => catalogFilterSchema.parse({ tier: 'tier_1,tier_3' })).toThrow();
+    expect(catalogFilterSchema.parse({ tier: '' }).tier).toBeUndefined();
+    expect(catalogFilterSchema.parse({}).tier).toBeUndefined();
+  });
+});
+
+describe('строка результата каталога (OPR-06)', () => {
+  const item = {
+    profileId: '00000000-0000-4000-8000-000000000001',
+    bin: '240100000001',
+    nameEn: 'Test LLP',
+    nameRu: 'ТОО «Тест»',
+    region: 'KZ-ATY',
+    commodityGroups: ['A'],
+    mainTnved: null,
+    certificateTypes: [],
+    siteSurveyed: true,
+    verifiedAt: null,
+    pendingChanges: false,
+    worksWithCount: 0,
+  };
+
+  it('строка результата несёт тир и статус unresponsive (OPR-06, UPD-06)', () => {
+    const parsed = catalogItemSchema.parse({ ...item, tier: 'tier_2', updateStatus: 'unresponsive' });
+    expect(parsed.tier).toBe('tier_2');
+    expect(parsed.updateStatus).toBe('unresponsive');
+  });
+
+  it('отклоняет строку без тира и прежний статус inactive', () => {
+    expect(() => catalogItemSchema.parse({ ...item, updateStatus: 'active' })).toThrow();
+    expect(() => catalogItemSchema.parse({ ...item, tier: 'tier_3', updateStatus: 'active' })).toThrow();
+    expect(() => catalogItemSchema.parse({ ...item, tier: 'tier_1', updateStatus: 'inactive' })).toThrow();
+  });
 });
 
 describe('дашборд (OPR-31…35)', () => {
@@ -77,8 +125,15 @@ describe('дашборд (OPR-31…35)', () => {
     siteSurveyed: 2,
     unifiedRegister: 1,
     updateStatus: { active: 2, outdated: 1, unresponsive: 2 },
+    tier: { tier_1: 3, tier_2: 2 },
     generatedAt: '2026-11-11T10:00:00.000Z',
   };
+
+  it('счётчики по тирам (OPR-32, IMBC-22)', () => {
+    expect(dashboardSchema.parse(dashboard).tier).toEqual({ tier_1: 3, tier_2: 2 });
+    const { tier: _tier, ...withoutTier } = dashboard;
+    expect(() => dashboardSchema.parse(withoutTier)).toThrow();
+  });
 
   it('счётчики по статусу актуальности включают все три статуса (OPR-33, UPD-06)', () => {
     expect(dashboardSchema.parse(dashboard).updateStatus).toEqual({ active: 2, outdated: 1, unresponsive: 2 });

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { COMMODITY_GROUPS, UPDATE_STATUSES } from './enums.js';
+import { COMMODITY_GROUPS, PROFILE_TIERS, UPDATE_STATUSES } from './enums.js';
 
 /**
  * Фильтры каталога (OPR-02, OPR-03). Значения живут в адресе страницы (OPR-05, D-21):
@@ -27,6 +27,7 @@ export const catalogFilterSchema = z.object({
   type: csv(z.string().max(64)),
   cert: csv(z.string().max(64)),
   surveyed: boolish,
+  tier: csv(z.enum(PROFILE_TIERS)),
   // Расширенные фильтры
   tnved: z
     .string()
@@ -64,6 +65,7 @@ export const catalogItemSchema = z.object({
   mainTnved: z.string().nullable(),
   certificateTypes: z.array(z.string()),
   siteSurveyed: z.boolean(),
+  tier: z.enum(PROFILE_TIERS),
   verifiedAt: z.string().nullable(),
   updateStatus: z.enum(UPDATE_STATUSES),
   pendingChanges: z.boolean(),
@@ -84,6 +86,7 @@ const count = z.number().int().min(0);
 /**
  * Дашборд видимых верифицированных производителей (OPR-31…35). Счётчики по статусу
  * актуальности включают все три статуса, unresponsive тоже остаётся на карте (OPR-33, UPD-06).
+ * Счётчики по тиру — tier 1 и tier 2 профиля (OPR-32, IMBC-22).
  */
 export const dashboardSchema = z.object({
   total: count,
@@ -92,6 +95,7 @@ export const dashboardSchema = z.object({
   siteSurveyed: count,
   unifiedRegister: count,
   updateStatus: z.object({ active: count, outdated: count, unresponsive: count }),
+  tier: z.object({ tier_1: count, tier_2: count }),
   generatedAt: z.iso.datetime(),
 });
 export type Dashboard = z.infer<typeof dashboardSchema>;

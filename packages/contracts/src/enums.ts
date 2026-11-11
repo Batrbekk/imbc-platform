@@ -23,6 +23,13 @@ export type ProfileStatus = (typeof PROFILE_STATUSES)[number];
 export const UPDATE_STATUSES = ['active', 'outdated', 'unresponsive'] as const;
 export type UpdateStatus = (typeof UPDATE_STATUSES)[number];
 
+/**
+ * Тир профиля (IMBC-19, IMBC-20): tier_1 — верифицирован, tier_2 — пока профиль site surveyed.
+ * Тир выводится, отдельно не записывается. Tier 3 принадлежит продукту (IMBC-21) и сюда не входит.
+ */
+export const PROFILE_TIERS = ['tier_1', 'tier_2'] as const;
+export type ProfileTier = (typeof PROFILE_TIERS)[number];
+
 /** Восемь секций профиля (раздел 5.2). Production — не входит в полноту (MAN-91). */
 export const PROFILE_SECTIONS = [
   'main',

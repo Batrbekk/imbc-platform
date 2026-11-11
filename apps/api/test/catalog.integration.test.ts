@@ -1,4 +1,10 @@
-import { catalogFilterSchema, computeBinCheckDigit, dashboardSchema, normalizeCompanyName } from '@imbc/contracts';
+import {
+  catalogFilterSchema,
+  catalogItemSchema,
+  computeBinCheckDigit,
+  dashboardSchema,
+  normalizeCompanyName,
+} from '@imbc/contracts';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import type pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -146,6 +152,32 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('каталог и дашбор�
     expect(d.siteSurveyed).toBe(2);
     expect(d.byCommodityGroup).toEqual([{ group: 'A', count: 5 }]);
     expect(valkey.set).toHaveBeenCalledWith('dashboard:v2', expect.any(String), 'EX', 60);
+  });
+
+  it('фильтр tier_2 — только компании с обследованием; оба значения — все (OPR-02, OPR-04)', async () => {
+    const byTier = async (tier: string) =>
+      names(await catalog.search(catalogFilterSchema.parse({ tier, sort: 'name' }), 'visible'));
+    expect(await byTier('tier_2')).toEqual(['Альфа', 'Аааа Первая']);
+    expect(await byTier('tier_1')).toEqual(['Бета', 'Гамма', 'Яяя']);
+    expect(await byTier('tier_1,tier_2')).toHaveLength(COMPANIES.length);
+  });
+
+  it('тир не зависит от статуса актуальности', async () => {
+    const page = await catalog.search(catalogFilterSchema.parse({ q: 'Аааа Первая' }), 'visible');
+    expect(page.items.map(({ nameRu, updateStatus, tier }) => ({ nameRu, updateStatus, tier }))).toEqual([
+      { nameRu: 'Аааа Первая', updateStatus: 'unresponsive', tier: 'tier_2' },
+    ]);
+  });
+
+  it('тир есть в каждой строке результата (OPR-06)', async () => {
+    const page = await catalog.search(catalogFilterSchema.parse({}), 'visible');
+    const tiers = Object.fromEntries(page.items.map((i) => [i.nameRu, catalogItemSchema.parse(i).tier]));
+    expect(tiers).toEqual(Object.fromEntries(COMPANIES.map((c) => [c.name, c.surveyed ? 'tier_2' : 'tier_1'])));
+  });
+
+  it('дашборд: счётчики по тирам (OPR-32)', async () => {
+    const d = dashboardSchema.parse(await catalog.dashboard());
+    expect(d.tier).toEqual({ tier_1: 3, tier_2: 2 });
   });
 
   it('кеш dashboard:v1 прежней формы не отдаётся', async () => {

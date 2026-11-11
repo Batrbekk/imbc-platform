@@ -132,6 +132,7 @@ export const POLICY_MATRIX: PolicyMatrix = {
     'imbc_request.send': 'own',
     'operator_request.send': 'visible',
     'tier.read': 'visible',
+    // Только какие продукты в tier 3: не статусы AGAR/CDP и не файлы отчётов (IMBC-26, OPR-09, GEN-09).
     'tier.read_products': 'visible',
     'focal_point.read': 'visible',
   },

@@ -72,6 +72,7 @@ export class CatalogService {
       );
     }
     if (f.surveyed !== undefined) where.push(eq(t.siteSurveyed, f.surveyed));
+    if (f.tier?.length) where.push(inArray(t.tier, f.tier));
     if (f.tnved) where.push(sql`exists (select 1 from unnest(${t.tnvedCodes}) c where c like ${`${f.tnved}%`})`);
     if (f.kpved) where.push(sql`exists (select 1 from unnest(${t.kpvedCodes}) c where c like ${`${f.kpved}%`})`);
     if (f.oked?.length) where.push(arrayOverlaps(t.okedCodes, f.oked));
@@ -107,6 +108,7 @@ export class CatalogService {
         mainTnved: t.mainTnved,
         certificateTypes: t.certificateTypes,
         siteSurveyed: t.siteSurveyed,
+        tier: t.tier,
         verifiedAt: t.verifiedAt,
         updateStatus: t.updateStatus,
         pendingChanges: t.pendingChanges,
@@ -132,7 +134,8 @@ export class CatalogService {
 
   /**
    * Дашборд оператора, наблюдателя и директора (OPR-31…35). Все счётчики — из проекции:
-   * unresponsive остаётся на карте и в счётчиках по статусу (OPR-33). Кеш Valkey на 60 секунд.
+   * unresponsive остаётся на карте и в счётчиках по статусу (OPR-33), счётчики по тиру — OPR-32.
+   * Кеш Valkey на 60 секунд.
    */
   async dashboard(): Promise<Dashboard> {
     const cached = await this.valkey.get(DASHBOARD_CACHE_KEY).catch(() => null);
@@ -146,6 +149,8 @@ export class CatalogService {
         active: sql<number>`count(*) filter (where ${t.updateStatus} = 'active')`.mapWith(Number),
         outdated: sql<number>`count(*) filter (where ${t.updateStatus} = 'outdated')`.mapWith(Number),
         unresponsive: sql<number>`count(*) filter (where ${t.updateStatus} = 'unresponsive')`.mapWith(Number),
+        tier1: sql<number>`count(*) filter (where ${t.tier} = 'tier_1')`.mapWith(Number),
+        tier2: sql<number>`count(*) filter (where ${t.tier} = 'tier_2')`.mapWith(Number),
       })
       .from(t);
     const byRegion = await this.db
@@ -167,6 +172,7 @@ export class CatalogService {
         outdated: totals?.outdated ?? 0,
         unresponsive: totals?.unresponsive ?? 0,
       },
+      tier: { tier_1: totals?.tier1 ?? 0, tier_2: totals?.tier2 ?? 0 },
       generatedAt: new Date().toISOString(),
     };
     await this.valkey
