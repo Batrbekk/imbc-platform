@@ -1,0 +1,98 @@
+# Сборочный конвейер (NFR-12, roadmap этап 0): типы, lint, тесты, сборка
+# и интеграционные тесты API на PostgreSQL 18 на каждый коммит.
+# Без секретов, развёртывания и публикации.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  TURBO_TELEMETRY_DISABLED: '1'
+
+jobs:
+  check:
+    name: Types, lint, tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      # Версия pnpm берётся из поля packageManager корневого package.json.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      # Без TEST_DATABASE_URL интеграционные тесты здесь пропускаются;
+      # их выполнение проверяет job integration.
+      - run: pnpm test
+      - run: pnpm build
+
+  integration:
+    name: API integration tests (PostgreSQL 18)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        # PostgreSQL 18 обязателен: схема использует uuidv7(), тесты создают pg_trgm.
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          # Тестовый набор отказывается работать с базой под другим именем.
+          POSTGRES_DB: imbc_auth_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d imbc_auth_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/imbc_auth_test
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Тесты API импортируют собранный @imbc/contracts.
+      - run: pnpm --filter @imbc/contracts build
+      - name: API tests against PostgreSQL 18
+        run: >-
+          pnpm --filter @imbc/api exec vitest run
+          --reporter=default --reporter=json
+          --outputFile.json="$RUNNER_TEMP/api-tests.json"
+      # describe.skipIf пропускает интеграционные тесты молча, и vitest
+      # завершается успешно. Отчёт проверяется явно: ни одного пропущенного
+      # теста и хотя бы один выполненный интеграционный тест.
+      - name: Fail if integration tests were skipped
+        run: |
+          node -e '
+            const report = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+            const files = report.testResults.filter((f) => /\.integration\.test\.ts$/.test(f.name));
+            const tests = files.flatMap((f) => f.assertionResults);
+            const passed = tests.filter((t) => t.status === "passed").length;
+            console.log(`API: ${report.numPassedTests} passed, ${report.numFailedTests} failed, ${report.numPendingTests} skipped, ${report.numTodoTests} todo`);
+            console.log(`Integration: ${passed}/${tests.length} passed in ${files.length} file(s)`);
+            if (!report.success || report.numFailedTests > 0 || report.numPendingTests > 0 || report.numTodoTests > 0 || passed === 0 || passed !== tests.length) {
+              console.log("::error::API integration tests did not all run and pass against PostgreSQL 18");
+              process.exit(1);
+            }
+          ' "$RUNNER_TEMP/api-tests.json"
