@@ -135,16 +135,48 @@ test('идентификаторы решений и чужие префиксы
 test('запись, разобранная не полностью, — ошибка, а не потеря', () => {
   const issues = (text) => scanReferences(text).issues.map((i) => i.message);
   assert.match(issues('AUTH-01–05, 08–10').join('\n'), /без префикса/);
+  assert.match(issues('AUTH-01–05, 08–10).').join('\n'), /без префикса/);
+  assert.match(issues('AUTH-01–05; 08–10, AUTH-12').join('\n'), /без префикса/);
   assert.match(issues('AUTH-01-05').join('\n'), /дефис/);
   assert.match(issues('OPR-35…31').join('\n'), /обратный/);
   assert.match(issues('OPR-31…3').join('\n'), /не разворачивается/);
+  assert.match(issues('GEN-08/2').join('\n'), /не разворачивается/);
   assert.match(issues('OPR-31…GEN-05').join('\n'), /не разворачивается/);
+  assert.match(issues('IMBC-07…OPR-14').join('\n'), /не разворачивается/);
   assert.deepEqual(scanReferences('OPR-35…31').refs, [
     { id: 'OPR-35', line: 1, source: 'OPR-35…31', kind: 'диапазона' },
   ]);
-  for (const text of ['GEN-08…', 'см. GEN-08... и дальше', 'GEN-08, 15 минут', 'MAN-01/GEN-05', 'IMBC-07…IMBC-14']) {
-    assert.deepEqual(issues(text), [], text);
+});
+
+test('обычный текст рядом с ID ошибкой не считается', () => {
+  for (const text of [
+    'GEN-08…',
+    'см. GEN-08... и дальше',
+    'GEN-08, 15 минут',
+    '(GEN-08, 15–20 минут)',
+    'GEN-08, 10-15 минут',
+    'GEN-08; 15-20 сек',
+    'MAN-25, 25-26 ноября',
+    'MAN-25/2026',
+    'GEN-08–2026',
+    'GEN-08/12/2026',
+    'MAN-25/26/2026',
+    'MAN-01/GEN-05',
+    'IMBC-07…IMBC-14',
+    'GEN-08, GEN-10',
+    'OPR-31…35, OPR-38',
+    'NFR-06 - совместимость',
+    'UPD-04 – профиль остаётся',
+    'IMBC-10 v1.3',
+    'AUTH-03 от 11-11-2026',
+  ]) {
+    assert.deepEqual(scanReferences(text).issues, [], text);
   }
+  // Дата через «/» — не перечень: берётся только первый ID.
+  assert.deepEqual(ids('GEN-08/12/2026'), ['GEN-08']);
+  assert.deepEqual(ids('MAN-25/26/2026'), ['MAN-25']);
+  assert.deepEqual(ids('MAN-25/2026'), ['MAN-25']);
+  assert.deepEqual(ids('OPR-31…35, OPR-38'), ['OPR-31', 'OPR-32', 'OPR-33', 'OPR-34', 'OPR-35', 'OPR-38']);
 });
 
 test('несуществующий ID вне базового списка — ошибка с файлом и строкой', () => {
@@ -220,6 +252,10 @@ test('базовый список: канонический вид, иначе �
     assert.equal(errors.length, 1, raw);
     assert.match(errors[0], /--update-baseline/, raw);
   }
+  assert.equal(parseBaseline('{ not json').baseline, null);
+  assert.equal(parseBaseline('{\n  "apps/a.ts": ["NFR-32"]\n}\n').baseline, null);
+  // Окончания строк CRLF канонический вид не нарушают.
+  assert.deepEqual(parseBaseline(text.replace(/\n/g, '\r\n')).errors, []);
 });
 
 const fakeSpecIds = ['GEN-01', 'GEN-02', 'GEN-03', 'AUTH-01', 'AUTH-02'];
@@ -380,6 +416,22 @@ test('скрипт: из подкаталога — тот же корень, т
   assert.match(fromSub.stderr, /^apps\/api\/src\/a\.ts:2: GEN-99 нет в спецификации$/m);
   assert.equal(fromSub.stderr, fromRoot.stderr);
   assert.equal(fromSub.stdout, fromRoot.stdout);
+});
+
+test('скрипт: базовый список неверной формы — одна ошибка о нём, без ошибок по ссылкам', () => {
+  const dir = tempRepo(
+    {
+      'spec.md': '- **GEN-01.** Первое.\n',
+      'apps/a.ts': '// GEN-98\n// GEN-99\n',
+      'scripts/requirements-baseline.json': '{\n  "apps/a.ts": ["GEN-98", "GEN-99"]\n}\n',
+    },
+    ['spec.md', 'apps', 'scripts'],
+  );
+  const result = runIn(dir, '--spec', 'spec.md');
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /ожидается объект/);
+  assert.doesNotMatch(result.stderr, /нет в спецификации/);
+  assert.match(result.stderr, /ошибок 1\n/);
 });
 
 test('скрипт: ни одного файла для проверки — ошибка', () => {

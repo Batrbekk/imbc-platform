@@ -125,11 +125,20 @@ export function parseSpecIds(text) {
  * «MAN-100», «OPR-5») и строчные формы («man-50», «tier-2») намеренно
  * не считаются ID: в спецификации их нет, а похожих чужих обозначений много.
  *
- * Продолжения сразу после ID: диапазон («…», «...», «–», правый конец — номер
- * или ID того же раздела) и перечисление через «/». Ошибкой («issues»)
- * считается то, что похоже на продолжение, но не разворачивается: обратный
- * диапазон, хвост другого вида (одна цифра, ID другого раздела, дефис-минус
- * вместо тире) и номера без префикса после запятой, как в нотации карты.
+ * Продолжения сразу после ID: диапазон («…», «...», «–», правый конец — две
+ * цифры или ID того же раздела) и перечисление через «/» (две цифры или ID
+ * того же раздела). Перечнем через «/», за которым идёт ещё «/» и три и более
+ * цифры, считается дата: из неё берётся только первый ID.
+ *
+ * Ошибкой («issues») считается запись, которая похожа на продолжение, но
+ * не разворачивается:
+ * - обратный или пустой диапазон;
+ * - после «…», «...», «–» — ровно одна цифра или ID другого раздела, после «/» —
+ *   ровно одна цифра (три и более цифр — год или число, не ошибка);
+ * - дефис-минус и ровно две цифры вместо тире;
+ * - после «,» или «;» — диапазон из двух номеров без префикса, как в нотации
+ *   карты, если за ним конец строки, знак препинания или ID (за ним слово —
+ *   «15–20 минут» — это обычный текст, не ошибка).
  * Примеры — в scripts/check-requirements.test.mjs (здесь они сработали бы).
  */
 export function scanReferences(text, prefixes = REQUIREMENT_PREFIXES) {
@@ -143,9 +152,12 @@ export function scanReferences(text, prefixes = REQUIREMENT_PREFIXES) {
   const head = new RegExp(`(?<![A-Za-z0-9_-])(${alternatives})-(\\d{2})(?!\\d)`, 'g');
   const separators = [...RANGE_SEPARATORS, '/'].map(escape).join('|');
   const rangeSeparators = RANGE_SEPARATORS.map(escape).join('|');
-  const brokenTail = new RegExp(`^(?:(?:${rangeSeparators})(?=\\d|[A-Z]+-\\d)|\\/(?=\\d))`);
+  const brokenTail = new RegExp(`^(?:(?:${rangeSeparators})(?=\\d(?!\\d)|[A-Z]+-\\d)|\\/(?=\\d(?!\\d)))`);
   const hyphenTail = /^-\d{2}(?!\d)/;
-  const bareNumbers = new RegExp(`^\\s*[,;]\\s*\\d{2}(?!\\d)\\s*(?:${rangeSeparators}|-)\\s*\\d{2}(?!\\d)`);
+  const bareNumbers = new RegExp(
+    `^\\s*[,;]\\s*\\d{2}(?!\\d)\\s*(?:${rangeSeparators}|-)\\s*\\d{2}(?!\\d)(?=\\s*(?:$|[,;.)\\]|]|[A-Z]+-\\d{2}))`,
+  );
+  const dateTail = /^\/\d{3,}/;
 
   text.split('\n').forEach((lineText, index) => {
     const line = index + 1;
@@ -174,6 +186,11 @@ export function scanReferences(text, prefixes = REQUIREMENT_PREFIXES) {
         }
         last = n;
         pos = tail.lastIndex;
+      }
+      // ID, «/» и дата («/26/2026») — не перечень: остаётся только первый ID.
+      if (!ranged && run.length > 1 && dateTail.test(lineText.slice(pos))) {
+        run.length = 1;
+        pos = head.lastIndex;
       }
       const rest = lineText.slice(pos);
       const snippet = () => `«${lineText.slice(start, pos + 12).trim()}»`;
@@ -462,14 +479,17 @@ export function formatBaseline(unknown) {
   return `{\n${body.join('\n')}\n}\n`;
 }
 
-/** Разбор базового списка: форма «файл → { ID: целое > 0 }» и канонический вид (без повторов, по порядку). */
+/**
+ * Разбор базового списка: форма «файл → { ID: целое > 0 }» и канонический вид
+ * (без повторов, по порядку). baseline — null, если файл не разобран или форма неверна.
+ */
 export function parseBaseline(raw) {
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch (e) {
     return {
-      baseline: {},
+      baseline: null,
       errors: [`${BASELINE_FILE}: не разобран JSON (${e.message}); перегенерируйте его: --update-baseline`],
     };
   }
@@ -483,13 +503,14 @@ export function parseBaseline(raw) {
     );
   if (!valid) {
     return {
-      baseline: {},
+      baseline: null,
       errors: [
         `${BASELINE_FILE}: ожидается объект «файл → { ID: число вхождений }»; перегенерируйте его: --update-baseline`,
       ],
     };
   }
-  if (formatBaseline(parsed) !== raw) {
+  // Сравнение без учёта окончаний строк: checkout с CRLF канонический вид не нарушает.
+  if (formatBaseline(parsed) !== raw.replace(/\r\n/g, '\n')) {
     return {
       baseline: parsed,
       errors: [
@@ -624,13 +645,18 @@ export function main(argv, { cwd = process.cwd(), log = console.log, error = con
       const parsed = existsSync(baselinePath)
         ? parseBaseline(readFileSync(baselinePath, 'utf8'))
         : { baseline: {}, errors: [] };
-      const result = checkReferences(refs, known, parsed.baseline);
-      errors.push(...parsed.errors, ...result.errors);
-      referenceErrors += parsed.errors.length + result.errors.length;
-      log(
-        `Ссылки: ${total} в ${refs.size} из ${files.length} файлов; ` +
-          `несуществующих ID (по базовому списку): ${countValues(result.unknown)} в ${Object.keys(result.unknown).length} файлах`,
-      );
+      errors.push(...parsed.errors);
+      referenceErrors += parsed.errors.length;
+      // Без разобранного базового списка каждая устаревшая ссылка стала бы ошибкой: останавливаемся на его ошибке.
+      if (parsed.baseline !== null) {
+        const result = checkReferences(refs, known, parsed.baseline);
+        errors.push(...result.errors);
+        referenceErrors += result.errors.length;
+        log(
+          `Ссылки: ${total} в ${refs.size} из ${files.length} файлов; ` +
+            `несуществующих ID (по базовому списку): ${countValues(result.unknown)} в ${Object.keys(result.unknown).length} файлах`,
+        );
+      }
     }
   }
 
