@@ -23,8 +23,14 @@ export function safeReturnTo(value: unknown, fallback = '/'): string {
   return local(value) ?? local(fallback) ?? '/';
 }
 
+/**
+ * Стартовая страница роли после входа. У оператора, наблюдателя и директора IMBC — дашборд
+ * (OPR-31). У SME — каталог, пока нет очереди проверки. Роль вправе открыть свою
+ * стартовую страницу по матрице прав: `/dashboard` — `dashboard.read`, `/catalog` — `catalog.search`.
+ */
 export function roleHome(role: Role): string {
   if (role === 'manufacturer') return '/profile';
   if (role === 'administrator') return '/account';
-  return '/catalog';
+  if (role === 'expert') return '/catalog';
+  return '/dashboard';
 }

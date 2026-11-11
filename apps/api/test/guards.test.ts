@@ -37,7 +37,8 @@ function auth(role: AuthContext['user']['role'], over: Partial<AuthContext> = {}
       fullName: null,
       role,
       organizationId: 'o',
-      organizationType: 'operator',
+      // Наблюдатель состоит в организации типа observer (раздел 3.1).
+      organizationType: role === 'observer' ? 'observer' : 'operator',
       locale: 'kk',
     },
     ...over,

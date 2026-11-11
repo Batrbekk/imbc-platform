@@ -10,6 +10,7 @@ import {
   dashboardSchema,
   normalizeCompanyName,
   POLICY_MATRIX,
+  type PolicyMatrix,
   ORGANIZATION_TYPES,
   PROFILE_TIERS,
   ROLES,
@@ -148,6 +149,100 @@ describe('дашборд (OPR-31…35)', () => {
 
 describe('PolicyMatrix (раздел 4 v1.3; GEN-03, GEN-04, GEN-10, GEN-13)', () => {
   const row = (action: Action) => Object.fromEntries(ROLES.map((r) => [r, can(r, action)]));
+
+  // Раздел 4 v1.3, выписанный построчно: любое право, добавленное или снятое в матрице
+  // без правки этой таблицы, роняет тест (GEN-10).
+  const SECTION_4: PolicyMatrix = {
+    manufacturer: {
+      'profile.read': 'own', // Own profile: edit
+      'profile.edit': 'own',
+      'operator_request.reply': 'own', // Operator request: reply
+      'forecast.read': 'after_nda', // Demand forecast, STR, and KTRE: once verified, current NDA
+      'tier.read': 'own', // Tier, AGAR, and CDP: request own
+      'tier.read_products': 'own',
+      'tier.request': 'own',
+      'focal_point.read': 'own',
+    },
+    expert: {
+      'profile.read': 'all', // Own profile: view
+      'profile.verify': 'all', // Verify profiles, sections, documents
+      'review.take': 'all', // Assign reviews: take
+      'imbc_records.read': 'all', // Site survey, due diligence, IMBC notes: edit
+      'imbc_records.edit': 'all',
+      'external_checks.run': 'all', // External checks: run and view
+      'external_checks.read': 'all',
+      'works_with.validate': 'all', // Validate works-with and visit marks; see who works with whom
+      'works_with.read_who': 'all',
+      'catalog.search': 'all', // Search and company page: all profiles
+      'catalog.export': 'all', // Export search results
+      'operator_notes.read': 'all', // Operator notes: view
+      'imbc_request.answer': 'all', // IMBC request: answer
+      'imbc_request.read': 'all',
+      'operator_request.read': 'all', // Operator request: view
+      'forecast.read': 'all', // Demand forecast, STR, and KTRE: view
+      'tier.read': 'all', // Tier, AGAR, and CDP: edit
+      'tier.read_products': 'all',
+      'tier.edit': 'all',
+      'focal_point.read': 'all',
+    },
+    administrator: {
+      'review.assign': 'all', // Assign reviews: assign
+      'accounts.manage': 'all', // Accounts of all organisations
+      'reference.manage': 'all', // Reference lists, NDA versions, organisation-chart sample
+      'reference.read': 'all',
+      'forecast.manage': 'all', // Import and publish forecast; STR and KTRE files
+      'forecast.read': 'all', // Demand forecast, STR, and KTRE: view
+      'migration.invite': 'all', // Invite migrated manufacturers
+      'pull_api.manage': 'all', // Pull API: issue and revoke
+      'audit.read': 'account_events', // Audit log: account events only
+    },
+    director: {
+      'profile.read': 'all', // Own profile: view
+      'imbc_records.read': 'all', // Site survey, due diligence, IMBC notes: view
+      'external_checks.read': 'all', // External checks: view
+      'works_with.read_who': 'all', // See which operators work with whom: view
+      'reference.read': 'all', // Reference lists: view
+      'forecast.read': 'all', // Forecast; STR and KTRE: view
+      'catalog.search': 'all', // Search and company page: all profiles
+      'dashboard.read': 'all', // Dashboard
+      'catalog.export': 'all', // Export search results
+      'operator_notes.read': 'all', // Operator notes: view
+      'imbc_request.read': 'all', // IMBC request: view
+      'operator_request.read': 'all', // Operator request: view
+      'audit.read': 'all', // Audit log: all
+      'tier.read': 'all', // Tier, AGAR, and CDP: view
+      'tier.read_products': 'all',
+      'focal_point.read': 'all',
+    },
+    operator: {
+      'catalog.search': 'visible', // Search and company page: visible verified only
+      'dashboard.read': 'visible', // Dashboard
+      'catalog.export': 'visible', // Export search results
+      'subscriptions.manage': 'own', // Export subscriptions: own only
+      'pull_api.use': 'own', // Pull API: own organisation
+      'operator_marks.write': 'own', // Works-with mark, visit mark: own organisation
+      'operator_notes.read': 'own', // Operator notes: own organisation
+      'operator_notes.write': 'own',
+      'imbc_request.send': 'own', // IMBC request: send
+      'operator_request.send': 'visible', // Operator request: send
+      'tier.read': 'visible', // Tier, and which products are tier 3
+      'tier.read_products': 'visible',
+      'focal_point.read': 'visible',
+    },
+    observer: {
+      'catalog.search': 'visible', // Search and company page: visible verified only, without the focal point
+      'dashboard.read': 'visible', // Dashboard
+      'tier.read': 'visible', // Tier, AGAR, and CDP: tier only
+    },
+  };
+
+  it('матрица целиком совпадает с разделом 4 (GEN-08, GEN-10)', () => {
+    // Сначала имена: опечатка в таблице даёт понятное сообщение, а не только разницу матриц.
+    const known = new Set(Object.values(POLICY_MATRIX).flatMap((r) => Object.keys(r)));
+    for (const action of Object.values(SECTION_4).flatMap((r) => Object.keys(r) as Action[]))
+      expect(known, action).toContain(action);
+    expect(POLICY_MATRIX).toEqual(SECTION_4);
+  });
 
   it('у каждой роли есть запись', () => {
     for (const role of ROLES) expect(POLICY_MATRIX[role]).toBeDefined();
