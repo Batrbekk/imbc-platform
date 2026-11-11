@@ -117,6 +117,10 @@ describe("ошибка маршрута (LANG-02)", () => {
 
     expect(await screen.findByRole("heading", { name: ru.routeError.title })).toBeTruthy();
     expect(screen.getByText(ru.routeError.description)).toBeTruthy();
+    // Экран заменяет корень вместе с областью объявлений: диктору его объявляет сама карточка.
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain(ru.routeError.title);
+    expect(alert.textContent).toContain(ru.routeError.description);
     // В разработке ошибка не прячется за общим экраном.
     expect(consoleError).toHaveBeenCalledWith(expect.objectContaining({ message: CHUNK_ERROR }));
     expect(document.title).toBe(`${ru.routeError.title} · ${ru.common.appName}`);

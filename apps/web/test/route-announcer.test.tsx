@@ -26,7 +26,7 @@ const OPERATOR: Me = {
     locale: "ru",
   },
   gates: { mfa: true, responsibility: true },
-  homePath: "/catalog",
+  homePath: "/dashboard",
   otpDelivery: "email",
 };
 
@@ -42,6 +42,7 @@ function stubWorkspace() {
         siteSurveyed: 0,
         unifiedRegister: 0,
         updateStatus: { active: 0, outdated: 0, unresponsive: 0 },
+        tier: { tier_1: 0, tier_2: 0 },
         generatedAt: "2026-11-11T10:00:00Z",
       },
     },
@@ -64,6 +65,25 @@ describe("объявление смены страницы", () => {
     await router.navigate("/dashboard");
     expect(await screen.findByRole("heading", { name: ru.dashboard.title })).toBeTruthy();
     await waitFor(() => expect(announcer().textContent).toBe(`${ru.dashboard.title} · ${ru.common.appName}`));
+  });
+
+  it("два перехода подряд с одинаковым заголовком объявляются оба раза: область очищается перед записью", async () => {
+    const { router } = renderRoute("/no-such-page", { locale: "ru" });
+    expect(await screen.findByRole("heading", { name: ru.notFound.title })).toBeTruthy();
+    const title = `${ru.notFound.title} · ${ru.common.appName}`;
+    await router.navigate("/another-missing-page");
+    await waitFor(() => expect(announcer().textContent).toBe(title));
+
+    // Текст области в каждом пакете изменений: при том же заголовке область сначала пустеет,
+    // и диктор видит новое содержимое, а не то же самое.
+    const seen: string[] = [];
+    const observer = new MutationObserver(() => seen.push(announcer().textContent ?? ""));
+    observer.observe(announcer(), { childList: true, characterData: true, subtree: true });
+    await router.navigate("/third-missing-page");
+    await waitFor(() => expect(seen).toEqual(["", title]));
+    await router.navigate("/fourth-missing-page");
+    await waitFor(() => expect(seen).toEqual(["", title, "", title]));
+    observer.disconnect();
   });
 
   it("смена только query string (фильтры каталога) не объявляется", async () => {

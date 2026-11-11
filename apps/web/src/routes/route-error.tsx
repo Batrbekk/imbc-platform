@@ -46,7 +46,9 @@ export function RouteError() {
   return (
     <main className="flex min-h-svh items-center justify-center p-4">
       <PageTitle title={t("title")} />
-      <Card className="w-full max-w-md">
+      {/* Экран заменяет корень вместе с областью объявлений (RouteAnnouncer): диктору его
+          объявляет сама карточка. */}
+      <Card className="w-full max-w-md" role="alert">
         <CardHeader>
           <CardTitle>
             <h1 className="text-xl">{t("title")}</h1>

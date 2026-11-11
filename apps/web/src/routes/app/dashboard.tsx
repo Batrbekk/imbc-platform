@@ -1,3 +1,4 @@
+import type { Dashboard } from "@imbc/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { useTranslations } from "use-intl";
@@ -10,15 +11,25 @@ import { useFormat } from "@/i18n/format";
 import { api } from "@/lib/api";
 import { serializeCatalog } from "@/lib/catalog-params";
 
-interface Dashboard {
-  total: number;
-  byRegion: { region: string; count: number }[];
-  byCommodityGroup: { group: string; count: number }[];
-  siteSurveyed: number;
-  unifiedRegister: number;
-  updateStatus: { active: number; outdated: number; unresponsive: number };
-  generatedAt: string;
-}
+/**
+ * Плитки счётчиков (OPR-32). Плитка со ссылкой открывает каталог с тем же фильтром (OPR-35);
+ * у счётчиков актуальности фильтра в каталоге нет. Скелет загрузки — по числу плиток.
+ */
+const TILES: { label: string; value: (data: Dashboard) => number; href?: string }[] = [
+  { label: "total", value: (d) => d.total, href: "/catalog" },
+  { label: "siteSurveyed", value: (d) => d.siteSurveyed, href: `/catalog${serializeCatalog({ surveyed: true })}` },
+  {
+    label: "unifiedRegister",
+    value: (d) => d.unifiedRegister,
+    href: `/catalog${serializeCatalog({ unifiedRegister: true })}`,
+  },
+  // Тир профиля (IMBC-19, IMBC-20, IMBC-22).
+  { label: "tier1", value: (d) => d.tier.tier_1, href: `/catalog${serializeCatalog({ tier: ["tier_1"] })}` },
+  { label: "tier2", value: (d) => d.tier.tier_2, href: `/catalog${serializeCatalog({ tier: ["tier_2"] })}` },
+  { label: "active", value: (d) => d.updateStatus.active },
+  { label: "outdated", value: (d) => d.updateStatus.outdated },
+  { label: "unresponsive", value: (d) => d.updateStatus.unresponsive },
+];
 
 export function DashboardPage() {
   const t = useTranslations("dashboard");
@@ -55,36 +66,24 @@ function DashboardView() {
   if (!data) {
     return (
       <div className="grid gap-4 md:grid-cols-3">
-        {Array.from({ length: 6 }, (_, i) => (
-          <Skeleton key={i} className="h-28" />
+        {TILES.map((tile) => (
+          <Skeleton key={tile.label} className="h-28" />
         ))}
       </div>
     );
   }
 
-  const tiles = [
-    { label: t("total"), value: data.total, href: "/catalog" },
-    { label: t("siteSurveyed"), value: data.siteSurveyed, href: `/catalog${serializeCatalog({ surveyed: true })}` },
-    {
-      label: t("unifiedRegister"),
-      value: data.unifiedRegister,
-      href: `/catalog${serializeCatalog({ unifiedRegister: true })}`,
-    },
-    { label: t("active"), value: data.updateStatus.active },
-    { label: t("outdated"), value: data.updateStatus.outdated },
-    { label: t("unresponsive"), value: data.updateStatus.unresponsive },
-  ];
   const maxRegion = Math.max(1, ...data.byRegion.map((r) => r.count));
 
   return (
     <div className="flex flex-col gap-4">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {tiles.map((tile) => {
+        {TILES.map((tile) => {
           const card = (
             <Card className="h-full transition-colors hover:border-primary/40">
               <CardHeader>
-                <CardDescription>{tile.label}</CardDescription>
-                <CardTitle className="text-3xl tabular-nums">{format.number(tile.value)}</CardTitle>
+                <CardDescription>{t(tile.label)}</CardDescription>
+                <CardTitle className="text-3xl tabular-nums">{format.number(tile.value(data))}</CardTitle>
               </CardHeader>
             </Card>
           );
@@ -125,7 +124,7 @@ function DashboardView() {
             {data.byCommodityGroup.map((g) => (
               <Link
                 key={g.group}
-                to={`/catalog${serializeCatalog({ group: [g.group as "A"] })}`}
+                to={`/catalog${serializeCatalog({ group: [g.group] })}`}
                 className="rounded-lg border p-3 text-center hover:border-primary/40"
               >
                 <div className="text-sm text-muted-foreground">{g.group}</div>

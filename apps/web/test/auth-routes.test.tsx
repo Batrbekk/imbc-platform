@@ -16,7 +16,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function me(gates: Me["gates"], role: Me["user"]["role"] = "operator", homePath = "/catalog"): Me {
+function me(gates: Me["gates"], role: Me["user"]["role"] = "operator", homePath = "/dashboard"): Me {
   return {
     user: {
       id: "00000000-0000-4000-8000-000000000001",
@@ -127,13 +127,13 @@ describe("переходы по состоянию сеанса (AUTH-03, AUTH-1
     });
     ({ router } = renderRoute("/"));
     await waitFor(() => expect(router.state.location.pathname).toBe("/auth/verify"));
-    expect(router.state.location.search).toBe("?returnTo=%2Fcatalog");
+    expect(router.state.location.search).toBe("?returnTo=%2Fdashboard");
     cleanup();
 
     stubApi({ "GET /api/auth/me": { body: me({ mfa: true, responsibility: false }) } });
     ({ router } = renderRoute("/"));
     await waitFor(() => expect(router.state.location.pathname).toBe("/auth/responsibility"));
-    expect(router.state.location.search).toBe("?returnTo=%2Fcatalog");
+    expect(router.state.location.search).toBe("?returnTo=%2Fdashboard");
   });
 
   it("/ при сбое связи показывает ошибку и повтор", async () => {
@@ -178,7 +178,7 @@ describe("переходы по состоянию сеанса (AUTH-03, AUTH-1
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/auth/responsibility"));
     // Чужой адрес возврата заменён стартовой страницей роли.
-    expect(router.state.location.search).toBe("?returnTo=%2Fcatalog");
+    expect(router.state.location.search).toBe("?returnTo=%2Fdashboard");
     const sends = api.mock.calls.filter(([url, init]) => String(url).endsWith("/otp/send") && init?.method === "POST");
     expect(sends).toHaveLength(1);
     const verify = api.mock.calls.find(([url]) => String(url).endsWith("/otp/verify"));

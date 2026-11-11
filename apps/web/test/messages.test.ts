@@ -46,6 +46,21 @@ describe("файлы переводов", () => {
     }
   });
 
+  it("тир в каталоге и на дашборде переведён на три языка (OPR-02, OPR-06, OPR-32)", () => {
+    for (const locale of LOCALES) {
+      const keys = keyPaths(locale);
+      for (const path of [
+        "catalog.tier",
+        "catalog.tierValue.tier_1",
+        "catalog.tierValue.tier_2",
+        "catalog.columns.tier",
+        "dashboard.tier1",
+        "dashboard.tier2",
+      ])
+        expect(keys, `${locale}: нет ключа ${path}`).toContain(path);
+    }
+  });
+
   it("пустых строк нет", () => {
     for (const locale of LOCALES) {
       for (const [path, text] of entries(messages[locale])) {

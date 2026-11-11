@@ -21,6 +21,15 @@ function lazyPage<M>(load: () => Promise<M>, pick: (module: M) => ComponentType)
   return async () => ({ Component: pick(await load()) });
 }
 
+/**
+ * Пути сравниваются с учётом регистра: по умолчанию React Router принял бы `/CATALOG` за каталог,
+ * а шлюз роли сравнивает путь буквально и пропустил бы его. Теперь такой адрес — «не найдено».
+ */
+function caseSensitive(route: RouteObject): RouteObject {
+  if (route.index) return route;
+  return { ...route, caseSensitive: true, children: route.children?.map(caseSensitive) };
+}
+
 /** Маршруты приложения. Страницы — дети корня; «*» остаётся последним. */
 export const routes: RouteObject[] = [
   {
@@ -63,6 +72,7 @@ export const routes: RouteObject[] = [
           },
           {
             path: "profile",
+            handle: { title: "nav.profile" } satisfies AppRouteHandle,
             lazy: lazyPage(() => import("@/routes/app/profile"), (m) => m.ProfilePage),
           },
         ],
@@ -70,7 +80,7 @@ export const routes: RouteObject[] = [
       { path: "*", element: <NotFoundPage /> },
     ],
   },
-];
+].map(caseSensitive);
 
 export function createAppRouter(): DataRouter {
   return createBrowserRouter(routes);

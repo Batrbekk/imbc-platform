@@ -1,5 +1,5 @@
 // Оболочка рабочих страниц: интерфейс прячет недоступное, решает сервер (GEN-08, GEN-10).
-import { can } from "@imbc/contracts";
+import { can, type Dashboard, ROLES, roleHome } from "@imbc/contracts";
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -22,9 +22,9 @@ const HOME: Record<Me["user"]["role"], string> = {
   manufacturer: "/profile",
   administrator: "/account",
   expert: "/catalog",
-  director: "/catalog",
-  operator: "/catalog",
-  observer: "/catalog",
+  director: "/dashboard",
+  operator: "/dashboard",
+  observer: "/dashboard",
 };
 
 function me(role: Me["user"]["role"], gates: Me["gates"] = { mfa: true, responsibility: true }): Me {
@@ -45,13 +45,14 @@ function me(role: Me["user"]["role"], gates: Me["gates"] = { mfa: true, responsi
 }
 
 const EMPTY_PAGE = { items: [], total: 0, page: 1, pageSize: 25 };
-const DASHBOARD = {
+const DASHBOARD: Dashboard = {
   total: 0,
   byRegion: [],
   byCommodityGroup: [],
   siteSurveyed: 0,
   unifiedRegister: 0,
   updateStatus: { active: 0, outdated: 0, unresponsive: 0 },
+  tier: { tier_1: 0, tier_2: 0 },
   generatedAt: "2026-11-11T10:00:00Z",
 };
 
@@ -102,7 +103,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     // Ссылка с видом кнопки остаётся ссылкой, а не кнопкой Base UI.
     expect(page.getByRole("link", { name: kk.nav.account }).getAttribute("href")).toBe("/account");
     expect(page.queryByRole("button", { name: kk.nav.account })).toBeNull();
-    expect(document.title).toBe(kk.common.appName);
+    expect(document.title).toBe(`${kk.nav.profile} · ${kk.common.appName}`);
     // Меню производителя — профиль компании и аккаунт, без каталога и дашборда.
     expect(screen.getByRole("link", { name: kk.nav.profile }).getAttribute("href")).toBe("/profile");
     expect(screen.queryByRole("link", { name: kk.nav.catalog })).toBeNull();
@@ -113,6 +114,53 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     ({ router } = renderRoute("/dashboard"));
     await waitFor(() => expect(router.state.location.pathname).toBe("/account"));
     expect(await screen.findByRole("heading", { name: kk.account.title })).toBeTruthy();
+  });
+
+  it.each(ROLES)("%s со входа на / попадает на стартовую страницу роли и видит её первым пунктом меню (OPR-31)", async (role) => {
+    stubWorkspace(me(role));
+    const { router } = renderRoute("/");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe(HOME[role]));
+    expect(HOME[role]).toBe(roleHome(role));
+    await screen.findAllByText(`${role}@${role}.local`);
+    const first = screen.getAllByRole("link").find((link) => link.dataset.sidebar === "menu-button")!;
+    expect(first.getAttribute("href")).toBe(HOME[role]);
+    expect(first.hasAttribute("data-active")).toBe(true);
+  });
+
+  it("производитель на /catalog/ уходит на /profile: завершающий / не обходит шлюз роли", async () => {
+    const api = stubWorkspace(me("manufacturer"));
+    const { router } = renderRoute("/catalog/?q=steel");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/profile"));
+    expect(await screen.findByText(kk.profile.welcome)).toBeTruthy();
+    expect(api.mock.calls.map(([url]) => String(url)).filter((url) => url.startsWith("/api/v1/"))).toEqual([]);
+  });
+
+  it("эксперт на /dashboard/ уходит на /catalog; /catalog/ ему открыт", async () => {
+    stubWorkspace(me("expert"));
+    let { router } = renderRoute("/dashboard/");
+    await waitFor(() => expect(router.state.location.pathname).toBe("/catalog"));
+    expect(await screen.findByRole("heading", { name: kk.catalog.title })).toBeTruthy();
+    cleanup();
+
+    stubWorkspace(me("expert"));
+    ({ router } = renderRoute("/catalog/"));
+    expect(await screen.findByRole("heading", { name: kk.catalog.title })).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/catalog/");
+  });
+
+  it("маршруты чувствительны к регистру: /CATALOG — «не найдено», без оболочки и без поиска", async () => {
+    for (const role of ["manufacturer", "operator"] as const) {
+      const api = stubWorkspace(me(role));
+      const { router } = renderRoute("/CATALOG");
+
+      expect(await screen.findByRole("heading", { name: kk.notFound.title })).toBeTruthy();
+      expect(router.state.location.pathname).toBe("/CATALOG");
+      expect(document.querySelector('[data-sidebar="sidebar"]')).toBeNull();
+      expect(api.mock.calls.map(([url]) => String(url)).filter((url) => url.startsWith("/api/v1/"))).toEqual([]);
+      cleanup();
+    }
   });
 
   it("сбой связи при проверке сеанса — сообщение и повтор, заголовок вкладки — страницы", async () => {
@@ -153,18 +201,22 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     expect(screen.queryByRole("heading", { name: ru.dashboard.title })).toBeNull();
   });
 
-  it("меню по матрице прав: оператор, директор, эксперт, администратор (GEN-10)", async () => {
+  it("меню по матрице прав; у оператора, наблюдателя и директора дашборд — первый пункт (GEN-10, OPR-31)", async () => {
     // Ожидаемые пункты; сверяются и с PolicyMatrix, чтобы тест не разошёлся с ней.
     const expected: [Me["user"]["role"], string[]][] = [
-      ["operator", ["/catalog", "/dashboard", "/account"]],
-      ["director", ["/catalog", "/dashboard", "/account"]],
+      ["operator", ["/dashboard", "/catalog", "/account"]],
+      ["observer", ["/dashboard", "/catalog", "/account"]],
+      ["director", ["/dashboard", "/catalog", "/account"]],
       ["expert", ["/catalog", "/account"]],
+      ["manufacturer", ["/profile", "/account"]],
       ["administrator", ["/account"]],
     ];
+    expect(expected.map(([role]) => role).sort()).toEqual([...ROLES].sort());
     for (const [role, hrefs] of expected) {
       const fromPolicy = [
-        can(role, "catalog.search") && "/catalog",
         can(role, "dashboard.read") && "/dashboard",
+        can(role, "catalog.search") && "/catalog",
+        can(role, "profile.edit") && "/profile",
         "/account",
       ].filter(Boolean);
       expect(fromPolicy, role).toEqual(hrefs);

@@ -77,7 +77,7 @@ const OPERATOR: Me = {
     locale: "kk",
   },
   gates: { mfa: true, responsibility: true },
-  homePath: "/catalog",
+  homePath: "/dashboard",
   otpDelivery: "email",
 };
 
@@ -106,6 +106,7 @@ const DASHBOARD = {
   siteSurveyed: 0,
   unifiedRegister: 0,
   updateStatus: { active: 0, outdated: 0, unresponsive: 0 },
+  tier: { tier_1: 1200, tier_2: 0 },
   generatedAt: "2026-11-11T10:00:00Z",
 };
 
@@ -134,6 +135,7 @@ describe("казахский интерфейс без данных kk в ICU б
     const total = (await screen.findByText(kk.dashboard.total)).closest("a")!;
     expect(spaces(total.textContent)).toContain("1 234 567");
     expect(spaces(screen.getByText("KZ-ATY").closest("a")!.textContent)).toContain("2 500");
+    expect(spaces(screen.getByText(kk.dashboard.tier1).closest("a")!.textContent)).toContain("1 200");
     // 10:00 UTC — 15:00 в Алматы.
     expect(screen.getByText(`${kk.dashboard.generatedAt.replace("{time}", "11.11.2026, 15:00")}`)).toBeTruthy();
     expect(kazakhRequests).toEqual([]);

@@ -1,5 +1,5 @@
 // Каталог: фильтры в адресе страницы уходят в API в формате catalogFilterSchema (OPR-04, OPR-05).
-import { type CatalogItem, catalogFilterSchema, type CatalogPage } from "@imbc/contracts";
+import { type CatalogItem, catalogFilterSchema, type CatalogPage, type Dashboard } from "@imbc/contracts";
 import { screen, waitFor, within } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, describe, expect, it, type Mock, vi } from "vitest";
@@ -33,7 +33,7 @@ const OPERATOR: Me = {
     locale: "kk",
   },
   gates: { mfa: true, responsibility: true },
-  homePath: "/catalog",
+  homePath: "/dashboard",
   otpDelivery: "email",
 };
 
@@ -54,7 +54,7 @@ const ITEM: CatalogItem = {
   worksWithCount: 0,
 };
 
-const DASHBOARD = {
+const DASHBOARD: Dashboard = {
   total: 1,
   byRegion: [
     { region: "KZ-MAN", count: 1 },
@@ -64,6 +64,7 @@ const DASHBOARD = {
   siteSurveyed: 0,
   unifiedRegister: 0,
   updateStatus: { active: 0, outdated: 0, unresponsive: 0 },
+  tier: { tier_1: 1, tier_2: 0 },
   generatedAt: "2026-11-11T10:00:00Z",
 };
 
@@ -283,7 +284,7 @@ describe("каталог (OPR-04, OPR-05)", () => {
 
     const row = (await screen.findByText("ТОО Сталь")).closest("tr")!;
     const cells = within(row).getAllByRole("cell");
-    expect(cells[5]?.textContent).toBe("Nov 12, 2026");
+    expect(cells[6]?.textContent).toBe("Nov 12, 2026");
     expect(within(row).getByText("Steel LLP")).toBeTruthy();
     expect(within(row).getByText("980540000384")).toBeTruthy();
     expect(within(row).getByText(en.catalog.status.active)).toBeTruthy();
@@ -336,6 +337,86 @@ describe("каталог (OPR-04, OPR-05)", () => {
     expect(searches(api)).toHaveLength(2);
   });
 
+  it("фильтр «Тир» — множественный выбор после товарных групп; выбор уходит в адрес и в API (OPR-02, OPR-04)", async () => {
+    const api = stubCatalog();
+    const { router, user } = renderRoute("/catalog?tier=tier_1", { locale: "en" });
+
+    const tier = await screen.findByRole("button", { name: new RegExp(`^${en.catalog.tier}`) });
+    const group = screen.getByRole("button", { name: new RegExp(en.catalog.group) });
+    // Поле тира стоит сразу после поля товарных групп.
+    expect(group.nextElementSibling).toBe(tier);
+    expect(within(tier).getByText("1")).toBeTruthy();
+
+    await user.click(tier);
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([en.catalog.tierValue.tier_1, en.catalog.tierValue.tier_2]);
+    await user.click(screen.getByRole("option", { name: en.catalog.tierValue.tier_2 }));
+
+    await waitFor(() => expect(router.state.location.search).toBe("?tier=tier_1,tier_2"));
+    await waitFor(() => expect(searches(api).at(-1)).toBe("/api/v1/catalog/search?tier=tier_1,tier_2"));
+    expect(catalogFilterSchema.parse({ tier: router.state.location.search.slice("?tier=".length) }).tier).toEqual([
+      "tier_1",
+      "tier_2",
+    ]);
+  });
+
+  it("неизвестный тир в адресе не ломает страницу: значение отбрасывается до запроса", async () => {
+    const api = stubCatalog();
+    renderRoute("/catalog?tier=tier_3,tier_2&region=KZ-ATY", { locale: "en" });
+
+    expect(await screen.findByText("ТОО Сталь")).toBeTruthy();
+    expect(searches(api)).toEqual(["/api/v1/catalog/search?region=KZ-ATY&tier=tier_2"]);
+    const tier = screen.getByRole("button", { name: new RegExp(`^${en.catalog.tier}`) });
+    expect(within(tier).getByText("1")).toBeTruthy();
+  });
+
+  it("колонка «Тир» перед датой верификации — у каждой строки, и у unresponsive (OPR-06)", async () => {
+    stubCatalog({
+      items: [
+        ITEM,
+        {
+          ...ITEM,
+          profileId: "00000000-0000-4000-8000-000000000011",
+          nameRu: "ТОО Труба",
+          tier: "tier_2",
+          updateStatus: "unresponsive",
+          pendingChanges: false,
+        },
+      ],
+      total: 2,
+      page: 1,
+      pageSize: 25,
+    });
+    renderRoute("/catalog", { locale: "ru" });
+
+    expect(await screen.findByText("ТОО Труба")).toBeTruthy();
+    const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
+    expect(headers.indexOf(ru.catalog.columns.tier)).toBe(headers.indexOf(ru.catalog.columns.verifiedAt) - 1);
+    const tierCell = (name: string) => {
+      const cells = within(screen.getByText(name).closest("tr")!).getAllByRole("cell");
+      return cells[headers.indexOf(ru.catalog.columns.tier)];
+    };
+    expect(tierCell("ТОО Сталь")?.textContent).toBe(ru.catalog.tierValue.tier_1);
+    const unresponsive = tierCell("ТОО Труба")!;
+    expect(unresponsive.textContent).toBe(ru.catalog.tierValue.tier_2);
+    expect(unresponsive.querySelector('[data-slot="badge"]')).toBeTruthy();
+    expect(within(screen.getByText("ТОО Труба").closest("tr")!).getByText(ru.catalog.status.unresponsive)).toBeTruthy();
+  });
+
+  it("пока идёт поиск — скелет на всю ширину таблицы, по числу колонок", async () => {
+    stubApi({
+      "GET /api/auth/me": { body: OPERATOR },
+      "GET /api/v1/catalog/search": () => new Promise<Response>(() => {}) as unknown as Response,
+      "GET /api/v1/dashboard": { body: DASHBOARD },
+    });
+    renderRoute("/catalog", { locale: "en" });
+
+    const headers = await screen.findAllByRole("columnheader");
+    const skeleton = document.querySelector('[data-slot="skeleton"]')!.closest("td")!;
+    expect(skeleton.colSpan).toBe(headers.length);
+    expect(headers.map((h) => h.textContent)).toContain(en.catalog.columns.tier);
+  });
+
   it("регионы фильтра — из дашборда, по алфавиту до справочника регионов (ADM-08)", async () => {
     stubCatalog();
     const { user } = renderRoute("/catalog", { locale: "en" });
@@ -355,8 +436,6 @@ const KEYS_WITHOUT_CONTROL = [
   // Общие фильтры OPR-02 без поля: тип продукции и тип сертификата (ждут справочников, ADM-08).
   "type",
   "cert",
-  // Фильтр по тиру (OPR-02): поле добавляет следующая задача плана (задача 9).
-  "tier",
   // Расширенные фильтры OPR-03 без поля.
   "kpved",
   "oked",
@@ -377,6 +456,7 @@ const SAMPLES: Record<keyof typeof catalogParsers, string> = {
   region: "KZ-ATY,KZ-MAN",
   group: "A,B",
   surveyed: "true",
+  tier: "tier_1,tier_2",
   unifiedRegister: "false",
   tnved: "7308",
   sort: "verified_at",

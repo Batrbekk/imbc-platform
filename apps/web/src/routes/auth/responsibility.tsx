@@ -13,7 +13,7 @@ export function ResponsibilityPage() {
   const t = useTranslations("responsibility");
   return (
     <Card>
-      <PageTitle />
+      <PageTitle title={t("title")} />
       <CardHeader>
         <CardTitle className="text-xl">
           <h1>{t("title")}</h1>

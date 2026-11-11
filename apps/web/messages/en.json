@@ -119,6 +119,11 @@
     "region": "Region",
     "group": "Commodity group",
     "groupValue": "Group {group}",
+    "tier": "Tier",
+    "tierValue": {
+      "tier_1": "Tier 1 — verified",
+      "tier_2": "Tier 2 — site surveyed"
+    },
     "surveyed": "Site survey",
     "unifiedRegister": "In the unified register",
     "tnved": "HS (TN VED) code",
@@ -138,6 +143,7 @@
       "region": "Region",
       "groups": "Groups",
       "certificates": "Certificates",
+      "tier": "Tier",
       "verifiedAt": "Verified",
       "status": "Freshness"
     },
@@ -156,6 +162,8 @@
     "total": "Visible manufacturers",
     "siteSurveyed": "Site surveyed",
     "unifiedRegister": "In the unified register",
+    "tier1": "Tier 1",
+    "tier2": "Tier 2",
     "active": "Up to date",
     "outdated": "Need update",
     "unresponsive": "Unresponsive",

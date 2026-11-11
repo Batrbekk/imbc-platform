@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { screen } from "@testing-library/react";
+import { cleanup, screen } from "@testing-library/react";
 import { useLayoutEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -46,7 +46,7 @@ const OPERATOR: Me = {
     locale: "kk",
   },
   gates: { mfa: true, responsibility: true },
-  homePath: "/catalog",
+  homePath: "/dashboard",
   otpDelivery: "email",
 };
 
@@ -74,6 +74,7 @@ describe("заголовок вкладки", () => {
           siteSurveyed: 0,
           unifiedRegister: 0,
           updateStatus: { active: 0, outdated: 0, unresponsive: 0 },
+          tier: { tier_1: 0, tier_2: 0 },
           generatedAt: "2026-11-11T10:00:00Z",
         },
       },
@@ -86,6 +87,36 @@ describe("заголовок вкладки", () => {
     await router.navigate("/dashboard");
     expect(await screen.findByRole("heading", { name: kk.dashboard.title })).toBeTruthy();
     expect(titles()).toEqual([`${kk.dashboard.title} · ${kk.common.appName}`]);
+  });
+
+  it("второй фактор, ответственность и профиль компании — свой заголовок вкладки, как у карточки", async () => {
+    stubApi({
+      "GET /api/auth/me": { body: { ...OPERATOR, gates: { mfa: false, responsibility: false } } },
+      "POST /api/auth/otp/send": { body: { sent: true, retryAfter: 60 } },
+    });
+    renderRoute("/auth/verify", { locale: "ru" });
+    expect(await screen.findByRole("heading", { name: ru.verify.title })).toBeTruthy();
+    expect(titles()).toEqual([`${ru.verify.title} · ${ru.common.appName}`]);
+    cleanup();
+
+    stubApi({ "GET /api/auth/me": { body: { ...OPERATOR, gates: { mfa: true, responsibility: false } } } });
+    renderRoute("/auth/responsibility", { locale: "ru" });
+    expect(await screen.findByRole("heading", { name: ru.responsibility.title })).toBeTruthy();
+    expect(titles()).toEqual([`${ru.responsibility.title} · ${ru.common.appName}`]);
+    cleanup();
+
+    stubApi({
+      "GET /api/auth/me": {
+        body: {
+          ...OPERATOR,
+          user: { ...OPERATOR.user, role: "manufacturer", organizationType: "manufacturer" },
+          homePath: "/profile",
+        },
+      },
+    });
+    renderRoute("/profile", { locale: "ru" });
+    expect(await screen.findByText(ru.profile.welcome)).toBeTruthy();
+    expect(titles()).toEqual([`${ru.nav.profile} · ${ru.common.appName}`]);
   });
 
   it("страница без PageTitle после страницы с ним — название платформы, а не прежний заголовок", async () => {

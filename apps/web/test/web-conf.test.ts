@@ -30,6 +30,13 @@ describe("web.conf: кеширование", () => {
   it("хешированные файлы /assets/ — на год и immutable, отсутствующий файл — 404", () => {
     const block = location("/assets/");
     expect(cacheControl(block)).toEqual(["public, max-age=31536000, immutable"]);
-    expect(block).toMatch(/try_files\s+\$uri\s+=404;/);
+    expect(block).toMatch(/try_files\s+\$uri\s+@missing_asset;/);
+  });
+
+  it("404 для отсутствующего файла /assets/ — no-store: промежуточный кеш не удержит его после выката", () => {
+    const block = location("@missing_asset");
+    // Без always nginx не добавляет заголовок к ответу 404.
+    expect(block).toMatch(/add_header\s+Cache-Control\s+"no-store"\s+always;/);
+    expect(block).toMatch(/return\s+404;/);
   });
 });

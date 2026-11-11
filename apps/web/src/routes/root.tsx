@@ -22,6 +22,9 @@ export function Root() {
   );
 }
 
+/** Пауза между очисткой области объявлений и записью нового заголовка. */
+const ANNOUNCE_DELAY_MS = 100;
+
 /**
  * Объявляет смену страницы экранному диктору: после перехода по меню фокус остаётся на ссылке,
  * и без объявления пользователь не узнает, что страница сменилась. Текст — заголовок вкладки:
@@ -34,9 +37,16 @@ function RouteAnnouncer() {
   const region = useRef<HTMLParagraphElement>(null);
   const announced = useRef(pathname);
   useEffect(() => {
-    if (announced.current === pathname || !region.current) return;
+    const node = region.current;
+    if (announced.current === pathname || !node) return;
     announced.current = pathname;
-    region.current.textContent = document.title;
+    // Сначала область очищается, текст пишется отдельной задачей: иначе при том же заголовке
+    // (два адреса «не найдено» подряд) содержимое не изменилось бы, и диктор промолчал бы.
+    node.textContent = "";
+    const timer = setTimeout(() => {
+      node.textContent = document.title;
+    }, ANNOUNCE_DELAY_MS);
+    return () => clearTimeout(timer);
   }, [pathname]);
   return <p id="route-announcer" ref={region} aria-live="polite" aria-atomic="true" className="sr-only" />;
 }

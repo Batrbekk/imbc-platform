@@ -1,4 +1,4 @@
-import { COMMODITY_GROUPS, type CatalogPage } from "@imbc/contracts";
+import { type CatalogPage, COMMODITY_GROUPS, type Dashboard, PROFILE_TIERS } from "@imbc/contracts";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { cn } from "cn";
 import { CheckIcon, ChevronsUpDownIcon, LinkIcon, SearchIcon, XIcon } from "lucide-react";
@@ -22,6 +22,9 @@ import { catalogParsers, serializeCatalog } from "@/lib/catalog-params";
 
 /** Фильтры из записанного адреса страницы — теми же парсерами, что у полей. */
 const loadCatalog = createLoader(catalogParsers);
+
+/** Колонки результата (OPR-06); скелет загрузки занимает их все. */
+const COLUMNS = ["name", "bin", "region", "groups", "certificates", "tier", "verifiedAt", "status"] as const;
 
 type Tri = "any" | "true" | "false";
 const tri = (v: boolean | null): Tri => (v === null ? "any" : v ? "true" : "false");
@@ -48,7 +51,7 @@ export function CatalogView() {
   // Список регионов — из дашборда до появления справочника регионов (ADM-08).
   const regions = useQuery({
     queryKey: ["dashboard"],
-    queryFn: () => api<{ byRegion: { region: string; count: number }[] }>("/v1/dashboard"),
+    queryFn: () => api<Dashboard>("/v1/dashboard"),
     select: (d) => d.byRegion.map((r) => r.region).sort(),
   });
 
@@ -107,6 +110,12 @@ export function CatalogView() {
           options={COMMODITY_GROUPS.map((g) => ({ value: g, label: t("groupValue", { group: g }) }))}
           value={filters.group}
           onChange={(group) => set({ group: group as typeof filters.group })}
+        />
+        <MultiPick
+          label={t("tier")}
+          options={PROFILE_TIERS.map((tier) => ({ value: tier, label: t(`tierValue.${tier}`) }))}
+          value={filters.tier}
+          onChange={(tier) => set({ tier: tier as typeof filters.tier })}
         />
 
         <Select
@@ -196,20 +205,16 @@ export function CatalogView() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>{t("columns.name")}</TableHead>
-              <TableHead>{t("columns.bin")}</TableHead>
-              <TableHead>{t("columns.region")}</TableHead>
-              <TableHead>{t("columns.groups")}</TableHead>
-              <TableHead>{t("columns.certificates")}</TableHead>
-              <TableHead>{t("columns.verifiedAt")}</TableHead>
-              <TableHead>{t("columns.status")}</TableHead>
+              {COLUMNS.map((column) => (
+                <TableHead key={column}>{t(`columns.${column}`)}</TableHead>
+              ))}
             </TableRow>
           </TableHeader>
           <TableBody>
             {result.isPending &&
               Array.from({ length: 6 }, (_, i) => (
                 <TableRow key={i}>
-                  <TableCell colSpan={7}>
+                  <TableCell colSpan={COLUMNS.length}>
                     <Skeleton className="h-5 w-full" />
                   </TableCell>
                 </TableRow>
@@ -230,6 +235,10 @@ export function CatalogView() {
                   ))}
                 </TableCell>
                 <TableCell className="text-xs">{c.certificateTypes.join(", ") || "—"}</TableCell>
+                {/* Тир — у каждой строки, и у unresponsive тоже (OPR-06, IMBC-22). */}
+                <TableCell>
+                  <Badge variant="secondary">{t(`tierValue.${c.tier}`)}</Badge>
+                </TableCell>
                 <TableCell className="text-xs">{format.date(c.verifiedAt)}</TableCell>
                 <TableCell>
                   <Badge variant={c.updateStatus === "active" ? "default" : "outline"}>

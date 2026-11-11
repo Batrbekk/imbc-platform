@@ -84,10 +84,11 @@ export function AppShell() {
   }
 
   const role = me.data.user.role;
+  // Дашборд — первым: это стартовая страница оператора, наблюдателя и директора (OPR-31).
   const items = [
-    { href: "/catalog", label: t("nav.catalog"), icon: SearchIcon, show: !!can(role, "catalog.search") },
     { href: "/dashboard", label: t("nav.dashboard"), icon: LayoutDashboardIcon, show: !!can(role, "dashboard.read") },
-    { href: "/profile", label: t("nav.profile"), icon: BuildingIcon, show: role === "manufacturer" },
+    { href: "/catalog", label: t("nav.catalog"), icon: SearchIcon, show: !!can(role, "catalog.search") },
+    { href: "/profile", label: t("nav.profile"), icon: BuildingIcon, show: !!can(role, "profile.edit") },
     { href: "/account", label: t("nav.account"), icon: UserRoundIcon, show: true },
   ].filter((i) => i.show);
 

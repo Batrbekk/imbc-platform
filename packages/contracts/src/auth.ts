@@ -1,4 +1,5 @@
 import type { Role } from './enums.js';
+import { can, type Action } from './policy.js';
 
 const LOCAL_ORIGIN = 'https://imbc.invalid';
 
@@ -40,4 +41,32 @@ const ROLE_HOME: Record<Role, string> = {
 
 export function roleHome(role: Role): string {
   return ROLE_HOME[role];
+}
+
+/** Страницы с правом в матрице: роль без права уходит на свою стартовую страницу (GEN-08). */
+const GUARDED_PAGES = new Map<string, Action>([
+  ['/catalog', 'catalog.search'],
+  ['/dashboard', 'dashboard.read'],
+  ['/profile', 'profile.edit'],
+]);
+
+/**
+ * Страница после входа — одно правило для сервера (BFF) и интерфейса (OPR-31, GEN-08):
+ * сохранённый локальный адрес с query и fragment, если роль вправе открыть страницу, иначе
+ * стартовая страница роли. Внешний адрес, `/` и страницы входа ведут на стартовую.
+ *
+ * Путь сравнивается точно и без завершающих `/`: React Router принимает `/catalog/` как `/catalog`,
+ * поэтому и шлюз роли видит в нём каталог. Регистр не приводится: маршруты SPA чувствительны
+ * к регистру, и `/CATALOG` — страница «не найдено», а не каталог.
+ */
+export function destinationFor(role: Role, saved: unknown): string {
+  const home = roleHome(role);
+  const target = safeReturnTo(saved, home);
+  const raw = target.split(/[?#]/)[0] ?? '/';
+  const pathname = raw.replace(/\/+$/, '') || '/';
+  if (pathname === '/' || pathname === '/login' || pathname === '/register' || raw.startsWith('/auth/'))
+    return home;
+  const action = GUARDED_PAGES.get(pathname);
+  if (action && !can(role, action)) return home;
+  return target;
 }

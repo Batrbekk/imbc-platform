@@ -13,7 +13,7 @@ export function VerifyPage() {
   const t = useTranslations("verify");
   return (
     <Card>
-      <PageTitle />
+      <PageTitle title={t("title")} />
       <CardHeader>
         <CardTitle className="text-xl">
           <h1>{t("title")}</h1>

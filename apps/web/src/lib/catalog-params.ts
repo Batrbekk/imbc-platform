@@ -1,4 +1,4 @@
-import { COMMODITY_GROUPS } from "@imbc/contracts";
+import { COMMODITY_GROUPS, PROFILE_TIERS } from "@imbc/contracts";
 import {
   createSerializer,
   parseAsArrayOf,
@@ -19,6 +19,8 @@ export const catalogParsers = {
   q: parseAsString.withDefault(""),
   region: parseAsArrayOf(parseAsString).withDefault([]),
   group: parseAsArrayOf(parseAsStringLiteral(COMMODITY_GROUPS)).withDefault([]),
+  // Тир профиля (OPR-02); неизвестное значение (tier_3) парсер отбрасывает, и в API оно не уходит.
+  tier: parseAsArrayOf(parseAsStringLiteral(PROFILE_TIERS)).withDefault([]),
   surveyed: parseAsBoolean,
   unifiedRegister: parseAsBoolean,
   tnved: parseAsString.withDefault(""),

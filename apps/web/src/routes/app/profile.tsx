@@ -6,13 +6,13 @@ import { PageTitle } from "@/components/app/page-title";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-/** Рабочее место производителя. Во вкладке — только название платформы: PageTitle без заголовка страницы. */
+/** Рабочее место производителя. Заголовок вкладки — заголовок карточки, «Профиль компании». */
 export function ProfilePage() {
   const t = useTranslations("profile");
   const nav = useTranslations("nav");
   return (
     <Card className="mx-auto max-w-3xl">
-      <PageTitle />
+      <PageTitle title={nav("profile")} />
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Building2Icon className="size-5 text-primary" />
