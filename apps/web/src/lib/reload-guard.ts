@@ -48,11 +48,12 @@ export function clearReloadFlag(flag: string): void {
 
 /**
  * Динамический import не загрузился: так браузеры сообщают об отсутствующем чанке
- * (вкладка старше выката, /assets/* отвечает 404). Тексты Chrome/Edge, Firefox и Safari.
+ * (вкладка старше выката, /assets/* отвечает 404). Тексты Chrome/Edge, Firefox и Safari;
+ * у Safari ещё и модуль, отданный с чужим типом (например, страница ошибки прокси в text/html).
  */
+const CHUNK_LOAD_ERROR =
+  /dynamically imported module|Importing a module script failed|is not a valid JavaScript MIME type|Unable to preload CSS/i;
+
 export function isChunkLoadError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    /dynamically imported module|Importing a module script failed|Unable to preload CSS/i.test(error.message)
-  );
+  return error instanceof Error && CHUNK_LOAD_ERROR.test(error.message);
 }

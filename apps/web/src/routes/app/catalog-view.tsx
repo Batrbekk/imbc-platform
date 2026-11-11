@@ -2,7 +2,8 @@ import { COMMODITY_GROUPS, type CatalogPage } from "@imbc/contracts";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { cn } from "cn";
 import { CheckIcon, ChevronsUpDownIcon, LinkIcon, SearchIcon, XIcon } from "lucide-react";
-import { debounce, useQueryStates } from "nuqs";
+import { createLoader, debounce, useQueryStates } from "nuqs";
+import { useLocation } from "react-router";
 import { toast } from "sonner";
 import { useFormatter, useTranslations } from "use-intl";
 
@@ -18,6 +19,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { api } from "@/lib/api";
 import { catalogParsers, serializeCatalog } from "@/lib/catalog-params";
 
+/** Фильтры из записанного адреса страницы — теми же парсерами, что у полей. */
+const loadCatalog = createLoader(catalogParsers);
+
 type Tri = "any" | "true" | "false";
 const tri = (v: boolean | null): Tri => (v === null ? "any" : v ? "true" : "false");
 const fromTri = (v: string): boolean | null => (v === "any" ? null : v === "true");
@@ -30,7 +34,10 @@ export function CatalogView() {
   // shallow: false — адаптер nuqs сообщает адрес и роутеру: иначе useLocation() в AppShell не видел бы
   // новых фильтров, и возврат после истёкшего сеанса потерял бы их.
   const [filters, setFilters] = useQueryStates(catalogParsers, { history: "push", shallow: false });
-  const query = serializeCatalog(filters);
+  // Поля показывают состояние nuqs сразу, а запрос строится из записанного адреса: ввод с задержкой
+  // 350 мс даёт один запрос, и он совпадает с адресом, который вернёт returnTo (OPR-05).
+  const { pathname, search } = useLocation();
+  const query = serializeCatalog(loadCatalog(search));
 
   const result = useQuery({
     queryKey: ["catalog", query],
@@ -47,7 +54,9 @@ export function CatalogView() {
   const set = (patch: Partial<typeof filters>) => setFilters({ ...patch, page: patch.page ?? 1 });
   const total = result.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / (result.data?.pageSize ?? 25)));
-  const hasFilters = query.replace(/^\?/, "") !== "";
+  // То, что пользователь видит в фильтрах, включая текст, набранный меньше 350 мс назад.
+  const shown = serializeCatalog(filters);
+  const hasFilters = shown !== "";
 
   // Base UI показывает в SelectValue подпись из items, а не сырое значение из адреса.
   const triItems = [
@@ -63,7 +72,7 @@ export function CatalogView() {
 
   const copyLink = async () => {
     try {
-      await navigator.clipboard.writeText(window.location.href);
+      await navigator.clipboard.writeText(`${window.location.origin}${pathname}${shown}`);
       toast.success(t("linkCopied"));
     } catch {
       // Буфер обмена недоступен (нет разрешения, не HTTPS): сообщение вместо необработанной ошибки.

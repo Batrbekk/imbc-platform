@@ -7,22 +7,18 @@ import { LoginPage } from "@/routes/auth/login";
 import { RegisterPage } from "@/routes/auth/register";
 import { ResponsibilityPage } from "@/routes/auth/responsibility";
 import { VerifyPage } from "@/routes/auth/verify";
-import { clearReloadFlag, LAZY_RELOAD } from "@/lib/reload-guard";
 import { HomePage } from "@/routes/home";
 import { NotFoundPage } from "@/routes/not-found";
 import { Root, RootFallback } from "@/routes/root";
 import { RouteError } from "@/routes/route-error";
 
 /**
- * Ленивый маршрут: свой чанк на страницу (и на оболочку). Чанк загрузился — флаг перезагрузки снимается,
- * и следующий выкат снова может перезагрузить вкладку один раз (см. RouteError).
+ * Ленивый маршрут: свой чанк на страницу (и на оболочку). Флаг перезагрузки здесь не снимается:
+ * оболочка и страница грузятся параллельно, и загруженная оболочка при упавшей странице
+ * зациклила бы перезагрузки. Флаг снимает Root, когда вся ветка отрисовалась (см. RouteError).
  */
 function lazyPage<M>(load: () => Promise<M>, pick: (module: M) => ComponentType) {
-  return async () => {
-    const module = await load();
-    clearReloadFlag(LAZY_RELOAD);
-    return { Component: pick(module) };
-  };
+  return async () => ({ Component: pick(await load()) });
 }
 
 /** Маршруты приложения. Страницы — дети корня; «*» остаётся последним. */

@@ -1,6 +1,7 @@
 // Каталог: фильтры в адресе страницы уходят в API без преобразований (OPR-04, OPR-05).
 import type { CatalogItem, CatalogPage } from "@imbc/contracts";
 import { screen, waitFor, within } from "@testing-library/react";
+import { toast } from "sonner";
 import { afterEach, describe, expect, it, type Mock, vi } from "vitest";
 
 import type { Me } from "@/lib/session";
@@ -15,6 +16,8 @@ vi.mock("@/lib/leave-app", () => ({ leaveApp: vi.fn(), reloadApp: vi.fn() }));
 
 afterEach(() => {
   vi.clearAllMocks();
+  // Очередь toast у sonner общая для модуля: уведомления одного теста не доживают до следующего.
+  toast.dismiss();
 });
 
 // Оператор с пройденными шлюзами входа.
@@ -133,9 +136,7 @@ describe("каталог (OPR-04, OPR-05)", () => {
       "GET /api/v1/catalog/search": (url) => {
         if (!url.searchParams.has("unifiedRegister")) return Response.json({ items: [], total: 0, page: 1, pageSize: 25 });
         expired = true;
-        // nuqs переносит фильтр в адрес не сразу, а очередью (до 50 мс); настоящий ответ API
-        // приходит позже. Без задержки мгновенная заглушка обгоняла бы адрес.
-        return new Promise<Response>((resolve) => setTimeout(() => resolve(unauthorized()), 100)) as unknown as Response;
+        return unauthorized();
       },
       "GET /api/v1/dashboard": { body: DASHBOARD },
     });
@@ -159,6 +160,34 @@ describe("каталог (OPR-04, OPR-05)", () => {
     expect(await screen.findByText(en.catalog.linkCopied)).toBeTruthy();
     const copied = new URL(await navigator.clipboard.readText());
     expect(copied.pathname + copied.search).toBe("/catalog?region=KZ-ATY,KZ-MAN&surveyed=true");
+  });
+
+  it("быстрый ввод пяти символов — один запрос после задержки, с query string страницы (OPR-05)", async () => {
+    const api = stubCatalog();
+    const { router, user } = renderRoute("/catalog", { locale: "en" });
+    await waitFor(() => expect(searches(api)).toEqual(["/api/v1/catalog/search"]));
+
+    await user.type(await screen.findByPlaceholderText(en.catalog.query), "steel");
+    // Пока адрес не записан (задержка 350 мс), новых запросов нет.
+    expect(searches(api)).toHaveLength(1);
+
+    await waitFor(() => expect(router.state.location.search).toBe("?q=steel"));
+    await waitFor(() => expect(searches(api)).toHaveLength(2));
+    expect(searches(api)[1]).toBe(`/api/v1/catalog/search${router.state.location.search}`);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(searches(api)).toHaveLength(2);
+  });
+
+  it("«Скопировать ссылку» сразу после ввода содержит набранный текст", async () => {
+    stubCatalog();
+    const { user } = renderRoute("/catalog?region=KZ-ATY", { locale: "en" });
+
+    await user.type(await screen.findByPlaceholderText(en.catalog.query), "pipe");
+    await user.click(screen.getByRole("button", { name: en.catalog.copyLink }));
+
+    expect(await screen.findByText(en.catalog.linkCopied)).toBeTruthy();
+    const copied = new URL(await navigator.clipboard.readText());
+    expect(copied.pathname + copied.search).toBe("/catalog?q=pipe&region=KZ-ATY");
   });
 
   it("буфер обмена недоступен — сообщение об ошибке вместо необработанного отказа", async () => {
