@@ -16,3 +16,8 @@ if (typeof window !== "undefined" && !window.matchMedia) {
     dispatchEvent: () => false,
   });
 }
+
+// В jsdom нет elementFromPoint, а input-otp по таймеру ищет им значок менеджера паролей.
+if (typeof document !== "undefined" && !document.elementFromPoint) {
+  document.elementFromPoint = () => null;
+}
