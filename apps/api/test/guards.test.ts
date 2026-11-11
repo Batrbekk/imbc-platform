@@ -10,6 +10,8 @@ class Routes {
   @Public() open() {}
   @Can('catalog.search') search() {}
   @Can('accounts.manage') manageUsers() {}
+  @Can('catalog.export') exportResults() {}
+  @Can('dashboard.read') board() {}
   me() {}
 }
 
@@ -86,6 +88,22 @@ describe('SessionGuard', () => {
     expect(await code(g.canActivate(ctx('manageUsers', {})))).toBe('forbidden');
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({ outcome: 'denied', action: 'accounts.manage' }),
+    );
+  });
+
+  it('наблюдатель ищет по видимым профилям и открывает дашборд (GEN-13)', async () => {
+    for (const handler of ['search', 'board'] as const) {
+      const c = ctx(handler, {});
+      expect(await code(guard(auth('observer')).g.canActivate(c))).toBe('ok');
+      expect(c.switchToHttp().getRequest<{ auth: AuthContext }>().auth.scope).toBe('visible');
+    }
+  });
+
+  it('прямой запрос наблюдателя на выгрузку отклоняется и пишется в аудит (GEN-08, GEN-13)', async () => {
+    const { g, audit } = guard(auth('observer'));
+    expect(await code(g.canActivate(ctx('exportResults', {})))).toBe('forbidden');
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'denied', action: 'catalog.export' }),
     );
   });
 

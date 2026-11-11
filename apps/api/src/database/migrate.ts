@@ -1,6 +1,6 @@
 /**
  * Одноразовый запуск миграций (сервис `migrate` в docker-compose, Job в Kubernetes).
- * Схема меняется по правилу expand → migrate → contract (NFR-13): каждая миграция
+ * Схема меняется по правилу expand → migrate → contract (NFR-06): каждая миграция
  * совместима с предыдущей версией приложения.
  */
 import { dirname, resolve } from 'node:path';

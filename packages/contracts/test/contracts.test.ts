@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type Action,
+  can,
   catalogFilterSchema,
   catalogFilterToSearchParams,
   checkBin,
@@ -66,12 +68,94 @@ describe('фильтры каталога (OPR-02…05)', () => {
   });
 });
 
-describe('PolicyMatrix (GEN-03, GEN-04, GEN-13…15)', () => {
+describe('PolicyMatrix (раздел 4 v1.3; GEN-03, GEN-04, GEN-10, GEN-13)', () => {
+  const row = (action: Action) => Object.fromEntries(ROLES.map((r) => [r, can(r, action)]));
+
   it('у каждой роли есть запись', () => {
     for (const role of ROLES) expect(POLICY_MATRIX[role]).toBeDefined();
   });
 
-  it('администратор не читает содержимое профилей и записи IMBC (D-51, ADM-06)', () => {
+  it('наблюдатель: дашборд, список и тир — и больше ничего (GEN-13)', () => {
+    expect(POLICY_MATRIX.observer).toEqual({
+      'catalog.search': 'visible',
+      'dashboard.read': 'visible',
+      'tier.read': 'visible',
+    });
+  });
+
+  it.each([
+    'catalog.export',
+    'subscriptions.manage',
+    'pull_api.use',
+    'forecast.read',
+    'focal_point.read',
+    'tier.read_products',
+    'operator_marks.write',
+    'operator_notes.read',
+    'operator_notes.write',
+    'imbc_request.send',
+    'operator_request.send',
+    'profile.read',
+  ] as const)('наблюдателю запрещено %s (GEN-13)', (action) => expect(can('observer', action)).toBeNull());
+
+  it('строка «Tier, AGAR, and CDP» (IMBC-22)', () => {
+    expect(row('tier.read')).toEqual({
+      manufacturer: 'own',
+      expert: 'all',
+      administrator: null,
+      director: 'all',
+      operator: 'visible',
+      observer: 'visible',
+    });
+    expect(row('tier.read_products')).toEqual({
+      manufacturer: 'own',
+      expert: 'all',
+      administrator: null,
+      director: 'all',
+      operator: 'visible',
+      observer: null,
+    });
+    expect(row('tier.request')).toEqual({
+      manufacturer: 'own',
+      expert: null,
+      administrator: null,
+      director: null,
+      operator: null,
+      observer: null,
+    });
+    expect(row('tier.edit')).toEqual({
+      manufacturer: null,
+      expert: 'all',
+      administrator: null,
+      director: null,
+      operator: null,
+      observer: null,
+    });
+  });
+
+  it('focal point: оператор видит, наблюдатель и администратор — нет (GEN-13, OPR-09)', () => {
+    expect(row('focal_point.read')).toEqual({
+      manufacturer: 'own',
+      expert: 'all',
+      administrator: null,
+      director: 'all',
+      operator: 'visible',
+      observer: null,
+    });
+  });
+
+  it('прогноз, STR и KTRE: производитель после NDA, IMBC читает, оператор и наблюдатель — нет (раздел 4)', () => {
+    expect(row('forecast.read')).toEqual({
+      manufacturer: 'after_nda',
+      expert: 'all',
+      administrator: 'all',
+      director: 'all',
+      operator: null,
+      observer: null,
+    });
+  });
+
+  it('администратор не читает содержимое профилей и записи IMBC (ADM-06)', () => {
     expect(POLICY_MATRIX.administrator['profile.read']).toBeUndefined();
     expect(POLICY_MATRIX.administrator['imbc_records.read']).toBeUndefined();
     expect(POLICY_MATRIX.administrator['audit.read']).toBe('account_events');
@@ -79,16 +163,12 @@ describe('PolicyMatrix (GEN-03, GEN-04, GEN-13…15)', () => {
 
   it('директор только читает (GEN-04)', () => {
     const writes = Object.keys(POLICY_MATRIX.director).filter((a) =>
-      /\.(edit|manage|verify|validate|write|send|answer|reply|take|assign|run|invite)$/.test(a),
+      /\.(edit|manage|verify|validate|write|send|answer|reply|take|assign|run|invite|request)$/.test(a),
     );
     expect(writes).toEqual([]);
   });
 
-  it('наблюдатель не выгружает, не подписывается и не пишет (GEN-15)', () => {
-    expect(Object.keys(POLICY_MATRIX.observer).sort()).toEqual(['catalog.search', 'dashboard.read']);
-  });
-
-  it('оператор видит только видимые профили и не видит прогноз (OPR-01, D-24)', () => {
+  it('оператор видит только видимые профили и не видит прогноз (OPR-01)', () => {
     expect(POLICY_MATRIX.operator['catalog.search']).toBe('visible');
     expect(POLICY_MATRIX.operator['forecast.read']).toBeUndefined();
   });
