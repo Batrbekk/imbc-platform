@@ -62,8 +62,13 @@ export function CatalogView() {
   ];
 
   const copyLink = async () => {
-    await navigator.clipboard.writeText(window.location.href);
-    toast.success(t("linkCopied"));
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      toast.success(t("linkCopied"));
+    } catch {
+      // Буфер обмена недоступен (нет разрешения, не HTTPS): сообщение вместо необработанной ошибки.
+      toast.error(t("linkCopyFailed"));
+    }
   };
 
   return (
@@ -71,10 +76,11 @@ export function CatalogView() {
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-64 flex-1">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+          {/* Поля следуют адресу: «Сбросить» и «Назад» меняют и их текст (OPR-05). */}
           <Input
             className="pl-8"
             placeholder={t("query")}
-            defaultValue={filters.q}
+            value={filters.q}
             onChange={(e) => setFilters({ q: e.target.value, page: 1 }, { limitUrlUpdates: debounce(350) })}
           />
         </div>
@@ -97,7 +103,7 @@ export function CatalogView() {
           value={tri(filters.surveyed)}
           onValueChange={(v) => v !== null && set({ surveyed: fromTri(v) })}
         >
-          <SelectTrigger className="w-auto">
+          <SelectTrigger className="w-auto" aria-label={t("surveyed")}>
             <span className="text-muted-foreground">{t("surveyed")}:</span>
             <SelectValue />
           </SelectTrigger>
@@ -115,7 +121,7 @@ export function CatalogView() {
           value={tri(filters.unifiedRegister)}
           onValueChange={(v) => v !== null && set({ unifiedRegister: fromTri(v) })}
         >
-          <SelectTrigger className="w-auto">
+          <SelectTrigger className="w-auto" aria-label={t("unifiedRegister")}>
             <span className="text-muted-foreground">{t("unifiedRegister")}:</span>
             <SelectValue />
           </SelectTrigger>
@@ -133,7 +139,7 @@ export function CatalogView() {
           inputMode="numeric"
           placeholder={t("tnved")}
           title={t("tnvedHint")}
-          defaultValue={filters.tnved}
+          value={filters.tnved}
           onChange={(e) =>
             setFilters(
               { tnved: e.target.value.replace(/\D/g, "").slice(0, 10), page: 1 },
@@ -147,7 +153,7 @@ export function CatalogView() {
           value={filters.sort}
           onValueChange={(v) => v !== null && set({ sort: v as typeof filters.sort })}
         >
-          <SelectTrigger className="w-auto">
+          <SelectTrigger className="w-auto" aria-label={t("sort")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

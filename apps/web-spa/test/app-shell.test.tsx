@@ -1,4 +1,5 @@
 // Оболочка рабочих страниц: интерфейс прячет недоступное, решает сервер (GEN-08, GEN-10).
+import { can } from "@imbc/contracts";
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -131,11 +132,79 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
 
     expect(await screen.findByText(ru.auth.connectionError)).toBeTruthy();
     expect(document.title).toBe(`${ru.catalog.title} · ${ru.common.appName}`);
+    // Страница ещё не смонтирована: заголовок один — от оболочки.
+    expect(document.querySelectorAll("title")).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: ru.auth.retry }));
 
     expect(await screen.findByRole("heading", { name: ru.catalog.title })).toBeTruthy();
     expect(document.title).toBe(`${ru.catalog.title} · ${ru.common.appName}`);
     expect(document.querySelectorAll("title")).toHaveLength(1);
+  });
+
+  it("пока проверяется сеанс — индикатор и ровно один заголовок вкладки, заголовок страницы", async () => {
+    stubApi({ "GET /api/auth/me": () => new Promise<Response>(() => {}) as unknown as Response });
+    renderRoute("/dashboard", { locale: "ru" });
+
+    expect(await screen.findByText(ru.auth.checkingSession)).toBeTruthy();
+    expect(document.querySelectorAll("title")).toHaveLength(1);
+    expect(document.title).toBe(`${ru.dashboard.title} · ${ru.common.appName}`);
+    expect(screen.queryByRole("heading", { name: ru.dashboard.title })).toBeNull();
+  });
+
+  it("меню по матрице прав: оператор, директор, эксперт, администратор (GEN-10)", async () => {
+    // Ожидаемые пункты; сверяются и с PolicyMatrix, чтобы тест не разошёлся с ней.
+    const expected: [Me["user"]["role"], string[]][] = [
+      ["operator", ["/catalog", "/dashboard", "/account"]],
+      ["director", ["/catalog", "/dashboard", "/account"]],
+      ["expert", ["/catalog", "/account"]],
+      ["administrator", ["/account"]],
+    ];
+    for (const [role, hrefs] of expected) {
+      const fromPolicy = [
+        can(role, "catalog.search") && "/catalog",
+        can(role, "dashboard.read") && "/dashboard",
+        "/account",
+      ].filter(Boolean);
+      expect(fromPolicy, role).toEqual(hrefs);
+
+      stubWorkspace(me(role));
+      renderRoute(HOME[role]);
+      await screen.findAllByText(`${role}@${role}.local`);
+      const menu = screen
+        .getAllByRole("link")
+        .filter((link) => link.dataset.sidebar === "menu-button")
+        .map((link) => link.getAttribute("href"));
+      expect(menu, role).toEqual(hrefs);
+      cleanup();
+    }
+  });
+
+  it("шапка оболочки по-русски: кнопка меню и мобильная панель переведены, логотип декоративный (LANG-02)", async () => {
+    stubWorkspace(me("observer"));
+    renderRoute("/catalog", { locale: "ru" });
+
+    expect(await screen.findByRole("button", { name: ru.nav.toggleSidebar })).toBeTruthy();
+    // Название платформы читается один раз — из sr-only, логотип рядом без alt.
+    expect(screen.queryByRole("img", { name: ru.common.logoAlt })).toBeNull();
+    expect(screen.getByText(ru.common.appName, { selector: ".sr-only" })).toBeTruthy();
+    expect(document.querySelector('[data-sidebar="header"] img')?.getAttribute("alt")).toBe("");
+  });
+
+  it("на телефоне меню — панель с переведёнными заголовком и описанием (NFR-14)", async () => {
+    const matchMedia = window.matchMedia;
+    window.matchMedia = (query: string) => ({ ...matchMedia(query), matches: true });
+    try {
+      stubWorkspace(me("observer"));
+      const { user } = renderRoute("/catalog", { locale: "ru" });
+
+      await user.click(await screen.findByRole("button", { name: ru.nav.toggleSidebar }));
+      const panel = await screen.findByRole("dialog", { name: ru.nav.sheetTitle });
+      expect(within(panel).getByText(ru.nav.sheetDescription)).toBeTruthy();
+      expect(within(panel).getByRole("link", { name: ru.nav.catalog }).getAttribute("href")).toBe("/catalog");
+      expect(screen.queryByText("Sidebar")).toBeNull();
+    } finally {
+      window.matchMedia = matchMedia;
+    }
   });
 
   it("меню наблюдателя: каталог, дашборд, аккаунт — без профиля компании", async () => {
@@ -156,6 +225,27 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     expect(document.title).toBe(`${en.dashboard.title} · ${en.common.appName}`);
     expect(screen.getByRole("link", { name: en.nav.dashboard }).hasAttribute("data-active")).toBe(true);
     expect(screen.getByRole("link", { name: en.nav.catalog }).hasAttribute("data-active")).toBe(false);
+  });
+
+  it("дашборд: сбой запроса — сообщение и повтор вместо вечного skeleton (OPR-08); плитки ведут в каталог (OPR-35)", async () => {
+    let fail = true;
+    stubApi({
+      "GET /api/auth/me": { body: me("operator") },
+      "GET /api/v1/dashboard": () =>
+        fail
+          ? Response.json({ status: 503, code: "unavailable", title: "unavailable" }, { status: 503 })
+          : Response.json({ ...DASHBOARD, siteSurveyed: 7, byRegion: [{ region: "KZ-ATY", count: 7 }] }),
+    });
+    const { user } = renderRoute("/dashboard", { locale: "en" });
+
+    expect(await screen.findByText(en.common.error)).toBeTruthy();
+    fail = false;
+    await user.click(screen.getByRole("button", { name: en.common.retry }));
+
+    const surveyed = (await screen.findByText(en.dashboard.siteSurveyed)).closest("a")!;
+    expect(surveyed.getAttribute("href")).toBe("/catalog?surveyed=true");
+    expect(screen.getByText("KZ-ATY").closest("a")!.getAttribute("href")).toBe("/catalog?region=KZ-ATY");
+    expect(screen.queryByText(en.common.error)).toBeNull();
   });
 
   it("аккаунт: сброс пароля — обычная ссылка в BFF с языком", async () => {

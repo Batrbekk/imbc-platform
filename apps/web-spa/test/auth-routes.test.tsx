@@ -271,6 +271,32 @@ describe("переходы по состоянию сеанса (AUTH-03, AUTH-1
     await waitFor(() => expect(paths[0]).toBe("/auth/verify?returnTo=%2Fdashboard"));
   });
 
+  it("/auth/responsibility: после 401 mfa_required сеанс перечитывается, и /auth/verify не отправляет обратно", async () => {
+    let mfaPassed = true;
+    const api = stubApi({
+      // Кеш /me (staleTime 60 с) ещё говорит, что второй фактор пройден; сервер уже требует код.
+      "GET /api/auth/me": () => Response.json(me({ mfa: mfaPassed, responsibility: false })),
+      "POST /api/auth/responsibility": () => {
+        mfaPassed = false;
+        return Response.json(
+          { type: "about:blank", title: "mfa_required", status: 401, code: "mfa_required" },
+          { status: 401 },
+        );
+      },
+      "POST /api/auth/otp/send": { body: { sent: true, retryAfter: 60 } },
+    });
+    const { router, user } = renderRoute("/auth/responsibility?returnTo=%2Fdashboard");
+    const meCalls = () => api.mock.calls.filter(([url]) => String(url) === "/api/auth/me").length;
+
+    await user.click(await screen.findByRole("button", { name: kk.responsibility.accept }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/auth/verify"));
+    expect(router.state.location.search).toBe("?returnTo=%2Fdashboard");
+    expect(meCalls()).toBe(2);
+    expect(await screen.findByText(kk.verify.sent)).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/auth/verify");
+  });
+
   it("/auth/responsibility: 401 истёкшего сеанса при согласии → /login?error=session_expired с тем же returnTo", async () => {
     stubApi({
       "GET /api/auth/me": { body: me({ mfa: true, responsibility: false }) },

@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { useFormatter, useTranslations } from "use-intl";
 
 import { PageTitle } from "@/components/app/page-title";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
@@ -32,9 +33,24 @@ export function DashboardPage() {
 /** Дашборд (OPR-32): каждый счётчик ведёт в каталог с тем же фильтром (OPR-35). */
 function DashboardView() {
   const t = useTranslations("dashboard");
+  const common = useTranslations("common");
   const format = useFormatter();
-  const { data } = useQuery({ queryKey: ["dashboard"], queryFn: () => api<Dashboard>("/v1/dashboard") });
+  const { data, isError, refetch } = useQuery({
+    queryKey: ["dashboard"],
+    queryFn: () => api<Dashboard>("/v1/dashboard"),
+  });
 
+  // Сбой запроса — тот же блок с повтором, что в каталоге, а не вечный skeleton (OPR-08).
+  if (!data && isError) {
+    return (
+      <div className="flex items-center justify-between rounded-lg border p-4 text-sm text-destructive">
+        {common("error")}
+        <Button size="sm" variant="outline" onClick={() => refetch()}>
+          {common("retry")}
+        </Button>
+      </div>
+    );
+  }
   if (!data) {
     return (
       <div className="grid gap-4 md:grid-cols-3">

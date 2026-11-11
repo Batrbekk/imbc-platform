@@ -93,12 +93,13 @@ export function AppShell() {
 
   return (
     <SidebarProvider>
-      <Sidebar collapsible="icon">
+      <Sidebar collapsible="icon" mobileTitle={t("nav.sheetTitle")} mobileDescription={t("nav.sheetDescription")}>
         <SidebarHeader>
           <div className="flex items-center gap-2 px-1 py-1.5 font-semibold">
             {/* Сайдбар тёмно-синий — логотипу подложка не нужна; квадратного знака нет,
-                поэтому в свёрнутом виде логотип скрыт (NFR-15). */}
-            <Logo className="h-7 group-data-[collapsible=icon]:hidden" />
+                поэтому в свёрнутом виде логотип скрыт (NFR-15). Название — в sr-only рядом,
+                поэтому логотип декоративный: диктор не читает имя дважды. */}
+            <Logo decorative className="h-7 group-data-[collapsible=icon]:hidden" />
             <span className="sr-only">{t("common.appName")}</span>
           </div>
         </SidebarHeader>
@@ -142,7 +143,7 @@ export function AppShell() {
       </Sidebar>
       <SidebarInset>
         <header className="flex h-14 items-center gap-2 border-b px-4">
-          <SidebarTrigger />
+          <SidebarTrigger aria-label={t("nav.toggleSidebar")} />
           <Separator orientation="vertical" className="mr-2 h-4" />
           <div className="flex-1" />
           <LocaleSwitcher />

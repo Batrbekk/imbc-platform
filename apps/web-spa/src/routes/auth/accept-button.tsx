@@ -22,20 +22,26 @@ export function AcceptButton({ returnTo }: { returnTo: string }) {
       await qc.invalidateQueries({ queryKey: meKey });
       void navigate(me.data ? authDestination(me.data, returnTo) : returnTo, { replace: true });
     },
-  });
-  useEffect(() => {
-    const error = accept.error ?? me.error;
-    if (error instanceof ApiError && error.status === 401) {
+    onError: async (error) => {
+      if (!(error instanceof ApiError && error.status === 401)) return;
+      // Ответ /me в кеше (staleTime 60 с) мог устареть: без свежего ответа /auth/verify
+      // увидел бы «второй фактор пройден» и вернул сюда же. Следующая страница решает по новому.
+      await qc.invalidateQueries({ queryKey: meKey });
       const path = error.code === "mfa_required" ? "/auth/verify" : "/login?error=session_expired";
       void navigate(`${path}${path.includes("?") ? "&" : "?"}returnTo=${encodeURIComponent(returnTo)}`, {
         replace: true,
       });
+    },
+  });
+  useEffect(() => {
+    if (me.error instanceof ApiError && me.error.status === 401) {
+      void navigate(`/login?error=session_expired&returnTo=${encodeURIComponent(returnTo)}`, { replace: true });
     } else if (me.data && !me.data.gates.mfa) {
       void navigate(`/auth/verify?returnTo=${encodeURIComponent(returnTo)}`, { replace: true });
     } else if (me.data?.gates.responsibility) {
       void navigate(authDestination(me.data, returnTo), { replace: true });
     }
-  }, [accept.error, me.error, me.data, returnTo, navigate]);
+  }, [me.error, me.data, returnTo, navigate]);
 
   if (!me.data || !me.data.gates.mfa || me.data.gates.responsibility) {
     return (

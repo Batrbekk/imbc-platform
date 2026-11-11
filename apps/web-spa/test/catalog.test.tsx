@@ -133,7 +133,9 @@ describe("каталог (OPR-04, OPR-05)", () => {
       "GET /api/v1/catalog/search": (url) => {
         if (!url.searchParams.has("unifiedRegister")) return Response.json({ items: [], total: 0, page: 1, pageSize: 25 });
         expired = true;
-        return unauthorized();
+        // nuqs переносит фильтр в адрес не сразу, а очередью (до 50 мс); настоящий ответ API
+        // приходит позже. Без задержки мгновенная заглушка обгоняла бы адрес.
+        return new Promise<Response>((resolve) => setTimeout(() => resolve(unauthorized()), 100)) as unknown as Response;
       },
       "GET /api/v1/dashboard": { body: DASHBOARD },
     });
@@ -146,6 +148,66 @@ describe("каталог (OPR-04, OPR-05)", () => {
     expect(router.state.location.search).toBe(
       `?error=session_expired&returnTo=${encodeURIComponent("/catalog?unifiedRegister=false")}`,
     );
+  });
+
+  it("«Скопировать ссылку» копирует адрес с текущими фильтрами (OPR-05)", async () => {
+    stubCatalog();
+    const { user } = renderRoute("/catalog?region=KZ-ATY,KZ-MAN&surveyed=true", { locale: "en" });
+
+    await user.click(await screen.findByRole("button", { name: en.catalog.copyLink }));
+
+    expect(await screen.findByText(en.catalog.linkCopied)).toBeTruthy();
+    const copied = new URL(await navigator.clipboard.readText());
+    expect(copied.pathname + copied.search).toBe("/catalog?region=KZ-ATY,KZ-MAN&surveyed=true");
+  });
+
+  it("буфер обмена недоступен — сообщение об ошибке вместо необработанного отказа", async () => {
+    stubCatalog();
+    const { user } = renderRoute("/catalog", { locale: "ru" });
+    // user-event ставит свой navigator.clipboard при setup(): подменяем его метод.
+    const writeText = vi
+      .spyOn(navigator.clipboard, "writeText")
+      .mockRejectedValue(new DOMException("denied", "NotAllowedError"));
+
+    await user.click(await screen.findByRole("button", { name: ru.catalog.copyLink }));
+
+    expect(await screen.findByText(ru.catalog.linkCopyFailed)).toBeTruthy();
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(ru.catalog.linkCopied)).toBeNull();
+  });
+
+  it("поля поиска следуют адресу: «Сбросить» и переход по ссылке меняют их текст (OPR-05)", async () => {
+    stubCatalog();
+    const { router, user } = renderRoute("/catalog?q=steel&tnved=72", { locale: "en" });
+
+    const query = (await screen.findByPlaceholderText(en.catalog.query)) as HTMLInputElement;
+    const tnved = screen.getByPlaceholderText(en.catalog.tnved) as HTMLInputElement;
+    expect(query.value).toBe("steel");
+    expect(tnved.value).toBe("72");
+
+    await user.click(screen.getByRole("button", { name: en.common.reset }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    expect(query.value).toBe("");
+    expect(tnved.value).toBe("");
+
+    // Переход на адрес с другими фильтрами (как «Назад» или ссылка дашборда).
+    await router.navigate("/catalog?q=pipe&tnved=7304");
+    await waitFor(() => expect(query.value).toBe("pipe"));
+    expect(tnved.value).toBe("7304");
+
+    // В поле кода остаются только цифры, как и в адресе.
+    await user.clear(tnved);
+    await user.type(tnved, "73a0");
+    expect(tnved.value).toBe("730");
+  });
+
+  it("у селектов есть доступные имена — текст видимой подписи", async () => {
+    stubCatalog();
+    renderRoute("/catalog", { locale: "ru" });
+
+    expect(await screen.findByRole("combobox", { name: ru.catalog.surveyed })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: ru.catalog.unifiedRegister })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: ru.catalog.sort })).toBeTruthy();
   });
 
   it("множественный выбор группы — OR внутри фильтра (OPR-04)", async () => {

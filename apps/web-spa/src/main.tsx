@@ -7,10 +7,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./app";
 import { readLocale } from "./i18n/locale";
 import { loadMessages } from "./i18n/messages";
-import { reloadApp } from "./lib/leave-app";
-
-// Флаг одной перезагрузки при сбое старта: второй сбой подряд не зацикливает вкладку.
-const STARTUP_RELOAD = "imbc:startup-reload";
+import { clearReloadFlag, reloadOnce, STARTUP_RELOAD } from "./lib/reload-guard";
 
 // Язык — из cookie NEXT_LOCALE, по умолчанию казахский (LANG-01); грузится только его файл.
 const locale = readLocale(document.cookie);
@@ -23,12 +20,11 @@ loadMessages(locale)
         <App initialLocale={locale} initialMessages={messages} />
       </StrictMode>,
     );
-    sessionStorage.removeItem(STARTUP_RELOAD);
+    clearReloadFlag(STARTUP_RELOAD);
   })
   .catch(() => {
     // Файла переводов нет — вкладка старше выката или сбой сети. Одна перезагрузка
-    // подтянет свежий index.html; если и она не помогла, страницу не перезагружаем снова.
-    if (sessionStorage.getItem(STARTUP_RELOAD)) return;
-    sessionStorage.setItem(STARTUP_RELOAD, "1");
-    reloadApp();
+    // подтянет свежий index.html. Если она уже была или sessionStorage недоступен —
+    // статичное сообщение из index.html на трёх языках вместо пустой страницы.
+    if (reloadOnce(STARTUP_RELOAD) !== "reloaded") document.getElementById("startup-error")?.removeAttribute("hidden");
   });

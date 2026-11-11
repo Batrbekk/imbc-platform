@@ -19,7 +19,10 @@
     "catalog": "Catalog",
     "dashboard": "Dashboard",
     "profile": "Company profile",
-    "account": "My account"
+    "account": "My account",
+    "toggleSidebar": "Show or hide the menu",
+    "sheetTitle": "Menu",
+    "sheetDescription": "Platform sections"
   },
   "login": {
     "title": "Sign in to the platform",
@@ -126,6 +129,7 @@
     "empty": "Nothing found. Change the filters.",
     "copyLink": "Copy link",
     "linkCopied": "Link with filters copied",
+    "linkCopyFailed": "Could not copy the link. Copy it from the address bar.",
     "columns": {
       "name": "Company",
       "bin": "BIN",
@@ -198,5 +202,10 @@
     "title": "Page not found",
     "description": "The address may be mistyped, or the page has moved.",
     "home": "Go to the start page"
+  },
+  "routeError": {
+    "title": "The page could not be opened",
+    "description": "The platform may have been updated. Reload the page to continue.",
+    "reload": "Reload the page"
   }
 }
