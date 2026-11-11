@@ -3,6 +3,7 @@
 ## Stack
 
 - React 19 + TypeScript single-page application built with Vite (specification 11.1). There is no server rendering: sessions, OIDC and rights live in the NestJS BFF (`apps/api`), and the browser talks only to `/api` and `/kc` on its own origin.
+- The BFF client `src/lib/api.ts` sends every request with `cache: "no-store"`, and the API answers every request with `Cache-Control: no-store`, so the browser never draws application data from its HTTP cache, also after sign-out and Back (NFR-11).
 - React Router 8 data router; nuqs (React Router v8 adapter) for state in the address; use-intl for translations; TanStack Query for server data; Tailwind CSS 4.
 - shadcn/ui on Base UI (`@base-ui/react`), preset `base-nova`. IMBC colours are CSS variables in `src/index.css` on top of the preset.
 - Vitest + jsdom + Testing Library. Run `pnpm --filter @imbc/web test`; `pnpm --filter @imbc/web dev` serves on `:3000`.

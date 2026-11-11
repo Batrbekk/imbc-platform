@@ -19,6 +19,9 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
   const res = await fetch(`/api${path}`, {
     credentials: "same-origin",
     ...rest,
+    // Ответ зависит от сеанса: браузер не берёт его из своего кеша, даже если заголовок
+    // Cache-Control: no-store потерялся по дороге (NFR-11).
+    cache: "no-store",
     headers: {
       accept: "application/json",
       ...(json !== undefined ? { "content-type": "application/json" } : {}),

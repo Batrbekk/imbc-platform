@@ -1,7 +1,9 @@
 import 'reflect-metadata';
-import { type CanActivate, type ExecutionContext, type INestApplication, Module } from '@nestjs/common';
+import { type CanActivate, type ExecutionContext, Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { configureHttp } from '../src/common/http.js';
 import { ProblemDetailsFilter } from '../src/common/problem.js';
 import { CatalogController } from '../src/modules/catalog/catalog.controller.js';
 import { CatalogService } from '../src/modules/catalog/catalog.service.js';
@@ -28,12 +30,12 @@ class OperatorSession implements CanActivate {
 class CatalogHttpModule {}
 
 describe('GET /api/v1/catalog/search', () => {
-  let app: INestApplication;
+  let app: NestExpressApplication;
   let base: string;
 
   beforeAll(async () => {
-    app = await NestFactory.create(CatalogHttpModule, { logger: false });
-    app.setGlobalPrefix('api');
+    app = await NestFactory.create<NestExpressApplication>(CatalogHttpModule, { logger: false });
+    configureHttp(app);
     await app.listen(0, '127.0.0.1');
     base = await app.getUrl();
   });
