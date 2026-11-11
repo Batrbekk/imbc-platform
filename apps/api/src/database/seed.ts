@@ -4,7 +4,13 @@
  * Все компании вымышленные; БИН сгенерированы с правильной контрольной цифрой.
  */
 import { pathToFileURL } from 'node:url';
-import { computeBinCheckDigit, normalizeCompanyName, type CommodityGroup, type Role } from '@imbc/contracts';
+import {
+  computeBinCheckDigit,
+  normalizeCompanyName,
+  type CommodityGroup,
+  type Role,
+  type UpdateStatus,
+} from '@imbc/contracts';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
@@ -42,6 +48,8 @@ const COMPANIES: {
   certs: string[];
   surveyed: boolean;
   headcount: number;
+  /** Статус актуальности: unresponsive тоже в каталоге и на дашборде, ниже остальных (UPD-04, OPR-33). */
+  updateStatus: UpdateStatus;
 }[] = [
   {
     ru: 'ТОО «Демо Металл Конструкция»',
@@ -52,6 +60,7 @@ const COMPANIES: {
     certs: ['ISO 9001'],
     surveyed: true,
     headcount: 240,
+    updateStatus: 'active',
   },
   {
     ru: 'ТОО «Каспий Демо Сервис»',
@@ -62,6 +71,7 @@ const COMPANIES: {
     certs: ['ISO 9001', 'API 6D'],
     surveyed: true,
     headcount: 410,
+    updateStatus: 'active',
   },
   {
     ru: 'АО «Пример Кабель»',
@@ -72,6 +82,7 @@ const COMPANIES: {
     certs: ['ISO 14001'],
     surveyed: false,
     headcount: 120,
+    updateStatus: 'active',
   },
   {
     ru: 'ТОО «Тест Химия»',
@@ -82,6 +93,7 @@ const COMPANIES: {
     certs: [],
     surveyed: false,
     headcount: 65,
+    updateStatus: 'unresponsive',
   },
   {
     ru: 'ТОО «Образец Спецодежда»',
@@ -92,6 +104,7 @@ const COMPANIES: {
     certs: ['ISO 45001'],
     surveyed: true,
     headcount: 90,
+    updateStatus: 'active',
   },
   {
     ru: 'ТОО «Демо Насос Завод»',
@@ -102,6 +115,7 @@ const COMPANIES: {
     certs: ['ISO 9001', 'API 610'],
     surveyed: true,
     headcount: 310,
+    updateStatus: 'active',
   },
   {
     ru: 'ТОО «Степь Пластик»',
@@ -112,6 +126,7 @@ const COMPANIES: {
     certs: [],
     surveyed: false,
     headcount: 45,
+    updateStatus: 'outdated',
   },
   {
     ru: 'ТОО «Атырау Демо Арматура»',
@@ -122,6 +137,7 @@ const COMPANIES: {
     certs: ['ISO 9001'],
     surveyed: true,
     headcount: 180,
+    updateStatus: 'active',
   },
 ];
 
@@ -163,11 +179,14 @@ export async function seedDemo(pool: pg.Pool): Promise<void> {
         .values({
           organizationId: org!.id,
           status: 'verified',
-          updateStatus: 'active',
+          updateStatus: c.updateStatus,
           verifiedAt,
           completenessPct: 100,
         })
-        .onConflictDoUpdate({ target: manufacturerProfiles.organizationId, set: { status: 'verified' } })
+        .onConflictDoUpdate({
+          target: manufacturerProfiles.organizationId,
+          set: { status: 'verified', updateStatus: c.updateStatus },
+        })
         .returning();
       const until = new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10);
       const row = {
@@ -189,7 +208,7 @@ export async function seedDemo(pool: pg.Pool): Promise<void> {
         headcountTotal: c.headcount,
         siteSurveyed: c.surveyed,
         unifiedRegister: i % 3 === 0,
-        updateStatus: 'active' as const,
+        updateStatus: c.updateStatus,
         verifiedAt,
         card: { demo: true },
       };

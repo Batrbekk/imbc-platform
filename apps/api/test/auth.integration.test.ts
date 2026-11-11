@@ -1,10 +1,8 @@
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import pg from 'pg';
+import type pg from 'pg';
 import { PgBoss } from 'pg-boss';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { computeBinCheckDigit, ROLES, type Role } from '@imbc/contracts';
@@ -24,6 +22,7 @@ import { SessionService } from '../src/modules/auth/session.service.js';
 import { ProfilesService } from '../src/modules/profiles/profiles.service.js';
 import { RegistrationController } from '../src/modules/registration/registration.controller.js';
 import { JobHandlers } from '../src/worker/handlers.service.js';
+import { migrateThrough, openTestPool, resetDatabase } from './support/database.js';
 
 // Explicit opt-in to a disposable PostgreSQL database. Never use the platform database.
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -43,15 +42,10 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
   } as Env;
 
   beforeAll(async () => {
-    const parsed = new URL(databaseUrl!);
-    if (parsed.pathname !== '/imbc_auth_test')
-      throw new Error('TEST_DATABASE_URL must select the isolated imbc_auth_test database');
-    pool = new pg.Pool({ connectionString: databaseUrl, max: 20 });
-    await pool.query(
-      'DROP SCHEMA IF EXISTS pgboss_auth_test CASCADE; DROP SCHEMA IF EXISTS drizzle CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public; CREATE EXTENSION pg_trgm',
-    );
+    pool = openTestPool();
+    await resetDatabase(pool);
+    await migrateThrough(pool);
     db = drizzle(pool, { schema, casing: 'snake_case' });
-    await migrate(db, { migrationsFolder: fileURLToPath(new URL('../drizzle', import.meta.url)) });
     sessions = new SessionService(db, env);
     rates = new AuthRateLimitService(db);
     boss = new PgBoss({ connectionString: databaseUrl, schema: 'pgboss_auth_test', supervise: false, schedule: false });

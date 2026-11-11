@@ -6,6 +6,7 @@ import {
   catalogFilterToSearchParams,
   checkBin,
   computeBinCheckDigit,
+  dashboardSchema,
   normalizeCompanyName,
   POLICY_MATRIX,
   ORGANIZATION_TYPES,
@@ -65,6 +66,28 @@ describe('фильтры каталога (OPR-02…05)', () => {
 
   it('отклоняет неизвестную товарную группу', () => {
     expect(() => catalogFilterSchema.parse({ group: 'Z' })).toThrow();
+  });
+});
+
+describe('дашборд (OPR-31…35)', () => {
+  const dashboard = {
+    total: 5,
+    byRegion: [{ region: 'KZ-AKM', count: 1 }],
+    byCommodityGroup: [{ group: 'A', count: 2 }],
+    siteSurveyed: 2,
+    unifiedRegister: 1,
+    updateStatus: { active: 2, outdated: 1, unresponsive: 2 },
+    generatedAt: '2026-11-11T10:00:00.000Z',
+  };
+
+  it('счётчики по статусу актуальности включают все три статуса (OPR-33, UPD-06)', () => {
+    expect(dashboardSchema.parse(dashboard).updateStatus).toEqual({ active: 2, outdated: 1, unresponsive: 2 });
+  });
+
+  it('отклоняет прежнюю форму со статусом inactive', () => {
+    expect(() =>
+      dashboardSchema.parse({ ...dashboard, updateStatus: { active: 2, outdated: 1, inactive: 2 } }),
+    ).toThrow();
   });
 });
 

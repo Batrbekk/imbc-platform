@@ -1,18 +1,40 @@
-import { type CatalogFilter, type CatalogPage, normalizeCompanyName, type Scope } from '@imbc/contracts';
+import {
+  type CatalogFilter,
+  type CatalogPage,
+  type Dashboard,
+  normalizeCompanyName,
+  type Scope,
+} from '@imbc/contracts';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, arrayOverlaps, asc, desc, eq, gte, inArray, lte, type SQL, sql } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
 import { DB, type Database } from '../../database/database.module.js';
-import { catalogVisible, manufacturerProfiles } from '../../database/schema/index.js';
+import { catalogVisible } from '../../database/schema/index.js';
 import { VALKEY } from '../../infra/infra.module.js';
 
 const t = catalogVisible;
 const DASHBOARD_TTL_S = 60;
+/** v2: счётчики по статусу актуальности v1.3 (UPD-06). Кеш прежней формы (dashboard:v1) не читается. */
+const DASHBOARD_CACHE_KEY = 'dashboard:v2';
+
+/**
+ * Порядок выдачи: unresponsive ниже active и outdated при любой сортировке (UPD-04, OPR-01, OPR-33),
+ * затем ключи выбранной сортировки. Между active и outdated порядка нет.
+ */
+export function catalogOrder(sort: CatalogFilter['sort']): SQL[] {
+  const keys = {
+    name: [asc(t.nameRu)],
+    verified_at: [desc(t.verifiedAt)],
+    region: [asc(t.region), asc(t.nameRu)],
+  }[sort];
+  return [sql`(${t.updateStatus} = 'unresponsive') asc`, ...keys];
+}
 
 /**
  * Каталог и дашборд читают только проекцию catalog_visible (архитектура §10):
- * в ней нет записей IMBC, заметок операторов и ожидающих значений (DATA-34),
- * а скрытые профили (unresponsive) в неё не попадают (UPD-04).
+ * в ней нет записей IMBC, заметок операторов и ожидающих значений (DATA-34).
+ * Видимый профиль — Verified и due diligence green/amber при любом статусе актуальности
+ * (раздел 4); unresponsive остаётся в выдаче (UPD-04).
  */
 @Injectable()
 export class CatalogService {
@@ -71,11 +93,6 @@ export class CatalogService {
     // TODO(scope=all): эксперт и директор ищут по всем профилям, включая Draft и Returned
     // (раздел 4). Для них нужна отдельная внутренняя проекция; пока — видимые профили.
     void scope;
-    const order = {
-      name: [asc(t.nameRu)],
-      verified_at: [desc(t.verifiedAt)],
-      region: [asc(t.region), asc(t.nameRu)],
-    }[f.sort];
     const conditions = this.buildConditions(f);
 
     const rows = await this.db
@@ -97,7 +114,7 @@ export class CatalogService {
       })
       .from(t)
       .where(conditions.length ? and(...conditions) : undefined)
-      .orderBy(...order)
+      .orderBy(...catalogOrder(f.sort))
       .limit(f.pageSize)
       .offset((f.page - 1) * f.pageSize);
 
@@ -112,11 +129,13 @@ export class CatalogService {
     };
   }
 
-  /** Дашборд оператора, наблюдателя и директора (OPR-70…73). Кеш Valkey на 60 секунд. */
-  async dashboard() {
-    const key = 'dashboard:v1';
-    const cached = await this.valkey.get(key).catch(() => null);
-    if (cached) return JSON.parse(cached) as unknown;
+  /**
+   * Дашборд оператора, наблюдателя и директора (OPR-31…35). Все счётчики — из проекции:
+   * unresponsive остаётся на карте и в счётчиках по статусу (OPR-33). Кеш Valkey на 60 секунд.
+   */
+  async dashboard(): Promise<Dashboard> {
+    const cached = await this.valkey.get(DASHBOARD_CACHE_KEY).catch(() => null);
+    if (cached) return JSON.parse(cached) as Dashboard;
 
     const [totals] = await this.db
       .select({
@@ -125,22 +144,18 @@ export class CatalogService {
         unifiedRegister: sql<number>`count(*) filter (where ${t.unifiedRegister})`.mapWith(Number),
         active: sql<number>`count(*) filter (where ${t.updateStatus} = 'active')`.mapWith(Number),
         outdated: sql<number>`count(*) filter (where ${t.updateStatus} = 'outdated')`.mapWith(Number),
+        unresponsive: sql<number>`count(*) filter (where ${t.updateStatus} = 'unresponsive')`.mapWith(Number),
       })
       .from(t);
     const byRegion = await this.db
       .select({ region: t.region, count: sql<number>`count(*)`.mapWith(Number) })
       .from(t)
       .groupBy(t.region);
-    const byGroup = await this.db.execute<{ group: string; count: number }>(
+    const byGroup = await this.db.execute<Dashboard['byCommodityGroup'][number]>(
       sql`select g as "group", count(*)::int as count from ${t}, unnest(${t.commodityGroups}) g group by g order by g`,
     );
-    // Unresponsive не на карте, но в счётчиках — чтобы было видно изменение общего числа (OPR-72).
-    const [unresponsive] = await this.db
-      .select({ count: sql<number>`count(*)`.mapWith(Number) })
-      .from(manufacturerProfiles)
-      .where(and(eq(manufacturerProfiles.status, 'verified'), eq(manufacturerProfiles.updateStatus, 'unresponsive')));
 
-    const result = {
+    const result: Dashboard = {
       total: totals?.total ?? 0,
       byRegion,
       byCommodityGroup: byGroup.rows,
@@ -149,12 +164,12 @@ export class CatalogService {
       updateStatus: {
         active: totals?.active ?? 0,
         outdated: totals?.outdated ?? 0,
-        unresponsive: unresponsive?.count ?? 0,
+        unresponsive: totals?.unresponsive ?? 0,
       },
       generatedAt: new Date().toISOString(),
     };
     await this.valkey
-      .set(key, JSON.stringify(result), 'EX', DASHBOARD_TTL_S)
+      .set(DASHBOARD_CACHE_KEY, JSON.stringify(result), 'EX', DASHBOARD_TTL_S)
       .catch((error: unknown) => this.logger.debug(`cache skip: ${String(error)}`));
     return result;
   }

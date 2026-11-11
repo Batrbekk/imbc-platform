@@ -79,6 +79,23 @@ export const catalogPageSchema = z.object({
 });
 export type CatalogPage = z.infer<typeof catalogPageSchema>;
 
+const count = z.number().int().min(0);
+
+/**
+ * Дашборд видимых верифицированных производителей (OPR-31…35). Счётчики по статусу
+ * актуальности включают все три статуса, unresponsive тоже остаётся на карте (OPR-33, UPD-06).
+ */
+export const dashboardSchema = z.object({
+  total: count,
+  byRegion: z.array(z.object({ region: z.string(), count })),
+  byCommodityGroup: z.array(z.object({ group: z.enum(COMMODITY_GROUPS), count })),
+  siteSurveyed: count,
+  unifiedRegister: count,
+  updateStatus: z.object({ active: count, outdated: count, unresponsive: count }),
+  generatedAt: z.iso.datetime(),
+});
+export type Dashboard = z.infer<typeof dashboardSchema>;
+
 /** Сериализация фильтров в query string (для API-клиента и ссылок в письмах). */
 export function catalogFilterToSearchParams(filter: Partial<CatalogFilter>): URLSearchParams {
   const params = new URLSearchParams();
