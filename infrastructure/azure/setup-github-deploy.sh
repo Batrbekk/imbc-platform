@@ -90,6 +90,9 @@ gh_read() {
 
 # Чтение через az с проверкой кода выхода: ошибка Azure CLI не выглядит как «ресурса нет».
 # Вызывать как x="$(az_read …)" || exit 1.
+# Формат -o tsv: скаляр — одна строка; плоский список — ОДНО ЗНАЧЕНИЕ НА СТРОКУ; список списков —
+# строки с полями через табуляцию; null — пустой вывод. Несколько полей одной записи читаются
+# только запросом «список списков» ([?…].[a, b] или [[a, b]]).
 az_read() {
   local out status=0
   out="$(az "$@" 2>"$ERR_FILE")" || status=$?
@@ -139,13 +142,15 @@ collect() {
   [[ -n "$REPO_INFO" ]] || die "Репозиторий $REPO не найден"
   resolve_subject
 
-  identity="$(az_read identity list -g "$RG" --query "[?name=='$IDENTITY'] | [0].[clientId, principalId]" -o tsv)" || exit 1
+  identity="$(az_read identity list -g "$RG" --query "[?name=='$IDENTITY'].[clientId, principalId]" -o tsv)" || exit 1
+  [[ "$identity" != *$'\n'* ]] || die "Несколько идентичностей $IDENTITY в $RG"
   IFS=$'\t' read -r CLIENT_ID PRINCIPAL_ID <<< "$identity"
+  [[ -z "$CLIENT_ID" || -n "$PRINCIPAL_ID" ]] || die "Идентичность $IDENTITY прочитана не полностью: нет principalId"
 
   FIC_STATE='absent'; EXTRA_FICS=''
   if [[ -n "$PRINCIPAL_ID" ]]; then
     fic="$(az_read identity federated-credential list --identity-name "$IDENTITY" -g "$RG" \
-      --query "[?name=='$CREDENTIAL'] | [0].[issuer, subject, join(',', audiences)]" -o tsv)" || exit 1
+      --query "[?name=='$CREDENTIAL'].[issuer, subject, join(',', audiences)]" -o tsv)" || exit 1
     if [[ -n "$fic" ]]; then
       FIC_STATE='differs'
       [[ "$fic" != "$ISSUER"$'\t'"$SUBJECT"$'\t'"$AUDIENCE" ]] || FIC_STATE='ok'
@@ -362,6 +367,10 @@ role_visible() {
 ensure_environment() {
   local id kind branch
   log "GitHub: окружение $GH_ENV, развёртывание только из $DEPLOY_BRANCH"
+  if environment_ok; then
+    echo "  уже так: custom branch policies, единственная политика — ветка $DEPLOY_BRANCH; без изменений"
+    return 0
+  fi
   gh api -X PUT "repos/$REPO/environments/$GH_ENV" --input - >/dev/null <<'JSON'
 {"deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
 JSON
@@ -389,7 +398,7 @@ apply() {
   if [[ -z "$PRINCIPAL_ID" ]]; then
     log "Azure: идентичность $IDENTITY"
     az identity create -g "$RG" -n "$IDENTITY" --tags project=imbc env=dev purpose=github-deploy -o none
-    identity="$(az_read identity show -g "$RG" -n "$IDENTITY" --query '[clientId, principalId]' -o tsv)" || exit 1
+    identity="$(az_read identity show -g "$RG" -n "$IDENTITY" --query '[[clientId, principalId]]' -o tsv)" || exit 1
     IFS=$'\t' read -r CLIENT_ID PRINCIPAL_ID <<< "$identity"
     [[ -n "$PRINCIPAL_ID" ]] || die "Идентичность создана, но её principalId не прочитан"
   fi
