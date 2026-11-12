@@ -69,15 +69,18 @@ describe('explicit development OTP configuration', () => {
     expect(otpDeliveryFor({ ...env, DEPLOYMENT_ENV: 'production' }, account)).toBe('email');
   });
 
-  it('accepts the legacy spectator role name from a pre-v1.3 server .env as observer', () => {
-    const env = loadEnv({
-      ...source,
-      DEPLOYMENT_ENV: 'development',
-      DEV_FIXED_OTP_ENABLED: 'true',
-      DEV_FIXED_OTP_ACCOUNTS: JSON.stringify([{ id: accountId, role: 'spectator' }]),
-    });
-    expect(env.DEV_FIXED_OTP_ACCOUNTS).toEqual([{ id: accountId, role: 'observer' }]);
-    expect(otpDeliveryFor(env, { id: accountId, role: 'observer' })).toBe('development_code');
+  it('прежнее имя роли spectator в DEV_FIXED_OTP_ACCOUNTS — ошибка конфигурации при старте', () => {
+    // Раздел 3.1 v1.3: псевдоним spectator → observer снят релизом contract (миграция 0006).
+    const start = () =>
+      loadEnv({
+        ...source,
+        DEPLOYMENT_ENV: 'development',
+        DEV_FIXED_OTP_ENABLED: 'true',
+        DEV_FIXED_OTP_ACCOUNTS: JSON.stringify([{ id: accountId, role: 'spectator' }]),
+      });
+    expect(start).toThrow('Некорректная конфигурация окружения');
+    expect(start).toThrow('DEV_FIXED_OTP_ACCOUNTS.0.role');
+    expect(start).not.toThrow(accountId);
   });
 
   it('combines listed accounts with the separate administrator-only legacy setting', () => {

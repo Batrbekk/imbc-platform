@@ -43,6 +43,13 @@
       "when": 1794483937251,
       "tag": "0005_adata_prefill",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794494630449,
+      "tag": "0006_spec_v13_contract",
+      "breakpoints": true
     }
   ]
 }

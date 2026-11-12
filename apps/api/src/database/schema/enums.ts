@@ -35,7 +35,6 @@ export const revisionState = pgEnum('revision_state', ['working', 'submitted', '
 export const decision = pgEnum('decision', ['verified', 'rejected']);
 export const scanState = pgEnum('scan_state', ['pending', 'clean', 'infected', 'type_mismatch']);
 export const ddResult = pgEnum('dd_result', ['no_issues', 'findings']);
-export const checkStatus = pgEnum('check_status', ['clean', 'findings', 'unavailable']);
 export const requestState = pgEnum('request_state', ['open', 'closed']);
 export const exportFormat = pgEnum('export_format', ['xlsx', 'csv']);
 export const subscriptionPeriod = pgEnum('subscription_period', ['daily', 'weekly', 'monthly']);

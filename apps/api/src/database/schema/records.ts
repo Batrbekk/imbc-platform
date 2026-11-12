@@ -17,7 +17,6 @@ import {
 import { createdAt, id } from './_shared.js';
 import { organizations, userAccounts } from './access.js';
 import {
-  checkStatus,
   connectorCode,
   ddResult,
   decision,
@@ -66,26 +65,6 @@ export const dueDiligenceRecords = pgTable('due_diligence_records', {
   changedBy: uuid('changed_by').references(() => userAccounts.id),
   createdAt: createdAt(),
 });
-
-/** Попытка внешней проверки; результат заглушки помечен как тестовый (EXT-01…05). */
-export const externalChecks = pgTable(
-  'external_checks',
-  {
-    id: id(),
-    profileId: uuid('profile_id')
-      .notNull()
-      .references(() => manufacturerProfiles.id, { onDelete: 'cascade' }),
-    connector: text('connector').notNull(),
-    bin: text('bin').notNull(),
-    status: checkStatus('status').notNull(),
-    value: jsonb('value'),
-    source: text('source').notNull(),
-    isTestData: boolean('is_test_data').notNull().default(false),
-    checkedAt: timestamp('checked_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [index('external_checks_profile_idx').on(t.profileId, t.connector)],
-);
-// externalChecks — пустой каркас, удаляет релиз contract. Чтение Adata пишет в таблицы DBML ниже.
 
 /*
  * Внешняя проверка и её попытки — по DBML (external_check, external_check_attempt), с расхождениями:

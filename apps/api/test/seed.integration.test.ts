@@ -1,12 +1,11 @@
-import { randomUUID } from 'node:crypto';
 import { companyCardDataSchema } from '@imbc/contracts';
 import type pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { seedDemo } from '../src/database/seed.js';
 import { migrateThrough, openTestPool, resetDatabase } from './support/database.js';
 
-// Демо-аккаунт наблюдателя (GEN-06, раздел 3.1 v1.3): spectator@spectator.local → observer@observer.local.
-// На стенде строка аккаунта переименовывается на месте: id и idp_subject сохраняются.
+// Демо-аккаунт наблюдателя (GEN-06, раздел 3.1 v1.3) — observer@observer.local; прежний адрес
+// spectator@spectator.local seed не создаёт.
 describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
   vi.setConfig({ testTimeout: 30000 });
   let pool: pg.Pool;
@@ -14,24 +13,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
   /** Аккаунты наблюдателя — прежний и новый адрес. */
   const accounts = async () =>
     (
-      await pool.query<{ id: string; email: string; organization_id: string; idp_subject: string | null }>(
-        `select id, email, organization_id, idp_subject from user_accounts
+      await pool.query<{ email: string }>(
+        `select email from user_accounts
          where lower(email) in ('spectator@spectator.local', 'observer@observer.local') order by email`,
       )
     ).rows;
-
-  /** Демо-организация и аккаунт наблюдателя, как их оставила предыдущая версия после переноса данных. */
-  const legacyObserver = async (email = 'spectator@spectator.local') => {
-    const org = await pool.query<{ id: string }>(
-      "insert into organizations (type, name) values ('observer', 'Наблюдатель (демо)') returning id",
-    );
-    const subject = randomUUID();
-    const account = await pool.query<{ id: string }>(
-      "insert into user_accounts (organization_id, email, role, state, idp_subject) values ($1, $2, 'observer', 'active', $3) returning id",
-      [org.rows[0]!.id, email, subject],
-    );
-    return { organization: org.rows[0]!.id, account: account.rows[0]!.id, subject };
-  };
 
   beforeAll(() => {
     pool = openTestPool();
@@ -44,63 +30,6 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
 
   afterAll(async () => {
     await pool?.end();
-  });
-
-  it('переименовывает прежний демо-аккаунт на месте', async () => {
-    const legacy = await legacyObserver();
-
-    await seedDemo(pool);
-
-    expect(await accounts()).toEqual([
-      {
-        id: legacy.account,
-        email: 'observer@observer.local',
-        organization_id: legacy.organization,
-        idp_subject: legacy.subject,
-      },
-    ]);
-    const orgs = await pool.query("select id from organizations where name = 'Наблюдатель (демо)'");
-    expect(orgs.rows).toEqual([{ id: legacy.organization }]);
-  });
-
-  it('находит прежний адрес без учёта регистра', async () => {
-    const legacy = await legacyObserver('Spectator@Spectator.local');
-
-    await seedDemo(pool);
-
-    expect(await accounts()).toEqual([
-      {
-        id: legacy.account,
-        email: 'observer@observer.local',
-        organization_id: legacy.organization,
-        idp_subject: legacy.subject,
-      },
-    ]);
-  });
-
-  it('не трогает аккаунты, если observer@observer.local уже существует', async () => {
-    const legacy = await legacyObserver();
-    const current = await pool.query<{ id: string }>(
-      "insert into user_accounts (organization_id, email, role, state) values ($1, 'observer@observer.local', 'observer', 'invited') returning id",
-      [legacy.organization],
-    );
-
-    await seedDemo(pool);
-
-    expect(await accounts()).toEqual([
-      {
-        id: current.rows[0]!.id,
-        email: 'observer@observer.local',
-        organization_id: legacy.organization,
-        idp_subject: null,
-      },
-      {
-        id: legacy.account,
-        email: 'spectator@spectator.local',
-        organization_id: legacy.organization,
-        idp_subject: legacy.subject,
-      },
-    ]);
   });
 
   it('повторный запуск не создаёт дублей', async () => {
