@@ -3,8 +3,8 @@ import { useSearchParams } from "react-router";
 import { useTranslations } from "use-intl";
 
 import { PageTitle } from "@/components/app/page-title";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
+import { AuthScreen } from "./auth-screen";
 import { VerifyForm } from "./verify-form";
 
 /** Второй фактор: код из письма при входе с нового устройства (AUTH-03). */
@@ -12,17 +12,9 @@ export function VerifyPage() {
   const [params] = useSearchParams();
   const t = useTranslations("verify");
   return (
-    <Card>
+    <AuthScreen title={t("title")} description={t("hint")}>
       <PageTitle title={t("title")} />
-      <CardHeader>
-        <CardTitle className="text-xl">
-          <h1>{t("title")}</h1>
-        </CardTitle>
-        <CardDescription>{t("hint")}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <VerifyForm returnTo={safeReturnTo(params.get("returnTo"))} />
-      </CardContent>
-    </Card>
+      <VerifyForm returnTo={safeReturnTo(params.get("returnTo"))} />
+    </AuthScreen>
   );
 }
