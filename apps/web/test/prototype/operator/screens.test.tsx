@@ -35,7 +35,8 @@ describe("экраны кабинета оператора", () => {
     for (const name of ["My manufacturers", "Requests", "Export", "Pull API"]) {
       expect(screen.getByRole("link", { name })).toBeTruthy();
     }
-    const item = screen.getByRole("link", { name: "Export subscriptions" }).closest("li")!;
+    // Короткая подпись в меню, полное название — заголовок страницы.
+    const item = screen.getByRole("link", { name: "Subscriptions" }).closest("li")!;
     expect(within(item as HTMLElement).getByText("Release 2")).toBeTruthy();
   });
 

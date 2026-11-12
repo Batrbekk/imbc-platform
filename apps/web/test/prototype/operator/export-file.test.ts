@@ -91,8 +91,17 @@ describe("файл выгрузки", () => {
     expect(about).toContain(">1.0<");
     expect(about).toContain(`<v>${t.rows.length}</v>`);
     expect(about).toContain(">group=B<");
+    // В XLSX строка в ячейке не вычисляется: телефон без апострофа (экранирование — только CSV).
+    expect(sheet).toContain(">+7 ");
+    expect(sheet).not.toContain(">'+7");
     const zip = zipStored(parts);
     expect(String.fromCharCode(zip[0]!, zip[1]!)).toBe("PK");
     expect(new TextDecoder().decode(zip)).toContain("xl/workbook.xml");
+    // Дата в заголовках ZIP — 1980-01-01 (DOS: ((1980 − 1980) << 9) | (1 << 5) | 1).
+    const view = new DataView(zip.buffer);
+    expect(view.getUint16(12, true)).toBe(0x21);
+    let central = 0;
+    while (view.getUint32(central, true) !== 0x02014b50) central++;
+    expect(view.getUint16(central + 14, true)).toBe(0x21);
   });
 });

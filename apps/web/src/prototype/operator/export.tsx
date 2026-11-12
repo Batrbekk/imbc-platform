@@ -1,5 +1,5 @@
 // Выгрузка текущего поиска: колонки раздела 9.2, формат, файл из демо-данных, история своей организации.
-// OPR-05, OPR-14, OPR-24, DATA-09, DATA-10, DATA-11, DATA-12, DATA-13, GEN-12.
+// OPR-05, OPR-14, OPR-24, DATA-09, DATA-10, DATA-11, DATA-12, DATA-13, AUD-01, GEN-12.
 import { COMMODITY_GROUPS, PROFILE_TIERS } from "@imbc/contracts";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
@@ -101,6 +101,15 @@ export function ExportScreen() {
       },
     );
     setBuilt(file);
+    // Скачивание — отдельное событие журнала (AUD-01).
+    update(
+      {
+        action: "export.download",
+        subject: { type: "export", id, label: file.name },
+        summary: localized(texts, "auditDownload", { name: file.name }),
+      },
+      () => {},
+    );
     downloadFile(file.name, file.content, file.format);
   };
 
@@ -116,7 +125,7 @@ export function ExportScreen() {
               id="export-q"
               className="sm:w-64"
               value={filters.q}
-              onChange={(e) => setFilter("q", e.target.value.trim() ? e.target.value : null)}
+              onChange={(e) => setFilter("q", e.target.value || null)}
             />
           </div>
           <Choice

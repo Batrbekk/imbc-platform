@@ -25,7 +25,7 @@ export function useDescribeFilters() {
   return (filters: SearchFilters | string) => {
     const f = typeof filters === "string" ? parseFilters(filters) : filters;
     const parts = [
-      f.q && `“${f.q}”`,
+      f.q.trim() && `“${f.q.trim()}”`,
       f.group && translate(texts, locale, "groupValue", { group: f.group }),
       f.region,
       f.tier && common(`tier.${f.tier}`),

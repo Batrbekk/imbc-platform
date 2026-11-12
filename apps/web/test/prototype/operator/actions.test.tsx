@@ -13,7 +13,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-const ACTOR = { email: "operator@operator.local", role: "operator", organizationId: "org-operator-demo" };
+const ACTOR = { accountId: "acc-operator", role: "operator", organizationId: "org-operator-demo" };
 
 function cardOf(text: string | RegExp): HTMLElement {
   return screen.getByText(text).closest<HTMLElement>("[data-slot=card]")!;
@@ -105,7 +105,7 @@ describe("отметки и заметки на карточке компани�
     expect(colleague.state().operatorNotes.some((n) => n.id === "opn-02")).toBe(false);
     expect(colleague.state().audit.at(-1)).toMatchObject({
       action: "operator_note.delete",
-      actor: { email: "arman.bekov@operator.demo.local" },
+      actor: { accountId: "acc-operator-2" },
     });
     expect(screen.queryByText("Готовы к аудиту поставщика в декабре.")).toBeNull();
   });
@@ -126,7 +126,7 @@ describe("запросы", () => {
       profileId: "p03",
       status: "open",
     });
-    expect(state().audit.at(-1)?.action).toBe("imbc_request.create");
+    expect(state().audit.at(-1)?.action).toBe("imbc_request.send");
     const card = cardOf("Кабельная продукция для склада");
     expect(within(card).getByText(/АО «Пример Кабель»/)).toBeTruthy();
     expect(within(card).getByText("Waiting for IMBC's reply.")).toBeTruthy();
@@ -169,7 +169,7 @@ describe("запросы", () => {
       reply: null,
       status: "open",
     });
-    expect(state().audit.at(-1)?.action).toBe("operator_request.create");
+    expect(state().audit.at(-1)?.action).toBe("operator_request.send");
     // Новый запрос — первым (сначала новые); у or-01 та же секция.
     const card = screen.getAllByText("Section: Certificates")[0]!.closest<HTMLElement>("[data-slot=card]")!;
     expect(within(card).getByText("АО «Пример Кабель»")).toBeTruthy();
@@ -195,13 +195,25 @@ describe("выгрузка и подписки", () => {
       filters: "group=B",
     });
     expect(record.rows).toBeGreaterThan(0);
-    expect(state().audit.at(-1)).toMatchObject({
+    expect(state().audit.at(-2)).toMatchObject({
       action: "export.create",
       summary: { en: expect.stringContaining("CSV") },
     });
+    // Скачивание собранного файла — своё событие журнала (AUD-01).
+    expect(state().audit.at(-1)).toMatchObject({ action: "export.download", actor: ACTOR });
     expect(await screen.findByRole("status")).toBeTruthy();
     expect(screen.getByRole("status").textContent).toMatch(/imbc-export-.*\.csv is ready/);
     expect(screen.getAllByText("Group B").length).toBeGreaterThan(0);
+  });
+
+  it("поиск из двух слов с пробелом набирается как есть и находит компанию (OPR-14)", async () => {
+    const { user } = renderCabinet("/proto/operator/export", { role: "operator" });
+    const field = await screen.findByLabelText("Name or BIN");
+    await user.type(field, "Демо Насос");
+    expect((field as HTMLInputElement).value).toBe("Демо Насос");
+    expect(screen.getByText(/Found: 1 manufacturers/)).toBeTruthy();
+    expect(screen.getByText("ТОО «Демо Насос Завод»")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Build file" }).hasAttribute("disabled")).toBe(false);
   });
 
   it("без колонок файл не собирается", async () => {
@@ -247,6 +259,18 @@ describe("выгрузка и подписки", () => {
     expect(screen.queryByText("Кабель, ежемесячно")).toBeNull();
   });
 
+  it("скачивание файла подписки пишет журнал (AUD-01)", async () => {
+    const { user, state } = renderCabinet("/proto/operator/subscriptions", { role: "operator" });
+    await screen.findByText("Арматура, еженедельно");
+    const card = cardOf("Арматура, еженедельно");
+    await user.click(within(card).getAllByRole("button", { name: "Download" })[0]!);
+    expect(state().audit.at(-1)).toMatchObject({
+      action: "subscription.download",
+      subject: { type: "subscription", id: "sub-01" },
+      actor: ACTOR,
+    });
+  });
+
   it("подписки только свои: коллега по организации чужих не видит (раздел 4: own only)", async () => {
     renderCabinet("/proto/operator/subscriptions", { role: "operator", email: "arman.bekov@operator.demo.local" });
     expect(await screen.findByText("You have no subscriptions.")).toBeTruthy();
@@ -255,7 +279,7 @@ describe("выгрузка и подписки", () => {
 });
 
 describe("сеанс не из демо-данных", () => {
-  it("email сеанса не попадает в записи модуля", async () => {
+  it("email сеанса не попадает ни в записи модуля, ни в журнал", async () => {
     const email = "someone@real.example";
     const { user } = renderCabinet("/proto/operator/manufacturers/p03", { role: "operator", email });
     await user.type(await screen.findByRole("textbox", { name: "New note" }), "Заметка с реального входа");
@@ -274,11 +298,8 @@ describe("сеанс не из демо-данных", () => {
 
     const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY)!) as Record<string, unknown>;
     expect(JSON.stringify(stored.operatorNotes)).toContain("Заметка с реального входа");
-    // Журнал (actor события) пишет общий слой — его правит задача 1; записи модуля — без email.
-    delete stored.audit;
+    // Ни в записях модуля, ни в журнале: действует демо-персона роли.
     expect(JSON.stringify(stored)).not.toContain(email);
-    for (const set of ["operatorNotes", "worksWithMarks", "exportRecords", "exportSubscriptions"] as const) {
-      expect(JSON.stringify(stored[set])).not.toContain(email);
-    }
+    expect((stored.audit as { actor: unknown }[]).at(-1)?.actor).toMatchObject(ACTOR);
   });
 });

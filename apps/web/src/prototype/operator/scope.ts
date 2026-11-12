@@ -48,7 +48,8 @@ export function parseFilters(params: URLSearchParams | string): SearchFilters {
   const group = p.get("group");
   const tier = p.get("tier");
   return {
-    q: p.get("q")?.trim() ?? "",
+    // Текст поиска — как набран: пробелы обрезаются только при сравнении и записи в адрес выгрузки.
+    q: p.get("q") ?? "",
     group: COMMODITY_GROUPS.includes(group as CommodityGroup) ? (group as CommodityGroup) : null,
     region: p.get("region") || null,
     tier: PROFILE_TIERS.includes(tier as ProfileTier) ? (tier as ProfileTier) : null,
@@ -59,7 +60,7 @@ export function parseFilters(params: URLSearchParams | string): SearchFilters {
 /** Строка адреса фильтров (`group=B&surveyed=true`): так поиск сохраняется в выгрузке и подписке. */
 export function serializeFilters(filters: SearchFilters): string {
   const p = new URLSearchParams();
-  if (filters.q) p.set("q", filters.q);
+  if (filters.q.trim()) p.set("q", filters.q.trim());
   if (filters.group) p.set("group", filters.group);
   if (filters.region) p.set("region", filters.region);
   if (filters.tier) p.set("tier", filters.tier);
@@ -69,7 +70,7 @@ export function serializeFilters(filters: SearchFilters): string {
 
 /** Видимые профили под фильтрами; разные фильтры — И (OPR-04), unresponsive ниже (UPD-04). */
 export function searchProfiles(state: ProtoState, filters: SearchFilters): ProtoProfile[] {
-  const q = filters.q.toLowerCase();
+  const q = filters.q.trim().toLowerCase();
   return visibleProfiles(state).filter(
     (p) =>
       (!q || p.nameRu.toLowerCase().includes(q) || p.nameEn.toLowerCase().includes(q) || p.bin.includes(q)) &&

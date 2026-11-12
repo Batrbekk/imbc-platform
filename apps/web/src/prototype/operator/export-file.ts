@@ -186,8 +186,9 @@ function sheetXml(rows: Cell[][]): string {
           const ref = `${columnName(c)}${r + 1}`;
           if (cell.kind === "number") return `<c r="${ref}"><v>${cell.value}</v></c>`;
           if (cell.kind === "date") return `<c r="${ref}" s="1"><v>${excelSerial(cell.value)}</v></c>`;
-          // БИН и коды — текстовые ячейки (DATA-11).
-          return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${xml(escapeFormula(cell.value))}</t></is></c>`;
+          // БИН и коды — текстовые ячейки (DATA-11). Inline-строка формулой не вычисляется, поэтому
+          // апостроф DATA-12 здесь не нужен: он только в CSV.
+          return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${xml(cell.value)}</t></is></c>`;
         })
         .join("");
       return `<row r="${r + 1}">${cells}</row>`;
@@ -234,6 +235,10 @@ function crc32(bytes: Uint8Array): number {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
+/** Постоянные дата и время в заголовках ZIP: 1980-01-01 00:00 в формате DOS. */
+const DOS_DATE = ((1980 - 1980) << 9) | (1 << 5) | 1;
+const DOS_TIME = 0;
+
 /** ZIP без сжатия (stored): XLSX — это ZIP с XML-частями. */
 export function zipStored(files: Record<string, string>): Uint8Array<ArrayBuffer> {
   const encoder = new TextEncoder();
@@ -248,6 +253,8 @@ export function zipStored(files: Record<string, string>): Uint8Array<ArrayBuffer
     head.setUint32(0, 0x04034b50, true);
     head.setUint16(4, 20, true);
     head.setUint16(6, 0x0800, true); // имена в UTF-8
+    head.setUint16(10, DOS_TIME, true);
+    head.setUint16(12, DOS_DATE, true);
     head.setUint32(14, crc, true);
     head.setUint32(18, data.length, true);
     head.setUint32(22, data.length, true);
@@ -258,6 +265,8 @@ export function zipStored(files: Record<string, string>): Uint8Array<ArrayBuffer
     dir.setUint16(4, 20, true);
     dir.setUint16(6, 20, true);
     dir.setUint16(8, 0x0800, true);
+    dir.setUint16(12, DOS_TIME, true);
+    dir.setUint16(14, DOS_DATE, true);
     dir.setUint32(16, crc, true);
     dir.setUint32(20, data.length, true);
     dir.setUint32(24, data.length, true);
