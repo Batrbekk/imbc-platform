@@ -182,6 +182,7 @@ export class JobHandlers {
     const events = await this.keycloak.securityEvents(since);
     const ordered = events.sort((a, b) => a.time - b.time);
     // Revocations must finish even when an unrelated lockout notification cannot be mailed.
+    const passwordSet = new Set<string>();
     for (const event of ordered) {
       if (!event.userId || event.error || !Number.isFinite(event.time)) continue;
       if (isPasswordEvent(event)) {
@@ -190,9 +191,11 @@ export class JobHandlers {
           new Date(event.time),
           `password:${sha256(event.id ?? `${event.type}:${event.userId}:${event.time}`)}`,
         );
-        await this.requestAdataRead(event.userId);
+        passwordSet.add(event.userId);
       }
     }
+    // Чтение Adata — после всех отзывов пакета и до уведомлений: отзыв не ждёт планировщик.
+    for (const subject of passwordSet) await this.requestAdataRead(subject);
     for (const event of ordered) {
       if (!event.userId || event.error || !Number.isFinite(event.time)) continue;
       if (event.type !== 'USER_DISABLED_BY_TEMPORARY_LOCKOUT') continue;

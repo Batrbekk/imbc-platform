@@ -62,6 +62,9 @@ export class AdataScheduler {
     accountId: string,
     origin: AdataReadOrigin,
   ): Promise<'scheduled' | 'requeued' | 'skipped'> {
+    // Вход и опрос событий не ждут чужую открытую транзакцию на строке профиля: отказ — warn у входа.
+    await tx.execute(sql`set local lock_timeout = '2s'`);
+    await tx.execute(sql`set local statement_timeout = '5s'`);
     const [target] = await tx
       .select({
         profileId: manufacturerProfiles.id,

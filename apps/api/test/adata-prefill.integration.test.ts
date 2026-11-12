@@ -358,6 +358,59 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     expect(account?.authVersion).toBe(m.account.authVersion + 1);
   });
 
+  it('чтение ставится после всех отзывов пакета событий и до уведомлений (NOT-23, NOT-03)', async () => {
+    const [a, b] = [await manufacturer(), await manufacturer()];
+    const order: string[] = [];
+    const revoke = vi.spyOn(sessions, 'revokeForPasswordChange');
+    revoke.mockImplementation(async (subject) => void order.push(`revoke:${subject}`));
+    const adata = {
+      requestOnProfileCreated: vi.fn(async (accountId: string) => {
+        order.push(`adata:${accountId}`);
+        return 'skipped' as const;
+      }),
+    };
+    const now = Date.now();
+    const worker = new JobHandlers(
+      db,
+      {} as never,
+      { sendRaw: vi.fn(async () => void order.push('mail')) } as never,
+      env,
+      audit,
+      {
+        securityEvents: async () => [
+          { id: `p1-${a.bin}`, type: 'UPDATE_PASSWORD', userId: a.account.idpSubject, time: now - 3000 },
+          {
+            id: `l-${a.bin}`,
+            type: 'USER_DISABLED_BY_TEMPORARY_LOCKOUT',
+            userId: a.account.idpSubject,
+            time: now - 2500,
+          },
+          {
+            id: `p2-${b.bin}`,
+            type: 'UPDATE_CREDENTIAL',
+            userId: b.account.idpSubject,
+            time: now - 2000,
+            details: { credential_type: 'password' },
+          },
+        ],
+      } as never,
+      sessions,
+      adata as never,
+    );
+    try {
+      await worker.keycloakEvents();
+    } finally {
+      revoke.mockRestore();
+    }
+    expect(order).toEqual([
+      `revoke:${a.account.idpSubject}`,
+      `revoke:${b.account.idpSubject}`,
+      `adata:${a.account.id}`,
+      `adata:${b.account.id}`,
+      'mail',
+    ]);
+  });
+
   it('первый вход ставит чтение, если события ещё не было; вход оператора — нет; сбой планировщика не ломает вход', async () => {
     const m = await manufacturer();
     expect(await signIn(m.account)).toBe('/auth/verify?returnTo=%2Fprofile');
@@ -391,6 +444,41 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     expect(failing.requestOnProfileCreated).toHaveBeenCalledWith(other.account.id, 'sign_in');
     expect(output).not.toContain('scheduler down');
     expect(await db.query.sessions.findMany({ where: eq(schema.sessions.userId, other.account.id) })).toHaveLength(1);
+  });
+
+  /** Другое соединение держит строку профиля for update — как открытая транзакция psql на стенде. */
+  async function holdProfile(profileId: string) {
+    const client = await pool.connect();
+    await client.query('begin');
+    await client.query('select id from manufacturer_profiles where id = $1 for update', [profileId]);
+    return async () => {
+      await client.query('rollback');
+      client.release();
+    };
+  }
+
+  it('планировщик не держит вход: строка профиля занята — отказ быстрее 4 с, попытки нет', async () => {
+    const m = await manufacturer();
+    const release = await holdProfile(m.profileId);
+    try {
+      const started = Date.now();
+      await expect(scheduler.requestOnProfileCreated(m.account.id, 'password_set')).rejects.toBeDefined();
+      expect(Date.now() - started).toBeLessThan(4000);
+      expect(await attemptsOf(m.profileId)).toHaveLength(0);
+
+      // Вход с настоящим планировщиком проходит, пока строка занята: отказ планировщика — только warn.
+      const signInStarted = Date.now();
+      const { value, output } = await captured(() => signIn(m.account));
+      expect(value).toBe('/auth/verify?returnTo=%2Fprofile');
+      expect(Date.now() - signInStarted).toBeLessThan(4000);
+      expect(output).toContain('adata: чтение при входе не поставлено');
+      expect(await db.query.sessions.findMany({ where: eq(schema.sessions.userId, m.account.id) })).toHaveLength(1);
+      expect(await attemptsOf(m.profileId)).toHaveLength(0);
+    } finally {
+      await release();
+    }
+    // Строка свободна — следующий вход ставит чтение как обычно.
+    expect(await scheduler.requestOnProfileCreated(m.account.id, 'sign_in')).toBe('scheduled');
   });
 
   it('seed-профиль Verified и мигрированный профиль (source migration) не читаются', async () => {
@@ -636,23 +724,99 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     expect(startsFor(m.bin)).toBe(1);
   });
 
-  it('ответ, который БД не принимает (NUL), — unavailable (malformed), без повтора и без зависшей попытки', async () => {
+  const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+  it('ответ с NUL и одиночным суррогатом в значениях сохраняется: received, в value и prefilled_value их нет', async () => {
     const m = await manufacturer();
-    const basic = { ...(ADATA_FIXTURE.data.basic as object), name_ru: 'x\u0000y' };
+    const basic = {
+      ...(ADATA_FIXTURE.data.basic as object),
+      name_ru: 'x\u0000y',
+      legal_address: 'Алматы \uD800',
+    };
     const attemptId = await schedule(m, {
       kind: 'ready',
       afterPolls: 0,
-      body: { ...ADATA_FIXTURE, data: { ...ADATA_FIXTURE.data, basic, unused: 'x\u0000y' } },
+      body: { ...ADATA_FIXTURE, data: { ...ADATA_FIXTURE.data, basic, unused: 'a\u0000b\uDC00' } },
     });
-    const { error, output } = await captured(() => throughQueue(prefillJob()));
+    const { error } = await captured(() => throughQueue(prefillJob()));
     expect(error).toBeUndefined();
-    expect(await attemptOf(m.profileId)).toMatchObject({ state: 'unavailable', failure: 'malformed', value: null });
+    const attempt = await attemptOf(m.profileId);
+    expect(attempt.state).toBe('received');
+    const stored = JSON.stringify(attempt.value);
+    expect(stored.includes('\u0000') || /\\u0000/.test(stored)).toBe(false);
+    expect(LONE_SURROGATE.test(stored)).toBe(false);
+    const values = await db.select().from(schema.prefilledValue).where(eq(schema.prefilledValue.attemptId, attemptId));
+    expect(new Set(values.map((v) => v.field)).size).toBe(9);
+    for (const v of values) {
+      expect(v.value.includes('\u0000')).toBe(false);
+      expect(LONE_SURROGATE.test(v.value)).toBe(false);
+    }
+    expect(startsFor(m.bin)).toBe(1);
+  });
+
+  it('БД отвергла запись ответа: класс 22 — unavailable (malformed) своей транзакцией; иной сбой своей БД — исключение и повтор', async () => {
+    const m = await manufacturer();
+    const attemptId = await schedule(m);
+    expect(attemptId).toMatch(/^[0-9a-f-]{36}$/);
+    // Подмена отказа БД: данные ответа после очистки PostgreSQL принимает, поэтому отказ вызывает триггер теста.
+    const reject = (errcode: string) =>
+      pool.query(`create or replace function adata_test_reject() returns trigger language plpgsql as $$
+        begin
+          if new.attempt_id = '${attemptId}' then raise exception 'test rejection' using errcode = '${errcode}'; end if;
+          return new;
+        end $$`);
+    try {
+      await reject('P0001');
+      await pool.query(
+        'create trigger adata_test_reject before insert on prefilled_value for each row execute function adata_test_reject()',
+      );
+      // Сбой своей БД, не связанный с данными: задание бросает без данных ответа, pg-boss повторит.
+      const first = await captured(() => prefillJob().run({ attemptId }));
+      expect(first.error).toBeInstanceOf(Error);
+      expect((first.error as Error).message).toBe(`adata attempt ${attemptId}: database received failed (P0001)`);
+      expect(await attemptOf(m.profileId)).toMatchObject({ state: 'polling', value: null });
+      expect((await attemptOf(m.profileId)).pollToken).not.toBeNull();
+
+      // Повтор задания: опрос по сохранённому токену, запись отвергнута как данные → конечное состояние.
+      await reject('22023');
+      const second = await captured(() => prefillJob().run({ attemptId }));
+      expect(second.error).toBeUndefined();
+      expect(await attemptOf(m.profileId)).toMatchObject({ state: 'unavailable', failure: 'malformed', value: null });
+      expect(second.output).toContain(`adata attempt ${attemptId}: unavailable (malformed)`);
+    } finally {
+      await pool.query('drop trigger if exists adata_test_reject on prefilled_value');
+      await pool.query('drop function if exists adata_test_reject()');
+    }
     expect(await db.select().from(schema.prefilledValue).where(eq(schema.prefilledValue.attemptId, attemptId))).toEqual(
       [],
     );
-    expect(output).toContain(`adata attempt ${attemptId}: unavailable (malformed)`);
+    const [entry] = await db
+      .select()
+      .from(schema.auditEntries)
+      .where(and(eq(schema.auditEntries.action, 'adata.read_completed'), eq(schema.auditEntries.objectId, attemptId)));
+    expect(entry).toMatchObject({ outcome: 'failed', diff: { state: 'unavailable', failure: 'malformed' } });
     expect(startsFor(m.bin)).toBe(1);
     expect(await scheduler.requestOnProfileCreated(m.account.id, 'sign_in')).toBe('skipped');
+  });
+
+  it('ответ, который задание не может обработать (вложенность 6 000), — unavailable (malformed), без исключения', async () => {
+    const m = await manufacturer();
+    const attemptId = await schedule(m);
+    const depth = 6000;
+    const deep = `{"success":true,"message":"ready","data":{"basic":${'{"a":'.repeat(depth)}{}${'}'.repeat(depth)}}}`;
+    // Заглушка не сериализует такой объект, поэтому тело готового ответа подменяется после настоящей проверки.
+    const deepReady: typeof fetch = async (input, init) => {
+      const res = await fetch(input, init);
+      if (!String(input).includes('/check/')) return res;
+      await res.text();
+      return new Response(deep, { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const { error, output } = await captured(() => throughQueue(prefillJob({}, deepReady)));
+    expect(error).toBeUndefined();
+    expect(await attemptOf(m.profileId)).toMatchObject({ state: 'unavailable', failure: 'malformed', value: null });
+    expect(output).toContain(`adata attempt ${attemptId}: unavailable (malformed)`);
+    expect(output).not.toContain('{"a":');
+    expect(startsFor(m.bin)).toBe(1);
   });
 
   it('unknown_bin — received без полей', async () => {

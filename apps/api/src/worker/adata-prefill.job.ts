@@ -47,8 +47,11 @@ function sqlState(error: unknown): string | null {
   return typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code) ? code : null;
 }
 
-/** Классы 22 (данные) и 23 (ограничения): БД отвергла сам ответ, повтор дал бы то же самое. */
-const isDataError = (error: unknown) => /^2[23]/.test(sqlState(error) ?? '');
+/**
+ * Классы 22 (данные), 23 (ограничения) и 54 (предел сложности, например глубина jsonb): БД отвергла
+ * сам ответ, повтор дал бы то же самое.
+ */
+const isDataError = (error: unknown) => /^(22|23|54)/.test(sqlState(error) ?? '');
 
 const failureOf = (error: unknown): AdataFailure => (error instanceof AdataCallError ? error.failure : 'malformed');
 
@@ -203,21 +206,41 @@ export class AdataPrefillJob {
       }
     }
     if (!result.ready) return this.unavailable(attempt, result.failure);
-    return this.received(attempt, redactToken(result.data, token));
+    return this.received(attempt, result.data, token);
   }
 
-  /** Ответ и девять значений — одной транзакцией; value и prefilled_value — из копии без токена. */
-  private async received(attempt: Attempt, value: Record<string, unknown>): Promise<void> {
+  /**
+   * Ответ и девять значений — одной транзакцией; value и prefilled_value — из копии без токена.
+   * Ответ разбирается до транзакции: любое исключение разбора (например, RangeError глубокой
+   * вложенности) — ответ непригоден, попытка закрывается malformed. В транзакции ответ уже только
+   * строки, поэтому исключение там — сбой своей БД либо отказ БД принять данные.
+   */
+  private async received(attempt: Attempt, data: Record<string, unknown>, token: string): Promise<void> {
+    let json: string;
+    let rows: ReturnType<typeof extractPrefill>;
+    try {
+      const value = redactToken(data, token);
+      json = JSON.stringify(value);
+      rows = extractPrefill(value);
+    } catch {
+      // Текст исключения не пишется: в нём может быть фрагмент ответа.
+      return this.unavailable(attempt, 'malformed');
+    }
     let done: boolean;
     try {
       done = await this.db.transaction(async (tx) => {
         const [row] = await tx
           .update(externalCheckAttempt)
-          .set({ state: 'received', completedAt: sql`now()`, value, source: 'adata.companyInfo', failure: null })
+          .set({
+            state: 'received',
+            completedAt: sql`now()`,
+            value: sql`${json}::jsonb`,
+            source: 'adata.companyInfo',
+            failure: null,
+          })
           .where(and(eq(externalCheckAttempt.id, attempt.id), eq(externalCheckAttempt.state, 'polling')))
           .returning({ completedAt: externalCheckAttempt.completedAt });
         if (!row) return false;
-        const rows = extractPrefill(value);
         if (rows.length)
           await tx
             .insert(prefilledValue)
@@ -248,7 +271,7 @@ export class AdataPrefillJob {
         return true;
       });
     } catch (error) {
-      // БД не принимает сам ответ (например, NUL в тексте): повтор дал бы то же, попытка закрывается.
+      // БД не принимает сам ответ: повтор дал бы то же, попытка закрывается отдельной транзакцией.
       if (isDataError(error)) return this.unavailable(attempt, 'malformed');
       throw new AdataJobDatabaseError(attempt.id, 'received', sqlState(error));
     }

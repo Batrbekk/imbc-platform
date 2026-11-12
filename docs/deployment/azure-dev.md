@@ -327,6 +327,103 @@ df -h /
 curl --fail --show-error https://imbc-dev-e1cde8dd.polandcentral.cloudapp.azure.com/api/health/ready
 ```
 
+## Чтение Adata (IMBC-07, EXT-02)
+
+Каждое чтение — настоящий платный запрос: одна единица квоты заказчика (3 000 БИН в месяц). Предел стенда по умолчанию — **1** запрос за период (`ADATA_MONTHLY_LIMIT` в `compose.azure.yaml`). Токен `ADATA_API_TOKEN` получает только сервис `worker`, из серверной `.env`; без него попытки заканчиваются `not_configured`.
+
+### Что запускает чтение
+
+Аккаунт с ролью `manufacturer`, у организации есть БИН, профиль `source = 'manual'`, `status = 'draft'`, попытки `profile_created` ещё нет. Чтение ставится при любом входе такого аккаунта и по событию пароля, которое увидел `keycloak-events`. Первый запуск `keycloak-events` после старта читает события с `auth_sync_state.checked_at` минус пять минут; если строки курсора нет — за 30 дней назад. Регистрация и повтор письма чтение не запускают.
+
+### Перед первым выкатом с токеном
+
+```bash
+./infrastructure/azure/deploy.sh ssh
+cd /home/imbc/imbc-platform
+sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
+  select checked_at from auth_sync_state where name = 'keycloak-events';"
+sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
+  select count(*) from user_accounts a
+  join organizations o on o.id = a.organization_id
+  join manufacturer_profiles p on p.organization_id = o.id
+  where a.role = 'manufacturer' and o.bin is not null and p.source = 'manual' and p.status = 'draft'
+    and not exists (
+      select 1 from external_check c
+      join external_check_attempt t on t.external_check_id = c.id
+      where c.profile_id = p.id and c.connector = 'adata' and t.trigger = 'profile_created');"
+```
+
+Первый запрос показывает, с какого момента будут прочитаны события пароля (нет строки — 30 дней). Второй — сколько производителей запустят чтение при входе или по событию. При пределе 1 запрос сделает первый из них; остальные получат `quota_exhausted`.
+
+### Токен не печатать
+
+Не выполняйте `docker compose config` без `-q`, `docker inspect` контейнера `worker`, `docker compose exec worker env` и `printenv`: все они выводят значение токена.
+
+### Во время чтения
+
+Чтение длится до 2,5 минуты (Get Request, опрос до 120 секунд, последняя проверка). В это время не перезапускайте `worker` и не выкатывайте: рестарт во время первого запроса закрывает попытку как `unavailable` (`interrupted`), единица квоты уже израсходована, а `unavailable` для этого профиля окончательно.
+
+### После чтения
+
+```bash
+sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
+  select period_start, used from adata_allowance;"
+sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
+  select id, state, failure, requested_at, request_sent_at, completed_at
+  from external_check_attempt where request_sent_at is not null;"
+sudo docker compose -f compose.yaml -f compose.azure.yaml logs worker | grep 'adata attempt'
+```
+
+Ожидается: `used = 1`, одна попытка с `request_sent_at` и `state = received`, в журнале worker строка `adata attempt <id>: received`. БИН, значения ответа и адрес Adata в журнал не пишутся.
+
+### Поднять предел
+
+Добавьте в серверную `.env` строку `ADATA_MONTHLY_LIMIT=<n>` (не больше 3000) и перезапустите worker:
+
+```bash
+sudo docker compose -f compose.yaml -f compose.azure.yaml up -d worker
+```
+
+Период сбрасывается 4-го числа (Asia/Almaty). Попытки в `quota_exhausted` и `not_configured` ставятся снова при следующем входе производителя, поэтому поднятый предел расходуют следующие вошедшие производители с Draft-профилем.
+
+### Ручное восстановление попытки
+
+Если pg-boss исчерпал повторы задания `adata-prefill` (четыре сбоя собственной БД подряд), попытка может остаться в `queued` или `polling`, и задания для неё больше нет; вход и событие пароля такую попытку не трогают. Найти:
+
+```sql
+SELECT id, state, request_sent_at, poll_token IS NOT NULL AS has_poll_token, requested_at
+FROM external_check_attempt
+WHERE trigger = 'profile_created' AND state IN ('queued', 'polling')
+  AND requested_at < now() - interval '15 minutes';
+```
+
+- `queued`, `request_sent_at IS NULL` — запроса не было; следующий вход поставит попытку снова:
+
+  ```sql
+  UPDATE external_check_attempt SET state = 'not_configured', completed_at = now()
+  WHERE id = '<id>' AND state = 'queued' AND request_sent_at IS NULL;
+  ```
+
+- `polling` без `poll_token` — ответа нет, единица израсходована:
+
+  ```sql
+  UPDATE external_check_attempt SET state = 'unavailable', failure = 'interrupted', completed_at = now()
+  WHERE id = '<id>' AND state = 'polling' AND poll_token IS NULL;
+  ```
+
+- `polling` с `poll_token` — поставить задание заново: одна проверка по сохранённому токену, без Get Request. Команда печатает только id задания:
+
+  ```bash
+  sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T worker node --input-type=module -e "
+  import { PgBoss } from 'pg-boss';
+  const boss = new PgBoss({ connectionString: process.env.DATABASE_URL, schema: process.env.PGBOSS_SCHEMA ?? 'pgboss', supervise: false, schedule: false });
+  await boss.start();
+  console.log(await boss.send('adata-prefill', { attemptId: '<id>' }));
+  await boss.stop();"
+  ```
+
+SQL выполняется через `sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -v ON_ERROR_STOP=1`.
+
 ## Временная остановка и стоимость
 
 Ориентир при непрерывной работе — около **165 USD в месяц** за VM, диск 128 ГБ и статический публичный IP по розничным тарифам Azure. Переменные расходы, в том числе исходящий трафик и доставка почты ACS, в эту оценку не включены. Кредиты и скидки применяются согласно условиям подписки; её фактическая стоимость и остаток кредитов здесь не проверены.

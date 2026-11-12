@@ -92,8 +92,14 @@ const envSchema = z
     MAIL_FROM: z.string().default('IMBC Platform <no-reply@imbc.local>'),
     IMBC_MAILBOX: z.string().default('platform@imbc.local'),
 
-    /** Токен Adata из менеджера секретов (EXT-02, NFR-10). Нет значения — коннектор выключен. */
-    ADATA_API_TOKEN: z.preprocess((v) => (v === '' ? undefined : v), z.string().trim().min(1).max(512).optional()),
+    /**
+     * Токен Adata из менеджера секретов (EXT-02, NFR-10). Нет значения или одни пробелы — коннектор выключен:
+     * ошибка конфигурации остановила бы весь worker, в том числе отзыв сеансов при смене пароля.
+     */
+    ADATA_API_TOKEN: z.preprocess(
+      (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+      z.string().trim().min(1).max(512).optional(),
+    ),
     /**
      * Наша граница квоты Adata за период (IMBC-07: 3 000 БИН в месяц); 0 — не запрашивать. Больше договорных
      * 3 000 — ошибка конфигурации; пустая строка — значение по умолчанию (иначе '' стало бы 0).

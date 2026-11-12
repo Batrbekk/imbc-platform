@@ -28,6 +28,13 @@ describe('Конфигурация коннектора Adata (EXT-02, NFR-10)',
     expect(env.ADATA_MONTHLY_LIMIT).toBe(0);
   });
 
+  it('токен из одних пробелов — коннектор выключен, worker стартует (EXT-02)', () => {
+    for (const token of [' ', '   ', '\t', ' \n\t ']) {
+      const env = loadEnv({ ...source, ADATA_API_TOKEN: token });
+      expect(env.ADATA_API_TOKEN).toBeUndefined();
+    }
+  });
+
   it('лимит: пустая строка — по умолчанию 3000; больше 3000 — ошибка конфигурации (IMBC-07)', () => {
     expect(loadEnv({ ...source, ADATA_MONTHLY_LIMIT: '' }).ADATA_MONTHLY_LIMIT).toBe(3000);
     expect(loadEnv({ ...source, ADATA_MONTHLY_LIMIT: '3000' }).ADATA_MONTHLY_LIMIT).toBe(3000);
