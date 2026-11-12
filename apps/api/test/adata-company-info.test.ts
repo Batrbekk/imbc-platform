@@ -111,4 +111,52 @@ describe('Разбор «Полной информации» Adata (MAN-06, MAN-
     expect(values(data, 'company_phone')).toEqual([]);
     for (const odd of [null, undefined, 'x', 1, []]) expect(extractPrefill(odd)).toEqual([]);
   });
+
+  // Ключ, которого нет в ответе, не обнуляет свой блок: остальные поля блока остаются (MAN-07).
+  const AFFECTS: Record<string, PrefillRow['field'][]> = {
+    'basic.name_ru': ['legal_name'],
+    'basic.name_kz': ['legal_name'],
+    'basic.legal_address': ['legal_address'],
+    'basic.legal_address_kz': ['legal_address'],
+    'basic.oked': ['activity'],
+    'basic.okeds': ['activity'],
+    'basic.secondary_okeds': ['activity'],
+    'basic.fullname_director': ['director_full_name'],
+    'basic.date_registration': ['state_registered_on'],
+    'basic.legal_form': ['legal_form'],
+    'kzCoContact.phones': ['company_phone'],
+    'kzCoContact.emails': ['company_email'],
+    'founders.founders_dtl': ['shareholders'],
+  };
+  const full = extractPrefill(ADATA_FIXTURE.data);
+  const keys = (['basic', 'kzCoContact', 'founders'] as const).flatMap((b) =>
+    Object.keys(ADATA_FIXTURE.data[b] as object).map((k) => `${b}.${k}`),
+  );
+  it.each(keys)('без ключа %s — остальные поля на месте', (path) => {
+    const [block, key] = path.split('.') as [string, string];
+    const data = fixture();
+    delete data[block]![key];
+    const affected = AFFECTS[path] ?? [];
+    expect(extractPrefill(data).filter((r) => !affected.includes(r.field))).toEqual(
+      full.filter((r) => !affected.includes(r.field)),
+    );
+  });
+
+  it('NUL и одиночный суррогат не попадают в строку; значение длиннее 1000 символов отбрасывается', () => {
+    const data = fixture();
+    data.basic!.name_ru = 'ТОО\u0000 «Тест»\ud800';
+    data.basic!.fullname_director = '\u0000\udc00';
+    data.basic!.legal_address = 'а'.repeat(1001);
+    data.basic!.legal_address_kz = 'ә'.repeat(1000);
+    const result = extractPrefill(data);
+    expect(values(data, 'legal_name')).toEqual(['ТОО «Тест»\ufffd']);
+    expect(values(data, 'director_full_name')).toEqual(['\ufffd']);
+    expect(values(data, 'legal_address')).toEqual(['ә'.repeat(1000)]);
+    for (const r of result) {
+      expect(r.value.includes('\u0000')).toBe(false);
+      expect(/[\ud800-\udfff]/.test(r.value.replace(/[\ud800-\udbff][\udc00-\udfff]/g, ''))).toBe(false);
+    }
+    data.basic!.legal_address_kz = 'ә'.repeat(1001);
+    expect(values(data, 'legal_address')).toEqual([]);
+  });
 });

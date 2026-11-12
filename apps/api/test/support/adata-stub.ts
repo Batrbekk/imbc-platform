@@ -22,7 +22,9 @@ export type AdataScenario =
   | { kind: 'unknown_bin' }
   | ({ kind: 'hang_up' } & Step)
   | ({ kind: 'silent' } & Step)
-  | ({ kind: 'echo_url' } & Step);
+  | ({ kind: 'echo_url' } & Step)
+  /** 302 на location: абсолютный адрес другого сервера или относительный путь. */
+  | ({ kind: 'redirect'; location: string } & Step);
 
 export interface AdataStubRequest {
   kind: 'start' | 'check' | 'other';
@@ -38,10 +40,18 @@ export interface AdataStub {
   close(): Promise<void>;
 }
 
+const STEP_FAULTS: ReadonlySet<AdataScenario['kind']> = new Set([
+  'malformed',
+  'hang_up',
+  'silent',
+  'echo_url',
+  'redirect',
+]);
 const START = /^\/api\/company\/info\/([^/]+)$/;
 const CHECK = /^\/api\/company\/info\/check\/([^/]+)$/;
 
-export async function startAdataStub({ token }: { token: string }): Promise<AdataStub> {
+/** port — для теста отказа listen; по умолчанию свободный порт. */
+export async function startAdataStub({ token, port = 0 }: { token: string; port?: number }): Promise<AdataStub> {
   const requests: AdataStubRequest[] = [];
   const scenarios = new Map<string, AdataScenario>();
   // Токен проверки уникален на БИН; число проверок — по токену проверки.
@@ -67,11 +77,16 @@ export async function startAdataStub({ token }: { token: string }): Promise<Adat
 
   /** Сбой шага; true — ответ отдан (или намеренно не отдан). */
   const fault = (s: AdataScenario | undefined, step: 'start' | 'check', req: IncomingMessage, res: ServerResponse) => {
-    if (!s || !('on' in s ? s.on === step : step === 'check')) return false;
-    if (s.kind !== 'malformed' && s.kind !== 'hang_up' && s.kind !== 'silent' && s.kind !== 'echo_url') return false;
+    if (!s || !STEP_FAULTS.has(s.kind)) return false;
+    // Явное on: undefined — как без on: Check Request.
+    if (((s as Step).on ?? 'check') !== step) return false;
     if (s.kind === 'malformed') html(res);
     else if (s.kind === 'hang_up') req.socket.destroy();
     else if (s.kind === 'echo_url') json(res, 500, { success: false, message: req.url });
+    else if (s.kind === 'redirect') {
+      res.writeHead(302, { location: s.location });
+      res.end();
+    }
     // silent: ответа нет, сокет закрывает close().
     return true;
   };
@@ -142,11 +157,17 @@ export async function startAdataStub({ token }: { token: string }): Promise<Adat
     return json(res, 404, { success: false, message: 'not found' });
   });
 
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address() as AddressInfo;
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+  const address = server.address() as AddressInfo;
 
   return {
-    baseUrl: `http://127.0.0.1:${port}`,
+    baseUrl: `http://127.0.0.1:${address.port}`,
     requests,
     scenario: (bin, s) => void scenarios.set(bin, s),
     close: () =>

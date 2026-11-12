@@ -1,4 +1,7 @@
 import { randomBytes } from 'node:crypto';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { setTimeout as delay } from 'node:timers/promises';
 import { inspect } from 'node:util';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -29,8 +32,10 @@ beforeEach(() => {
   stub.requests.length = 0;
 });
 
+// Своя пауза теста: нижняя граница шага опроса (100 мс) реальным часам теста не нужна.
+const fastSleep = (ms: number) => delay(Math.min(ms, 5)).then(() => undefined);
 const poll = (pollToken: string, deadlineMs = TIMING.deadlineMs) =>
-  pollCompanyInfo(client, pollToken, { deadlineAt: Date.now() + deadlineMs, timing: TIMING });
+  pollCompanyInfo(client, pollToken, { deadlineAt: Date.now() + deadlineMs, timing: TIMING, sleep: fastSleep });
 
 async function caught(run: () => Promise<unknown>): Promise<AdataCallError> {
   try {
@@ -132,6 +137,153 @@ describe('AdataClient: два шага с опросом (EXT-02, IMBC-07)', () 
     // Неверный токен авторизации — 401 заглушки.
     const wrong = new AdataClient({ baseUrl: stub.baseUrl, token: 'x', requestTimeoutMs: 50 });
     expectLeakFree(await caught(() => wrong.startCompanyInfo(nextBin())), stub.baseUrl);
+  });
+
+  it('переадресация не уходит ни на другой сервер, ни по относительному адресу — network (EXT-02)', async () => {
+    let elsewhere = 0;
+    const other = createServer((_req, res) => {
+      elsewhere += 1;
+      res.end('{}');
+    });
+    await new Promise<void>((resolve) => other.listen(0, '127.0.0.1', resolve));
+    try {
+      const otherUrl = `http://127.0.0.1:${(other.address() as AddressInfo).port}/collect`;
+      for (const location of [otherUrl, '/elsewhere'])
+        for (const on of ['start', 'check'] as const) {
+          const bin = nextBin();
+          stub.scenario(bin, { kind: 'redirect', location, on });
+          stub.requests.length = 0;
+          const error = await caught(async () => {
+            const { pollToken } = await client.startCompanyInfo(bin);
+            await client.checkCompanyInfo(pollToken);
+          });
+          expect([error.failure, error.httpStatus]).toEqual(['network', null]);
+          expectLeakFree(error, stub.baseUrl);
+          expect(stub.requests.map((r) => r.kind)).toEqual(on === 'start' ? ['start'] : ['start', 'check']);
+        }
+      expect(elsewhere).toBe(0);
+    } finally {
+      other.closeAllConnections();
+      await new Promise((resolve) => other.close(resolve));
+    }
+  });
+
+  it('клиент не раскрывает токен и адрес: inspect и JSON (EXT-02, NFR-10)', () => {
+    const texts = [inspect(client, { showHidden: true, depth: 6 }), JSON.stringify(client)];
+    for (const [index, text] of texts.entries())
+      for (const [n, needle] of [
+        TOKEN,
+        encodeURIComponent(TOKEN),
+        stub.baseUrl,
+        new URL(stub.baseUrl).host,
+        '/api/company/info/',
+      ].entries())
+        expect(text.includes(needle), `представление №${index} содержит запрещённую строку №${n}`).toBe(false);
+  });
+
+  it('под тестовым раннером адрес api.adata.kz не принимается', () => {
+    for (const baseUrl of ['https://api.adata.kz', 'https://adata.kz/', 'https://x.api.ADATA.kz:443']) {
+      let error: unknown;
+      try {
+        new AdataClient({ baseUrl, token: TOKEN, requestTimeoutMs: 50 });
+      } catch (e) {
+        error = e;
+      }
+      expect(error, baseUrl).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(AdataCallError);
+      const text = `${String(error)}\n${(error as Error).stack}\n${inspect(error, { showHidden: true })}`;
+      expect(text.includes(TOKEN) || text.includes(encodeURIComponent(TOKEN)), 'ошибка содержит токен').toBe(false);
+    }
+    // Похожий, но чужой домен — не Adata.
+    expect(() => new AdataClient({ baseUrl: 'https://notadata.kz', token: TOKEN, requestTimeoutMs: 50 })).not.toThrow();
+  });
+
+  it('тело больше 5 МБ — malformed: по content-length и по потоку', async () => {
+    const MB5 = 5 * 1024 * 1024;
+    let pulled = 0;
+    const declared: typeof fetch = async () =>
+      new Response('{"success":true,"token":"1"}', { status: 200, headers: { 'content-length': String(MB5 + 1) } });
+    const streaming: typeof fetch = async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            pulled += 1;
+            controller.enqueue(new Uint8Array(256 * 1024).fill(0x20));
+            if (pulled > 100) controller.close();
+          },
+        }),
+        { status: 200 },
+      );
+    for (const fake of [declared, streaming]) {
+      const c = new AdataClient({ baseUrl: stub.baseUrl, token: TOKEN, requestTimeoutMs: 1_000, fetch: fake });
+      const start = await caught(() => c.startCompanyInfo(nextBin()));
+      expect(start.failure).toBe('malformed');
+      expectLeakFree(start, stub.baseUrl);
+      expect((await caught(() => c.checkCompanyInfo('0000020991'))).failure).toBe('malformed');
+    }
+    // Чтение остановлено вскоре после 5 МБ (20 кусков по 256 КБ), а не дочитано до конца.
+    expect(pulled).toBeLessThan(2 * 25);
+    // Ровно 5 МБ — читается.
+    const head = '{"success":true,"token":"0000020991"}';
+    const exact: typeof fetch = async () => new Response(head + ' '.repeat(MB5 - head.length), { status: 200 });
+    const c = new AdataClient({ baseUrl: stub.baseUrl, token: TOKEN, requestTimeoutMs: 1_000, fetch: exact });
+    expect(await c.startCompanyInfo(nextBin())).toEqual({ pollToken: '0000020991' });
+  });
+
+  it('429: на проверке — временный сбой, опрос идёт до срока; на Get Request — http_4xx', async () => {
+    let checks = 0;
+    const limited: typeof fetch = async (input) => {
+      if (!String(input).includes('/check/'))
+        return new Response('{"success":false,"message":"Too Many Requests"}', { status: 429 });
+      checks += 1;
+      return checks <= 2
+        ? new Response('{"success":false,"message":"Too Many Requests"}', { status: 429 })
+        : new Response(JSON.stringify(ADATA_FIXTURE), { status: 200 });
+    };
+    const c = new AdataClient({ baseUrl: stub.baseUrl, token: TOKEN, requestTimeoutMs: 50, fetch: limited });
+    const start = await caught(() => c.startCompanyInfo(nextBin()));
+    expect([start.failure, start.httpStatus]).toEqual(['http_4xx', 429]);
+    const result = await pollCompanyInfo(c, '0000020991', {
+      deadlineAt: Date.now() + 1_000,
+      timing: TIMING,
+      sleep: async () => {},
+    });
+    expect(result).toEqual({ ready: true, data: ADATA_FIXTURE.data });
+    expect(checks).toBe(3);
+    // Только 429 до срока — последний временный сбой.
+    const always: typeof fetch = async () => new Response('{}', { status: 429 });
+    const d = new AdataClient({ baseUrl: stub.baseUrl, token: TOKEN, requestTimeoutMs: 50, fetch: always });
+    expect(
+      await pollCompanyInfo(d, '0000020991', { deadlineAt: Date.now() + 30, timing: TIMING, sleep: fastSleep }),
+    ).toEqual({ ready: false, failure: 'http_4xx' });
+  });
+
+  it('шаг опроса не короче 100 мс, даже при pollIntervalMs: 0', async () => {
+    const failing: typeof fetch = async () => new Response('{}', { status: 500 });
+    const c = new AdataClient({ baseUrl: stub.baseUrl, token: TOKEN, requestTimeoutMs: 50, fetch: failing });
+    let clock = 0;
+    const sleeps: number[] = [];
+    const result = await pollCompanyInfo(c, '0000020991', {
+      deadlineAt: 1_050,
+      timing: { firstPollDelayMs: 0, pollIntervalMs: 0, deadlineMs: 1_050, requestTimeoutMs: 50 },
+      now: () => clock,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+        clock += ms;
+      },
+    });
+    expect(result).toEqual({ ready: false, failure: 'http_5xx' });
+    // Первая пауза 0, затем десять шагов по 100 мс и 50 мс до срока: двенадцать проверок, а не сотни.
+    expect(sleeps).toEqual([0, ...Array<number>(10).fill(100), 50]);
+  });
+
+  it('заглушка: явное on: undefined — как по умолчанию; занятый порт — отказ startAdataStub', async () => {
+    const bin = nextBin();
+    stub.scenario(bin, { kind: 'malformed', on: undefined });
+    const { pollToken } = await client.startCompanyInfo(bin);
+    expect((await caught(() => client.checkCompanyInfo(pollToken))).failure).toBe('malformed');
+    const port = Number(new URL(stub.baseUrl).port);
+    await expect(startAdataStub({ token: TOKEN, port })).rejects.toMatchObject({ code: 'EADDRINUSE' });
   });
 
   it('путь: токен закодирован, БИН — в iinBin', async () => {
@@ -281,6 +433,21 @@ describe('AdataClient: два шага с опросом (EXT-02, IMBC-07)', () 
       expect(await poll(pollToken, 200)).toEqual({ ready: false, failure });
       expect(stub.requests.length).toBeGreaterThan(1);
     }
+  });
+
+  it('redactToken: закодированный токен в нижнем регистре тоже убирается', () => {
+    const lower = encodeURIComponent(TOKEN).replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase());
+    expect(lower).not.toBe(encodeURIComponent(TOKEN));
+    const redacted = redactToken({ url: `/api/company/info/${lower}?iinBin=1`, [lower]: 1 }, TOKEN);
+    expect(redacted).toEqual({ url: '/api/company/info/[redacted]?iinBin=1', '[redacted]': 1 });
+  });
+
+  it('redactToken: копия без NUL и одиночных суррогатов — её принимает jsonb', () => {
+    const redacted = redactToken({ a: [{ b: 'x\u0000y', c: 'z\ud800' }], ['k\u0000\udc00']: `t\u0000${TOKEN}` }, TOKEN);
+    const text = JSON.stringify(redacted);
+    expect(text.includes('\\u0000')).toBe(false);
+    expect(/\\ud[89a-f][0-9a-f]{2}/i.test(text)).toBe(false);
+    expect(redacted).toEqual({ a: [{ b: 'xy', c: 'z\ufffd' }], 'k\ufffd': 't[redacted]' });
   });
 
   it('redactToken убирает токен из вложенных строк', () => {

@@ -6,24 +6,27 @@
  */
 import { PREFILL_FIELDS, type PrefillField } from '@imbc/contracts';
 import { z } from 'zod';
+import { pgSafeText } from './adata.client.js';
 
 const block = <T extends z.ZodRawShape>(shape: T) => z.looseObject(shape).nullable().optional().catch(null);
+/** В zod 4 ключ z.unknown() обязателен: без optional() нехватка одного ключа обнулила бы весь блок. */
+const key = () => z.unknown().optional();
 
 export const companyInfoDataSchema = z.looseObject({
   basic: block({
-    name_ru: z.unknown(),
-    name_kz: z.unknown(),
-    legal_address: z.unknown(),
-    legal_address_kz: z.unknown(),
-    oked: z.unknown(),
-    okeds: z.unknown(),
-    secondary_okeds: z.unknown(),
-    fullname_director: z.unknown(),
-    date_registration: z.unknown(),
-    legal_form: z.unknown(),
+    name_ru: key(),
+    name_kz: key(),
+    legal_address: key(),
+    legal_address_kz: key(),
+    oked: key(),
+    okeds: key(),
+    secondary_okeds: key(),
+    fullname_director: key(),
+    date_registration: key(),
+    legal_form: key(),
   }),
-  kzCoContact: block({ phones: z.unknown(), emails: z.unknown() }),
-  founders: block({ founders_dtl: z.unknown() }),
+  kzCoContact: block({ phones: key(), emails: key() }),
+  founders: block({ founders_dtl: key() }),
 });
 
 export type PrefillRow = { field: PrefillField; position: number; value: string; label: string | null };
@@ -36,12 +39,15 @@ type Item = { value: string; label: string | null };
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const list = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 
-/** Строка после trim или число как строка; пустое и прочее — null. */
+/** Длиннее одно значение не предзаполняется; исходный ответ хранит его целиком. */
+const MAX_VALUE_LENGTH = 1_000;
+
+/** Строка после trim или число как строка, без NUL и одиночных суррогатов (jsonb, text); пустое, длинное и прочее — null. */
 function text(v: unknown): string | null {
   if (typeof v === 'number' && Number.isFinite(v)) return String(v);
   if (typeof v !== 'string') return null;
-  const s = v.trim();
-  return s === '' ? null : s;
+  const s = pgSafeText(v).trim();
+  return s === '' || s.length > MAX_VALUE_LENGTH ? null : s;
 }
 
 /** `YYYY-MM-DD`, `YYYY-MM-DDT…` (часть даты), `DD.MM.YYYY` → `YYYY-MM-DD`; иное или несуществующая дата — null. */

@@ -467,7 +467,9 @@ Vite проксирует `/api` на `API_PROXY_URL` (`localhost:3001`) и `/kc
 | `CLAMAV_HOST`, `CLAMAV_PORT` | clamd |
 | `SEED_DEMO` | Демо-данные при миграции (только dev) |
 | `ADATA_API_TOKEN` | Токен Adata (EXT-02, NFR-10): только сервис `worker`, только серверная `.env`; в Git, логи и вывод не попадает. Без значения чтение выключено — попытка `not_configured` |
-| `ADATA_MONTHLY_LIMIT` | Наша граница квоты Adata за период (IMBC-07): по умолчанию 3000, на Azure-стенде 25; `0` — не запрашивать |
+| `ADATA_MONTHLY_LIMIT` | Наша граница квоты Adata за период (IMBC-07): по умолчанию 3000, на Azure-стенде 25; `0` — не запрашивать; больше 3000 — ошибка конфигурации, пустое значение — 3000 |
+
+На `worker` никогда не включайте отладку запросов Node (`NODE_DEBUG=fetch`, `NODE_DEBUG=undici` или подписчик diagnostics-channel, например трассировку исходящих HTTP-запросов): она печатает в stderr адрес Adata вместе с токеном (EXT-02, NFR-10).
 
 ## 14. Качество и проверки
 
