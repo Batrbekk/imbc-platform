@@ -42,6 +42,7 @@ export function OperatorsScreen() {
   const { params, set, clear } = useAddress();
 
   const operators = state.organizations.filter((o) => o.type === "operator");
+  const majors = state.organizations.filter((o) => o.majorOperator).length;
   const org = pick([ALL, ...operators.map((o) => o.id)], params.get("org"), ALL);
   const tab = pick(TABS, params.get("tab"), "marks");
   const markState = pick(MARK_STATES, params.get("state"), ALL);
@@ -153,7 +154,12 @@ export function OperatorsScreen() {
                           </TableCell>
                         );
                       })}
-                      <TableCell>{t("ofThree", { count: format.number(worksWithCount(state, p.id)) })}</TableCell>
+                      <TableCell>
+                        {t("ofMajors", {
+                          count: format.number(worksWithCount(state, p.id)),
+                          total: format.number(majors),
+                        })}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

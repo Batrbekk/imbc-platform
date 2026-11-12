@@ -12,7 +12,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useFormat } from "@/i18n/format";
 import { DueDiligenceBadge, ProfileStatusBadge, ProtoPage, TierBadge, UpdateStatusBadge } from "@/prototype/components";
-import type { ProtoProfile, ProtoState } from "@/prototype/data";
+import type { ProtoProfile } from "@/prototype/data";
 import {
   DossierSections,
   DueDiligenceView,
@@ -23,27 +23,14 @@ import {
   SiteSurveyList,
   TierRecordsList,
 } from "@/prototype/expert/dossier";
+// Чтение своих данных SME (`ext.expert`) с проверкой формы — тем же кодом, что у кабинета SME; без записи.
+import { readExt } from "@/prototype/expert/ext";
 import { useDictionary } from "@/prototype/i18n";
 import { accountName, ddResult, isVisible, profileTier } from "@/prototype/rules";
 import { useProto } from "@/prototype/store";
 
 import { DOSSIER_TABS, directorPath, pick, useAddress } from "./paths";
 import { texts } from "./texts";
-
-/** Пометки SME к строкам due diligence (`ext.expert`, кабинет SME): только чтение, неверная форма — пусто. */
-type LineNotes = Record<string, { text: string; by: string; at: string }>;
-function expertLineNotes(state: ProtoState): LineNotes {
-  const raw = state.ext.expert as { ddLineNotes?: unknown } | undefined;
-  const notes = raw?.ddLineNotes;
-  if (typeof notes !== "object" || notes === null || Array.isArray(notes)) return {};
-  const out: LineNotes = {};
-  for (const [key, value] of Object.entries(notes as Record<string, unknown>)) {
-    const v = value as Record<string, unknown> | null;
-    if (v && typeof v.text === "string" && typeof v.by === "string" && typeof v.at === "string")
-      out[key] = { text: v.text, by: v.by, at: v.at };
-  }
-  return out;
-}
 
 export function DossierScreen() {
   const { profileId = "" } = useParams();
@@ -199,7 +186,7 @@ function DueDiligenceTab({ profile }: { profile: ProtoProfile }) {
   if (!record) return <p className="text-sm text-muted-foreground">{t("ddMissing")}</p>;
   return (
     <div className="flex flex-col gap-4">
-      <DueDiligenceView record={record} readOnly lineNotes={expertLineNotes(state)} />
+      <DueDiligenceView record={record} readOnly lineNotes={readExt(state).ddLineNotes} />
       <EnhancedDueDiligenceCard record={record} />
     </div>
   );

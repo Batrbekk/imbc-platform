@@ -63,29 +63,49 @@ describe("все профили директора", () => {
     expect(window.localStorage.getItem(STORAGE_KEY)).toBe(stored);
   });
 
-  it("выгрузка CSV: показанный список, DATA-10, без итога due diligence и названий операторов", async () => {
-    const { user, state } = renderCabinet("/proto/director/profiles?update=active", { role: "director" });
+  it("выгрузка CSV — стандартная выгрузка платформы (DATA-09, DATA-10, DATA-12, DATA-13) по списку директора", async () => {
+    const { user, state } = renderCabinet("/proto/director/profiles?visible=no", {
+      role: "director",
+      prepare: (draft) => {
+        // Значение, похожее на формулу, экранируется апострофом (DATA-12).
+        draft.profiles.find((p) => p.id === "p12")!.sections.main.legalAddress = "=HYPERLINK(1)";
+      },
+    });
     await screen.findByRole("heading", { level: 1, name: "All profiles" });
     const before = JSON.stringify(state());
-    const shown = bodyRows().length;
+    // Невидимые операторам профили тоже выгружаются: директор видит все (раздел 4).
+    const shown = state().profiles.filter((p) => ["p09", "p10", "p11", "p12"].includes(p.id));
+    expect(bodyRows()).toHaveLength(shown.length);
     await user.click(screen.getByRole("button", { name: "Export CSV" }));
 
     expect(blobs).toHaveLength(1);
     const bytes = await readBlob(blobs[0]!);
-    // UTF-8 с меткой порядка байтов (DATA-10).
+    // UTF-8 с меткой порядка байтов, «;», строка заголовка (DATA-10).
     expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
     const text = new TextDecoder().decode(bytes);
     const lines = text.trimEnd().split("\r\n");
-    expect(lines[0]).toBe(
-      "BIN;Name (Russian);Name (English);Region;Profile status;Pending changes;Update status;Tier;Tier 3 product lines;Major operators working with;Registered;Verified;Last due-diligence check",
-    );
-    expect(lines).toHaveLength(shown + 1);
-    expect(lines.find((l) => l.startsWith("240100001001;"))).toMatch(
-      /;Verified;No;Active;Tier 2;\d+;2;2026-09-03;2026-09-20;2026-09-03$/,
-    );
-    for (const banned of ["Green", "Amber", "Red", "Оператор", "Поставляли"]) expect(text).not.toContain(banned);
+    const header = lines[0]!.split(";");
+    // Все стандартные колонки раздела 9.2, строка на продуктовую линию (DATA-09).
+    expect(header).toHaveLength(30);
+    expect(header.slice(0, 3)).toEqual(["BIN", "Name in English", "Name in Russian"]);
+    expect(header).toContain("Focal point name");
+    expect(lines).toHaveLength(1 + shown.reduce((n, p) => n + p.sections.products.length, 0));
+    expect(lines.some((l) => l.startsWith("240100012007;"))).toBe(true);
+    expect(text).toContain("'=HYPERLINK(1)");
+    for (const banned of ["Green", "Amber", "Red", "Оператор (демо)", "Поставляли"]) expect(text).not.toContain(banned);
     // Выгрузка директора — файл в браузере, не правка: хранилище то же (GEN-04).
     expect(JSON.stringify(state())).toBe(before);
+  });
+
+  it("число major operators — из данных, а не «из 3»", async () => {
+    renderCabinet("/proto/director/profiles", {
+      role: "director",
+      prepare: (draft) => {
+        draft.organizations.find((o) => o.id === "org-observer-demo")!.majorOperator = true;
+      },
+    });
+    const row = (await screen.findByRole("link", { name: "ТОО «Демо Металл Конструкция»" })).closest("tr")!;
+    expect(within(row).getByText("2 of 4")).toBeTruthy();
   });
 
   it("досье: вкладка в адресе, секции без действий, тир и site survey", async () => {

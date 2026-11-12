@@ -12,8 +12,9 @@ import {
   ReferenceListView,
   TechFilesView,
 } from "@/prototype/administrator/shared";
-import { createInitialState } from "@/prototype/data";
+import { createInitialState, type ProtoState } from "@/prototype/data";
 import { DossierSections, DueDiligenceView, SiteSurveyList, TierRecordsList } from "@/prototype/expert/dossier";
+import { lineKey } from "@/prototype/expert/ext";
 import { setProtoState, STORAGE_KEY } from "@/prototype/store";
 
 import { renderRoute } from "../../support/render";
@@ -31,6 +32,9 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+/** Обход нажимает десятки элементов: под нагрузкой машины ему нужно больше времени по умолчанию. */
+const WALK_TIMEOUT = 30_000;
 
 const SCREENS = [
   "profiles",
@@ -74,25 +78,111 @@ async function pressEverything(user: UserEvent) {
   return pressed;
 }
 
-describe("GEN-04: кабинет директора ничего не меняет", () => {
-  it.each(SCREENS)("%s: каждое нажатие оставляет хранилище прежним", async (path) => {
-    const { user, state } = renderCabinet(`/proto/director/${path}`, { role: "director" });
-    await screen.findByRole("heading", { level: 1 });
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    const before = JSON.stringify(state());
-    expect(stored).not.toBeNull();
-
-    const pressed = await pressEverything(user);
-    expect(pressed).toBeGreaterThan(0);
-    expect(JSON.stringify(state())).toBe(before);
-    expect(window.localStorage.getItem(STORAGE_KEY)).toBe(stored);
-    // Выгрузка CSV на списке профилей тоже нажата: файл собран, хранилище то же.
-    if (path === "profiles") expect(URL.createObjectURL).toHaveBeenCalled();
-
-    // Ни полей ввода данных, ни переключателей, ни выбора файла — только фильтры.
-    const main = screen.getByRole("main");
-    expect(main.querySelectorAll("textarea, input[type=file], [role=switch], [role=checkbox]")).toHaveLength(0);
+/**
+ * Состояние, которое пишут другие кабинеты: пометка SME к строке due diligence (`ext.expert`), отклонённое
+ * ожидающее изменение секции и письмо NOT-05 «изменения» с событиями в журнале.
+ */
+function writtenByOthers(draft: ProtoState) {
+  const p01 = draft.profiles.find((p) => p.id === "p01")!;
+  draft.ext.expert = {
+    ddLineNotes: {
+      [lineKey("p01", "mass_address", p01.nameRu)]: {
+        text: "Пометка SME для теста",
+        by: "acc-expert",
+        at: "2026-11-12T11:00:00+05:00",
+      },
+    },
+    changeRound: {},
+  };
+  p01.pending.contacts = structuredClone(p01.sections.contacts);
+  p01.review.contacts = {
+    decision: "rejected",
+    comment: "Телефон focal point не отвечает",
+    decidedBy: "acc-expert",
+    decidedAt: "2026-11-12T11:30:00+05:00",
+    changed: false,
+  };
+  p01.pendingChanges = false;
+  draft.notifications.push({
+    id: "n-test",
+    profileId: "p01",
+    notId: "NOT-05",
+    at: "2026-11-12T11:30:00+05:00",
+    recipients: ["account", "focal_point"],
+    params: { result: "changes" },
+    read: false,
   });
+  const actor = {
+    accountId: "acc-expert",
+    email: "expert@imbc.local",
+    name: "—",
+    role: "expert" as const,
+    organizationId: "org-imbc",
+  };
+  const summary = (en: string) => ({ en, ru: en, kk: en });
+  draft.audit.push(
+    {
+      id: "t-1",
+      at: "2026-11-12T11:00:00+05:00",
+      actor,
+      action: "due_diligence.line_note",
+      subject: { type: "due_diligence", id: "p01", label: p01.nameRu },
+      summary: summary("Line note"),
+    },
+    {
+      id: "t-2",
+      at: "2026-11-12T11:30:00+05:00",
+      actor,
+      action: "section.reject_change",
+      subject: { type: "section", id: "p01:contacts", label: p01.nameRu },
+      summary: summary("Change rejected"),
+    },
+  );
+}
+
+describe("GEN-04: кабинет директора ничего не меняет", () => {
+  it.each(SCREENS)(
+    "%s: каждое нажатие оставляет хранилище прежним",
+    async (path) => {
+      const { user, state } = renderCabinet(`/proto/director/${path}`, { role: "director" });
+      await screen.findByRole("heading", { level: 1 });
+      const stored = window.localStorage.getItem(STORAGE_KEY);
+      const before = JSON.stringify(state());
+      expect(stored).not.toBeNull();
+
+      const pressed = await pressEverything(user);
+      expect(pressed).toBeGreaterThan(0);
+      expect(JSON.stringify(state())).toBe(before);
+      expect(window.localStorage.getItem(STORAGE_KEY)).toBe(stored);
+      // Выгрузка CSV на списке профилей тоже нажата: файл собран, хранилище то же.
+      if (path === "profiles") expect(URL.createObjectURL).toHaveBeenCalled();
+
+      // Ни полей ввода данных, ни переключателей, ни выбора файла — только фильтры.
+      const main = screen.getByRole("main");
+      expect(main.querySelectorAll("textarea, input[type=file], [role=switch], [role=checkbox]")).toHaveLength(0);
+    },
+    WALK_TIMEOUT,
+  );
+
+  it.each([...["sections", "due-diligence", "operators"].map((tab) => `profiles/p01?tab=${tab}`), "audit"])(
+    "%s с данными других кабинетов: всё показано, ничего не записано",
+    async (path) => {
+      const { user, state } = renderCabinet(`/proto/director/${path}`, { role: "director", prepare: writtenByOthers });
+      await screen.findByRole("heading", { level: 1 });
+      const stored = window.localStorage.getItem(STORAGE_KEY);
+      const before = JSON.stringify(state());
+      if (path.endsWith("sections")) expect(screen.getByText(/Телефон focal point не отвечает/)).toBeTruthy();
+      if (path === "audit") expect(screen.getByText("Change rejected")).toBeTruthy();
+      if (path.endsWith("due-diligence")) {
+        await user.click(screen.getByRole("button", { name: /^Company\. Enterprise/ }));
+        expect(await screen.findByText(/Пометка SME для теста/)).toBeTruthy();
+      }
+      await pressEverything(user);
+      expect(JSON.stringify(state())).toBe(before);
+      expect(window.localStorage.getItem(STORAGE_KEY)).toBe(stored);
+    },
+    WALK_TIMEOUT,
+  );
 
   it("модуль не импортирует средств записи хранилища", () => {
     const sources = import.meta.glob<string>("/src/prototype/director/**/*.{ts,tsx}", {
