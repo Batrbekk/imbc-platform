@@ -29,7 +29,15 @@ const databaseUrl = process.env.TEST_DATABASE_URL;
 describe.skipIf(!databaseUrl)('чтение Adata при установке пароля (IMBC-07, MAN-03, NOT-23)', () => {
   vi.setConfig({ testTimeout: 30000 });
   const TOKEN = `tok-${randomUUID()}`;
-  const TIMING: AdataTiming = { firstPollDelayMs: 0, pollIntervalMs: 10, deadlineMs: 300, requestTimeoutMs: 200 };
+  // Тесты срока опроса — с коротким сроком; тесты, ждущие ответа, — с запасом: под нагрузкой несколько
+  // проверок по loopback с паузой 100 мс могут не уложиться в 300 мс.
+  const DEADLINE_TIMING: AdataTiming = {
+    firstPollDelayMs: 0,
+    pollIntervalMs: 10,
+    deadlineMs: 300,
+    requestTimeoutMs: 200,
+  };
+  const TIMING: AdataTiming = { ...DEADLINE_TIMING, deadlineMs: 10_000 };
   const env = {
     SESSION_COOKIE_NAME: '__Host-imbc-session',
     DEVICE_COOKIE_NAME: '__Host-imbc-device',
@@ -114,7 +122,7 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
   /** Адреса, с которыми фабрика создавала клиент: ни один не ведёт к Adata (квота заказчика). */
   const clientBaseUrls: string[] = [];
 
-  function prefillJob(over: Partial<Env> = {}, fetchImpl?: typeof fetch) {
+  function prefillJob(over: Partial<Env> = {}, fetchImpl?: typeof fetch, timing: AdataTiming = TIMING) {
     return new AdataPrefillJob(
       db,
       { ADATA_API_TOKEN: TOKEN, ADATA_MONTHLY_LIMIT: 3000, ...over } as Env,
@@ -128,7 +136,7 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
           fetch: fetchImpl,
         });
       },
-      TIMING,
+      timing,
     );
   }
 
@@ -708,7 +716,7 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
   ])('%s — unavailable с failure, run не бросает, находкой не помечено (EXT-04)', async (_name, scenario, failure) => {
     const m = await manufacturer();
     const attemptId = await schedule(m, scenario);
-    const { error, output } = await captured(() => prefillJob().run({ attemptId }));
+    const { error, output } = await captured(() => prefillJob({}, undefined, DEADLINE_TIMING).run({ attemptId }));
     expect(error).toBeUndefined();
     expect(await attemptOf(m.profileId)).toMatchObject({ state: 'unavailable', failure, value: null });
     expect(await db.select().from(schema.prefilledValue).where(eq(schema.prefilledValue.attemptId, attemptId))).toEqual(
@@ -865,7 +873,9 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     for (const c of cases) {
       const m = await manufacturer();
       const attemptId = await schedule(m, c.scenario);
-      const run = await captured(() => throughQueue(prefillJob({}, c.fetch)));
+      // Сбои на проверке временные и идут до срока — им короткий срок; готовому ответу — с запасом.
+      const timing = c.state === 'received' ? TIMING : DEADLINE_TIMING;
+      const run = await captured(() => throughQueue(prefillJob({}, c.fetch, timing)));
       output += run.output;
       if (run.error !== undefined) errors.push(run.error);
       expect((await attemptOf(m.profileId)).state, JSON.stringify(c.scenario ?? 'fetch')).toBe(c.state);
