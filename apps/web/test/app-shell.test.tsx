@@ -76,16 +76,24 @@ function withCompanyPage(): RouteObject[] {
   ];
 }
 
-/**
- * Запросы стартовых страниц, а не закрытой страницы: свой профиль — у производителя (/profile),
- * организации и аккаунты — у администратора (/admin/accounts).
- */
 const OWN_PROFILE = "/api/v1/profiles/own";
 const ADMIN_ACCOUNTS = "/api/v1/admin/accounts";
+/** Все запросы к /api/v1 — без исключений. */
 const apiCalls = (api: ReturnType<typeof stubApi>) =>
-  api.mock.calls
-    .map(([url]) => String(url))
-    .filter((url) => url.startsWith("/api/v1/") && url !== OWN_PROFILE && url !== ADMIN_ACCOUNTS);
+  api.mock.calls.map(([url]) => String(url)).filter((url) => url.startsWith("/api/v1/"));
+
+/** Запросы стартовой страницы роли: после перехода с закрытой страницы других запросов к /api/v1 нет. */
+const START_REQUESTS: Record<Me["user"]["role"], string[]> = {
+  manufacturer: [OWN_PROFILE],
+  expert: ["/api/v1/reviews/queue"],
+  administrator: [ADMIN_ACCOUNTS],
+  director: ["/api/v1/dashboard"],
+  operator: ["/api/v1/dashboard"],
+  observer: ["/api/v1/dashboard"],
+};
+async function expectStartRequestsOnly(api: ReturnType<typeof stubApi>, role: Me["user"]["role"], entry?: string) {
+  await waitFor(() => expect(apiCalls(api), entry).toEqual(START_REQUESTS[role]));
+}
 const DASHBOARD: Dashboard = {
   total: 0,
   byRegion: [],
@@ -174,7 +182,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
   });
 
   it.each(ROLES)("%s со входа на / попадает на стартовую страницу роли и видит её первым пунктом меню (OPR-31)", async (role) => {
-    stubWorkspace(me(role));
+    const api = stubWorkspace(me(role));
     const { router } = renderRoute("/");
 
     await waitFor(() => expect(router.state.location.pathname).toBe(HOME[role]));
@@ -183,6 +191,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     const first = screen.getAllByRole("link").find((link) => link.dataset.sidebar === "menu-button")!;
     expect(first.getAttribute("href")).toBe(HOME[role]);
     expect(first.hasAttribute("data-active")).toBe(true);
+    await expectStartRequestsOnly(api, role);
   });
 
   it("производитель на /catalog/ уходит на /profile: завершающий / не обходит шлюз роли", async () => {
@@ -191,7 +200,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/profile"));
     expect(await screen.findByRole("heading", { level: 1, name: kk.nav.profile })).toBeTruthy();
-    expect(apiCalls(api)).toEqual([]);
+    await expectStartRequestsOnly(api, "manufacturer");
   });
 
   it("SME после входа и с закрытой страницы попадает на /reviews", async () => {
@@ -212,7 +221,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
       await waitFor(() => expect(router.state.location.pathname, entry).toBe("/admin/accounts"));
       expect(await screen.findByRole("heading", { level: 1, name: ru.adminAccounts.title })).toBeTruthy();
       expect(document.title).toBe(`${ru.adminAccounts.title} · ${ru.common.appName}`);
-      expect(apiCalls(api), entry).toEqual([]);
+      await expectStartRequestsOnly(api, "administrator", entry);
       cleanup();
     }
   });
@@ -223,7 +232,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/reviews"));
     expect(await screen.findByRole("heading", { name: kk.reviews.title })).toBeTruthy();
-    expect(api.mock.calls.map(([url]) => String(url)).filter((url) => url.startsWith(ADMIN_ACCOUNTS))).toEqual([]);
+    await expectStartRequestsOnly(api, "expert");
     expect(screen.queryByRole("link", { name: kk.nav.adminAccounts })).toBeNull();
   });
 
@@ -250,7 +259,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/dashboard"));
     expect(await screen.findByRole("heading", { name: kk.dashboard.title })).toBeTruthy();
-    expect(apiCalls(api).filter((url) => url.startsWith("/api/v1/reviews"))).toEqual([]);
+    await expectStartRequestsOnly(api, "director");
     expect(screen.queryByRole("link", { name: kk.nav.reviews })).toBeNull();
   });
 
@@ -292,7 +301,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
       await waitFor(() => expect(router.state.location.pathname).toBe(HOME[role]));
       await screen.findAllByText(`${role}@${role}.local`);
       expect(screen.queryByRole("heading", { name: "company" })).toBeNull();
-      expect(apiCalls(api)).toEqual([]);
+      await expectStartRequestsOnly(api, role);
       cleanup();
     }
   });
@@ -306,7 +315,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
         expect(router.state.location.pathname).toBe(role === "manufacturer" ? "/profile" : "/admin/accounts"),
       );
       await screen.findAllByText(`${role}@${role}.local`);
-      expect(apiCalls(api)).toEqual([]);
+      await expectStartRequestsOnly(api, role);
       cleanup();
     }
   });
@@ -327,7 +336,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/profile"));
     expect(await screen.findByRole("heading", { level: 1, name: kk.nav.profile })).toBeTruthy();
-    expect(apiCalls(api)).toEqual([]);
+    await expectStartRequestsOnly(api, "manufacturer");
   });
 
   it("маршруты чувствительны к регистру: /CATALOG — «не найдено», без оболочки и без поиска", async () => {

@@ -185,8 +185,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
          assigned_expert_id = (select id from user_accounts where lower(email) = 'expert@imbc.local')
        where organization_id in (select id from organizations where name = 'ТОО «Демо Жоба»')`,
     );
+    await pool.query(`update manufacturer_profiles set has_pending_changes = true where status <> 'verified'`);
     await seedDemo(pool);
     expect(await queue(), 'повторный').toEqual(expected);
+    const pending = await pool.query(`select 1 from manufacturer_profiles where status <> 'verified' and has_pending_changes`);
+    expect(pending.rowCount, 'has_pending_changes после повторного запуска').toBe(0);
     // У новых организаций нет аккаунтов.
     const accounts = await pool.query(
       `select a.email from user_accounts a join organizations o on o.id = a.organization_id

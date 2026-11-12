@@ -2,6 +2,7 @@ import { computeBinCheckDigit, normalizeCompanyName, ownProfileSchema } from '@i
 import { drizzle } from 'drizzle-orm/node-postgres';
 import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { ZodError } from 'zod';
 import { ProblemException } from '../src/common/problem.js';
 import type { Database } from '../src/database/database.module.js';
 import * as schema from '../src/database/schema/index.js';
@@ -138,5 +139,16 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('свой профиль про�
     expect(error).toBeInstanceOf(ProblemException);
     expect((error as ProblemException).getStatus()).toBe(404);
     expect((error as ProblemException).code).toBe('not_found');
+  });
+
+  it('организация без БИН — ответ не проходит схему: обычный Error, не ZodError (сбой сервера, 500)', async () => {
+    const [org] = await db.insert(schema.organizations).values({ type: 'manufacturer', name: 'Без БИН' }).returning();
+    await db.insert(schema.manufacturerProfiles).values({ organizationId: org!.id });
+
+    const error = await profiles.own(org!.id).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(ZodError);
+    expect(error).not.toBeInstanceOf(ProblemException);
+    expect((error as Error).cause).toBeInstanceOf(ZodError);
   });
 });

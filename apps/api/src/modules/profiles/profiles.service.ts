@@ -2,6 +2,7 @@ import { type OwnProfile, ownProfileSchema, PROFILE_SECTIONS } from '@imbc/contr
 import { Inject, Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { ProblemException } from '../../common/problem.js';
+import { parseResponse } from '../../common/response.js';
 import { DB, type Database } from '../../database/database.module.js';
 import {
   catalogVisible,
@@ -24,7 +25,7 @@ export class ProfilesService {
    * Свой профиль производителя, только для чтения (MAN-41, MAN-46, IMBC-22). Ищется только по организации
    * сеанса (GEN-11); у организации без профиля — 404. Статус актуальности и тир — только у Verified
    * (раздел 5.5). Тир — из строки своего профиля в catalog_visible: site surveyed хранится только там;
-   * Verified вне проекции — tier_1 (IMBC-19, IMBC-20).
+   * Verified вне проекции — tier_1 (IMBC-19, IMBC-20). Ответ не по схеме — сбой сервера (500), а не 400.
    */
   async own(organizationId: string): Promise<OwnProfile> {
     const p = manufacturerProfiles;
@@ -50,13 +51,19 @@ export class ProfilesService {
 
     const { projectedTier, updateStatus, registeredAt, verifiedAt, ...fields } = row;
     const verified = row.status === 'verified';
-    return ownProfileSchema.parse({
-      ...fields,
-      updateStatus: verified ? updateStatus : null,
-      tier: verified ? (projectedTier ?? 'tier_1') : null,
-      registeredAt: registeredAt.toISOString(),
-      verifiedAt: verifiedAt?.toISOString() ?? null,
-    });
+    return parseResponse(
+      ownProfileSchema,
+      {
+        ...fields,
+        updateStatus: verified ? updateStatus : null,
+        // site_surveyed пока есть только в проекции: Verified и site surveyed вне её (например, due diligence red)
+        // показывается tier_1, хотя по IMBC-20 это tier 2; перейти на site_survey_records, когда они появятся.
+        tier: verified ? (projectedTier ?? 'tier_1') : null,
+        registeredAt: registeredAt.toISOString(),
+        verifiedAt: verifiedAt?.toISOString() ?? null,
+      },
+      'свой профиль',
+    );
   }
 
   /**

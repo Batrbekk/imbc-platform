@@ -1,6 +1,7 @@
 import { type OwnProfile, ownProfileSchema } from '@imbc/contracts';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProblemException } from '../src/common/problem.js';
+import { parseResponse } from '../src/common/response.js';
 import { ProfilesController } from '../src/modules/profiles/profiles.controller.js';
 import { ProfilesService } from '../src/modules/profiles/profiles.service.js';
 import { type HttpStand, startHttp } from './support/http.js';
@@ -70,11 +71,22 @@ describe('GET /api/v1/profiles/own', () => {
     },
   );
 
-  it('SME без профиля в организации — 404', async () => {
-    const res = await imbc.get(URL_PATH, 'expert');
+  it.each(['expert', 'director'] as const)('%s без профиля в организации — 404', async (role) => {
+    const res = await imbc.get(URL_PATH, role);
     expect(res.status).toBe(404);
     expect(res.headers.get('content-type')).toMatch(/^application\/problem\+json/);
     expect(await res.json()).toMatchObject({ status: 404, code: 'not_found' });
     expect(own).toHaveBeenCalledExactlyOnceWith(IMBC_ORG);
+  });
+
+  it('ответ сервиса не проходит схему — 500 problem+json без списка полей', async () => {
+    own.mockImplementationOnce(async () => parseResponse(ownProfileSchema, { ...PROFILE, bin: null }, 'свой профиль'));
+    const res = await http.get(URL_PATH, 'manufacturer');
+    expect(res.status).toBe(500);
+    expect(res.headers.get('content-type')).toMatch(/^application\/problem\+json/);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ status: 500, code: 'internal' });
+    expect(Object.keys(body)).not.toContain('errors');
+    expect(JSON.stringify(body)).not.toContain('bin');
   });
 });

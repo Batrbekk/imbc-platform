@@ -297,6 +297,7 @@ export async function seedDemo(pool: pg.Pool): Promise<void> {
         .returning();
       const state = {
         status: q.status,
+        hasPendingChanges: false,
         assignedExpertId: q.assigned ? (sme?.id ?? null) : null,
         registeredAt: new Date(Date.now() - q.daysAgo * 86_400_000),
       };
