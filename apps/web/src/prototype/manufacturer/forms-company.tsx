@@ -1,7 +1,7 @@
 // Формы секций «Основная информация», «Контакты», «Персонал», «Акционеры».
 // MAN-09, MAN-10, MAN-11, MAN-12, MAN-13, MAN-14, MAN-15, MAN-17, MAN-18, MAN-19, MAN-20, MAN-21, MAN-22.
 import { CONTACT_ROLES, type ContactRole } from "@imbc/contracts";
-import { useState } from "react";
+import { use, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
@@ -24,6 +24,7 @@ import {
   SaveBar,
   TextField,
 } from "./fields";
+import { LockedContext } from "./locked";
 import type { FormProps } from "./model";
 import { EMAIL_RE, isPhone, useReference, withCurrent } from "./reference";
 import { texts } from "./texts";
@@ -179,6 +180,7 @@ const emptyContact = (): Contact => ({
 /** Контакты: не меньше трёх, ровно один focal point, без повторов почты и телефона (MAN-13…MAN-15). */
 export function ContactsForm({ initial, onSave }: FormProps<"contacts">) {
   const t = useDictionary(texts);
+  const locked = use(LockedContext);
   const [rows, setRows] = useState(initial);
   const [errors, setErrors] = useState<string[]>([]);
   const roleItems = CONTACT_ROLES.map((r) => ({ value: r, label: t(`role.${r}`) }));
@@ -206,6 +208,7 @@ export function ContactsForm({ initial, onSave }: FormProps<"contacts">) {
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">{t("contactsHint")}</p>
       <RadioGroup
+        disabled={locked}
         aria-label={t("focalPoint")}
         value={focal}
         onValueChange={(id) =>
@@ -253,7 +256,7 @@ export function ContactsForm({ initial, onSave }: FormProps<"contacts">) {
                 onChange={(x) => x && patch(r.id, { role: x as ContactRole })}
               />
               <Label className="flex items-center gap-2 self-end font-normal">
-                <RadioGroupItem value={r.id} aria-label={t("focalPointOf", { n: String(i + 1) })} />
+                <RadioGroupItem value={r.id} disabled={locked} aria-label={t("focalPointOf", { n: String(i + 1) })} />
                 {t("focalPoint")}
               </Label>
             </FieldGrid>
@@ -320,13 +323,26 @@ export function PersonnelForm({ profile, initial, onSave }: FormProps<"personnel
 }
 
 /** Акционеры: не меньше одного; итог долей и предупреждение, если не 100 % (MAN-21, MAN-22). */
+/** Строка формы: доля пока может быть пустой; в хранилище уходит только число (MAN-21). */
+type ShareholderRow = Omit<Shareholder, "sharePct"> & { sharePct: number | null };
+
 export function ShareholdersForm({ initial, onSave }: FormProps<"shareholders">) {
   const t = useDictionary(texts);
   const format = useFormat();
-  const [rows, setRows] = useState(initial);
-  const total = rows.reduce((sum, r) => sum + (Number.isFinite(r.sharePct) ? r.sharePct : 0), 0);
-  const patch = (id: string, change: Partial<Shareholder>) =>
+  const [rows, setRows] = useState<ShareholderRow[]>(() =>
+    initial.map((r) => ({ ...r, sharePct: Number.isFinite(r.sharePct) ? r.sharePct : null })),
+  );
+  const [errors, setErrors] = useState<string[]>([]);
+  const total = rows.reduce((sum, r) => sum + (r.sharePct ?? 0), 0);
+  const patch = (id: string, change: Partial<ShareholderRow>) =>
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...change } : r)));
+
+  const save = () => {
+    const e = rows.flatMap((r, i) => (r.sharePct === null ? [t("errShare", { n: String(i + 1) })] : []));
+    setErrors(e);
+    if (e.length === 0) onSave(rows.map((r) => ({ ...r, sharePct: r.sharePct ?? 0 })));
+  };
+
   return (
     <div className="flex flex-col gap-4">
       {rows.length === 0 && <p className="text-sm text-muted-foreground">{t("noShareholders")}</p>}
@@ -347,8 +363,9 @@ export function ShareholdersForm({ initial, onSave }: FormProps<"shareholders">)
               label={t("field.sharePct")}
               required
               max={100}
-              value={Number.isFinite(r.sharePct) ? r.sharePct : null}
-              onChange={(x) => patch(r.id, { sharePct: x ?? Number.NaN })}
+              value={r.sharePct}
+              error={errors.length > 0 && r.sharePct === null ? t("errShare", { n: String(i + 1) }) : null}
+              onChange={(x) => patch(r.id, { sharePct: x })}
             />
             <TextField
               label={t("field.country")}
@@ -361,7 +378,7 @@ export function ShareholdersForm({ initial, onSave }: FormProps<"shareholders">)
       ))}
       <AddButton
         label={t("addShareholder")}
-        onClick={() => setRows((prev) => [...prev, { id: newId("sh"), name: "", sharePct: Number.NaN, country: "" }])}
+        onClick={() => setRows((prev) => [...prev, { id: newId("sh"), name: "", sharePct: null, country: "" }])}
       />
       <p className="text-sm font-medium">{t("sharesTotal", { total: format.number(total) })}</p>
       {rows.length > 0 && total !== 100 && (
@@ -369,7 +386,7 @@ export function ShareholdersForm({ initial, onSave }: FormProps<"shareholders">)
           <AlertDescription>{t("sharesWarning", { total: format.number(total) })}</AlertDescription>
         </Alert>
       )}
-      <SaveBar onSave={() => onSave(rows)} errors={[]} />
+      <SaveBar onSave={save} errors={errors} />
     </div>
   );
 }

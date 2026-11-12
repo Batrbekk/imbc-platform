@@ -1,6 +1,6 @@
 // Кабинет производителя: профиль, секции, отправка на проверку, блокировка, возврат, pending changes.
 // MAN-13, MAN-22, MAN-36, MAN-40, MAN-41, MAN-42, MAN-43, MAN-44, MAN-45, MAN-46, GEN-08.
-import { screen, waitFor, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ProtoState } from "@/prototype/data";
@@ -157,9 +157,10 @@ describe("кабинет производителя: профиль", () => {
     await user.click(within(dialog).getByRole("checkbox"));
     await user.click(within(dialog).getByRole("button", { name: "Send for review" }));
     await waitFor(() => expect(p(state, "p10").status).toBe("submitted"));
-    // Верифицированная и не изменённая секция остаётся верифицированной, отклонённые ждут решения.
+    // Новое решение нужно только по изменённой секции; решения по нетронутым сохраняются (MAN-44, NOT-29).
+    expect(p(state, "p10").review.certificates).toMatchObject({ decision: null, changed: true });
     expect(p(state, "p10").review.main.decision).toBe("verified");
-    expect(p(state, "p10").review.contacts.decision).toBeNull();
+    expect(p(state, "p10").review.contacts.decision).toBe("rejected");
     expect(p(state, "p10").assignedExpertId).toBe("acc-expert-2");
   });
 
@@ -215,6 +216,109 @@ describe("кабинет производителя: профиль", () => {
     await user.click(screen.getByRole("button", { name: "Save section" }));
     expect(await screen.findByText(/Product line 2: this product already comes from e-Ondiris/)).toBeTruthy();
     expect(state().audit.length).toBe(before);
+  });
+
+  it("отклонённая правка Verified: видна с комментарием, правится, отправляется только после правки (MAN-45)", async () => {
+    const { user, state } = renderCabinet("/proto/manufacturer/profile", {
+      role: "manufacturer",
+      prepare: (d) => {
+        const x = d.profiles.find((y) => y.id === "p01")!;
+        x.pending.personnel = { ...x.sections.personnel, managers: 30 };
+        x.review.personnel = {
+          ...x.review.personnel,
+          decision: "rejected",
+          comment: "Численность не подтверждена.",
+          changed: false,
+        };
+        x.pendingChanges = false;
+      },
+    });
+    const row = (await screen.findByRole("link", { name: "Personnel" })).closest("tr")!;
+    expect(within(row).getByText("Rejected")).toBeTruthy();
+    expect(within(row).getByText("Численность не подтверждена.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send changes for review" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText(/Correct a rejected section first/)).toBeTruthy();
+
+    await user.click(screen.getByRole("link", { name: "Personnel" }));
+    expect(await screen.findByText("SME comment: Численность не подтверждена.")).toBeTruthy();
+    const field = screen.getByRole("spinbutton", { name: "Managers" });
+    await user.clear(field);
+    await user.type(field, "28");
+    await user.click(screen.getByRole("button", { name: "Save section" }));
+    await waitFor(() => expect(p(state, "p01").review.personnel.changed).toBe(true));
+    expect(p(state, "p01").pending.personnel?.managers).toBe(28);
+
+    await user.click(screen.getByRole("link", { name: "Back to profile" }));
+    const row2 = (await screen.findByRole("link", { name: "Personnel" })).closest("tr")!;
+    expect(within(row2).getByText("Pending change, not sent")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send changes for review" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("правки без изменений после решения SME не отправляются", async () => {
+    renderCabinet("/proto/manufacturer/profile?as=p02", {
+      role: "manufacturer",
+      prepare: (d) => {
+        const x = d.profiles.find((y) => y.id === "p02")!;
+        x.pendingChanges = false;
+        x.review.contacts = { ...x.review.contacts, decision: "rejected", comment: "Нет телефона.", changed: false };
+      },
+    });
+    expect((await screen.findByRole("button", { name: "Send changes for review" })).hasAttribute("disabled")).toBe(
+      true,
+    );
+    expect(screen.getByText(/nothing has been edited since the SME's decision/)).toBeTruthy();
+  });
+
+  it.each(["personnel", "certificates", "documents", "main", "products", "contacts"])(
+    "сохранение секции %s без изменений ничего не пишет",
+    async (section) => {
+      const { user, state } = renderCabinet(`/proto/manufacturer/profile/${section}?as=p10`, { role: "manufacturer" });
+      const before = structuredClone(state());
+      await user.click(await screen.findByRole("button", { name: "Save section" }));
+      expect((await screen.findByRole("status")).textContent).toBe("Nothing changed: the section was not saved.");
+      expect(state().audit.length).toBe(before.audit.length);
+      expect(p(state, "p10")).toEqual(before.profiles.find((x) => x.id === "p10"));
+    },
+  );
+
+  it("Under review: промежуточные решения SME не видны до результата (REV-07)", async () => {
+    const { user } = renderCabinet("/proto/manufacturer/profile?as=p11", { role: "manufacturer" });
+    const row = (await screen.findByRole("link", { name: "Personnel" })).closest("tr")!;
+    expect(within(row).getByText("Under review")).toBeTruthy();
+    expect(screen.queryByText(/Оргструктура не совпадает/)).toBeNull();
+    expect(screen.queryByText("Rejected")).toBeNull();
+    await user.click(screen.getByRole("link", { name: "Personnel" }));
+    expect(await screen.findByText(/The profile is locked/)).toBeTruthy();
+    expect(screen.queryByText(/Оргструктура не совпадает/)).toBeNull();
+    expect(screen.queryByText("Rejected by the SME")).toBeNull();
+  });
+
+  it("строка акционера без доли не сохраняется (MAN-21)", async () => {
+    const { user, state } = renderCabinet("/proto/manufacturer/profile/shareholders?as=p12", { role: "manufacturer" });
+    await user.click(await screen.findByRole("button", { name: "Add shareholder" }));
+    const card = screen.getByRole("group", { name: "Shareholder 3" });
+    await user.type(within(card).getByRole("textbox", { name: "Name" }), "ТОО «Демо Партнёр»");
+    const before = state().audit.length;
+    await user.click(screen.getByRole("button", { name: "Save section" }));
+    expect((await screen.findAllByText("Shareholder 3: enter the share in percent.")).length).toBeGreaterThan(0);
+    expect(state().audit.length).toBe(before);
+    expect(JSON.stringify(state().profiles)).not.toContain("NaN");
+  });
+
+  it("начальный адрес сохраняет выбор ведущего; другой аккаунт его не видит", async () => {
+    const { router } = renderCabinet("/proto/manufacturer?as=p12", { role: "manufacturer" });
+    await waitFor(() => expect(router.state.location.pathname).toBe("/proto/manufacturer/profile"));
+    expect(router.state.location.search).toBe("?as=p12");
+    expect(await screen.findByText("ТОО «Демо Жоба»")).toBeTruthy();
+    cleanup();
+
+    renderCabinet("/proto/manufacturer/profile", {
+      role: "manufacturer",
+      email: "account@company2.demo.local",
+      keepState: true,
+    });
+    expect(await screen.findByText("ТОО «Каспий Демо Сервис»")).toBeTruthy();
+    expect(screen.queryByText("ТОО «Демо Жоба»")).toBeNull();
   });
 
   it("неизвестная секция — «не найдено» со ссылкой назад", async () => {

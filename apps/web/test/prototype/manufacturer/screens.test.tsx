@@ -3,6 +3,7 @@
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { createInitialState, type ProtoState } from "@/prototype/data";
 import { resetViewAs } from "@/prototype/manufacturer/view-as";
 import { STORAGE_KEY } from "@/prototype/store";
 
@@ -14,17 +15,13 @@ afterEach(() => {
   resetViewAs();
 });
 
-/** Названия операторов и их пользователей демо-данных: производителю их не показывают (GEN-11). */
-const OPERATOR_NAMES = [
-  "Оператор (демо)",
-  "Оператор Б (демо)",
-  "Оператор В (демо)",
-  "Специалист оператора",
-  "Арман Беков",
-  "Жанар Иманова",
-  "operator.local",
-  "operator-b.demo.local",
-];
+/** Всё, что называет оператора: организации и аккаунты операторов из общих данных (GEN-11). */
+const OPERATOR_NAMES = (() => {
+  const data = createInitialState();
+  const orgs = data.organizations.filter((o) => o.type === "operator");
+  const people = data.accounts.filter((a) => a.role === "operator" || orgs.some((o) => o.id === a.organizationId));
+  return [...orgs.map((o) => o.name), ...people.flatMap((a) => [a.fullName, a.email, a.email.split("@")[1]!])];
+})();
 
 function expectNoOperatorNamed() {
   const text = document.body.textContent ?? "";
@@ -64,12 +61,9 @@ describe("кабинет производителя: запросы операт
     await user.click(within(card).getByRole("button", { name: "Send reply" }));
     await waitFor(() => expect(state().operatorRequests.find((r) => r.id === "or-02")!.reply).not.toBeNull());
 
-    const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY)!) as Record<string, unknown>;
-    const { audit, ...records } = stored;
-    expect(JSON.stringify(records)).not.toContain(email);
-    // Фразы журнала модуль пишет сам: адреса в них нет.
-    const events = audit as { summary: Record<string, string> }[];
-    expect(JSON.stringify(events.map((e) => e.summary))).not.toContain(email);
+    // Ни в одной записи хранилища, включая журнал, адреса сеанса нет.
+    expect(window.localStorage.getItem(STORAGE_KEY)).not.toContain(email);
+    expect(window.localStorage.getItem(STORAGE_KEY)).not.toContain("real.example");
   });
 });
 
@@ -193,6 +187,51 @@ describe("кабинет производителя: тир и AGAR", () => {
 });
 
 describe("кабинет производителя: уведомления", () => {
+  const withResult = (params: Record<string, string>) => (d: ProtoState) => {
+    d.notifications = [
+      {
+        id: "n-x",
+        profileId: "p01",
+        notId: "NOT-05",
+        at: "2026-11-12T12:00:00+05:00",
+        recipients: ["account"],
+        params,
+        read: false,
+      },
+    ];
+  };
+
+  it("NOT-05 по правкам: принятые и отклонённые с комментарием, без «возвращён» (NOT-28)", async () => {
+    renderCabinet("/proto/manufacturer/notifications", {
+      role: "manufacturer",
+      prepare: withResult({
+        result: "changes",
+        accepted: "contacts,products",
+        rejected: "personnel",
+        "comment.personnel": "Численность не подтверждена.",
+      }),
+    });
+    expect(await screen.findByText(/IMBC decided on your pending changes/)).toBeTruthy();
+    expect(screen.getByText("Accepted: Contacts, Products")).toBeTruthy();
+    expect(screen.getByText("Personnel")).toBeTruthy();
+    expect(screen.getByText(/Численность не подтверждена\./)).toBeTruthy();
+    expect(screen.queryByText(/returned/i)).toBeNull();
+  });
+
+  it("NOT-05 о возврате: отклонённые секции с комментариями (NOT-27); старая запись без списка", async () => {
+    renderCabinet("/proto/manufacturer/notifications", {
+      role: "manufacturer",
+      prepare: (d) => {
+        withResult({ result: "returned", rejected: "contacts,certificates", "comment.contacts": "Нет телефона." })(d);
+        d.notifications.push({ ...d.notifications[0]!, id: "n-y", params: { result: "returned" } });
+      },
+    });
+    expect((await screen.findAllByText(/IMBC returned your profile/)).length).toBe(2);
+    expect(screen.getByText("Contacts")).toBeTruthy();
+    expect(screen.getByText("Certificates")).toBeTruthy();
+    expect(screen.getByText(/Нет телефона\./)).toBeTruthy();
+  });
+
   it("письма производителю, запрос оператора без его названия, отметка о прочтении (NOT-32)", async () => {
     const { user, state } = renderCabinet("/proto/manufacturer/notifications", { role: "manufacturer" });
     expect(await screen.findByRole("heading", { level: 1, name: "Notifications" })).toBeTruthy();
