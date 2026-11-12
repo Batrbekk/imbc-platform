@@ -1,0 +1,78 @@
+{
+  "success": true,
+  "message": "ready",
+  "data": {
+    "basic": {
+      "name_ru": "ТОО «Тест Adata»",
+      "name_kz": "«Тест Adata» ЖШС",
+      "short_name": "Тест Adata",
+      "biin": "240100000011",
+      "legal_address": "Казахстан, г. Алматы, ул. Тестовая, д. 1",
+      "legal_address_kz": "Қазақстан, Алматы қ., Тестовая к-сі, 1 үй",
+      "oked": "25110",
+      "okeds": [
+        { "i": "25110", "name_ru": "Производство строительных металлических конструкций" },
+        { "i": "28220", "name_ru": "Производство подъемно-транспортного оборудования" }
+      ],
+      "secondary_okeds": [
+        { "i": "28220", "name_ru": "Производство подъемно-транспортного оборудования" },
+        { "i": "46690", "name_ru": "Оптовая торговля прочими машинами и оборудованием" }
+      ],
+      "fullname_director": "Тестов Тест Тестович",
+      "director_iin": "800101300011",
+      "director_start_date": "2016-09-29",
+      "date_registration": "2016-09-29",
+      "legal_form": "Товарищество с ограниченной ответственностью",
+      "employee_count": 42,
+      "is_nds_payer": true,
+      "krp": "Малые предприятия (<= 50 чел.)",
+      "unreliable_zakup": false,
+      "is_non_resident": false,
+      "counterparty_type": "ЮЛ"
+    },
+    "kzCoContact": {
+      "phones": [{ "contact": "+7 727 000 00 01" }, { "contact": "" }],
+      "emails": [{ "contact": "info@adata-test.local" }],
+      "websites": [{ "contact": "adata-test.local" }]
+    },
+    "founders": {
+      "founders_cnt": 2,
+      "founders_dtl": [
+        { "name": "Тестова Айгуль", "founder_uin": "850202400022", "is_company": false, "start_date": "2016-09-29" },
+        { "name": "ТОО «Тест Холдинг»", "founder_uin": "100140000033", "is_company": true, "start_date": "2018-03-15" }
+      ]
+    },
+    "status": {
+      "company_status": "Действующее",
+      "pseudo_company": false,
+      "bankcrupt": false,
+      "inactive": false,
+      "absent_at_address": false,
+      "registration_invalid": false,
+      "violation_tax": false,
+      "tax_debt": 0
+    },
+    "riskFactor": {
+      "company": {
+        "bankruptcy": false,
+        "liquidation": false,
+        "tax_risk_degree": "Низкая",
+        "irresponsible_taxpayer": false
+      },
+      "head": { "terrorism": false, "wanted": false, "tax_debt": 0, "litigation": 0 }
+    },
+    "taxDeductions": {
+      "sum": 12500000,
+      "details": [
+        { "year": 2024, "amount": 5500000 },
+        { "year": 2025, "amount": 7000000 }
+      ]
+    },
+    "litigation": {
+      "total_civil_count": 1,
+      "total_criminal_count": 0,
+      "total_administrative_count": 0,
+      "court_cases": []
+    }
+  }
+}

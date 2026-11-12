@@ -14,6 +14,7 @@ export const PREFILL_FIELDS = [
   'legal_form',
   'shareholders',
 ] as const;
+export type PrefillField = (typeof PREFILL_FIELDS)[number];
 /** Состояние чтения для производителя. */
 export const ADATA_READ_STATES = [
   'not_requested',

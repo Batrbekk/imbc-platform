@@ -91,6 +91,11 @@ const envSchema = z
     SMTP_URL: z.string().default('smtp://mailpit:1025'),
     MAIL_FROM: z.string().default('IMBC Platform <no-reply@imbc.local>'),
     IMBC_MAILBOX: z.string().default('platform@imbc.local'),
+
+    /** Токен Adata из менеджера секретов (EXT-02, NFR-10). Нет значения — коннектор выключен. */
+    ADATA_API_TOKEN: z.preprocess((v) => (v === '' ? undefined : v), z.string().trim().min(1).max(512).optional()),
+    /** Наша граница квоты Adata за период (IMBC-07: 3 000 БИН в месяц); 0 — не запрашивать. */
+    ADATA_MONTHLY_LIMIT: z.coerce.number().int().min(0).default(3000),
   })
   .superRefine((env, context) => {
     const ids = new Set<string>();
