@@ -21,6 +21,7 @@ import { CatalogService } from './modules/catalog/catalog.service.js';
 import { HealthController } from './modules/health/health.controller.js';
 import { ProfilesController } from './modules/profiles/profiles.controller.js';
 import { ProfilesService } from './modules/profiles/profiles.service.js';
+import { PrototypeModule } from './modules/prototype/prototype.module.js';
 import { RegistrationController } from './modules/registration/registration.controller.js';
 import { ReviewsController } from './modules/reviews/reviews.controller.js';
 import { ReviewsService } from './modules/reviews/reviews.service.js';
@@ -43,6 +44,7 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     DatabaseModule,
     InfraModule,
     AuditModule,
+    PrototypeModule,
   ],
   controllers: [
     HealthController,

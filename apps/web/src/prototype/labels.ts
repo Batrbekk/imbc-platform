@@ -9,6 +9,17 @@ export const commonTexts = defineDictionary({
   en: {
     prototype: "Prototype",
     prototypeHint: "Fictional data. Changes are kept only in this browser.",
+    prototypeHintShared: "Fictional data. Changes are shared by all users of the stand.",
+    resetDescriptionShared:
+      "All users of the stand return to the initial demo data. Changes made in the demo are lost.",
+    syncOffline: "Not saved: no connection to the stand. Your changes are kept in this browser; retrying.",
+    syncOutdated:
+      "The demo data on the stand is from a newer version of the platform. Reload the page: changes made here are not saved.",
+    syncDropped:
+      "Your last change was not applied: another user changed or removed this record first. The screen shows the current data.",
+    syncConflict:
+      "Your last change was not saved: the demo data kept changing while it was being saved. The screen shows the current data.",
+    dismiss: "Close",
     menuGroup: "Prototype",
     release2: "Release 2",
     reset: "Reset demo data",
@@ -100,6 +111,17 @@ export const commonTexts = defineDictionary({
   ru: {
     prototype: "Прототип",
     prototypeHint: "Данные вымышленные. Изменения хранятся только в этом браузере.",
+    prototypeHintShared: "Данные вымышленные. Изменения общие для всех пользователей стенда.",
+    resetDescriptionShared:
+      "Все пользователи стенда вернутся к исходным демо-данным. Изменения, сделанные на показе, пропадут.",
+    syncOffline: "Не сохранено: нет связи со стендом. Изменения сохранены в этом браузере; повторяем.",
+    syncOutdated:
+      "Демо-данные на стенде — от более новой версии платформы. Перезагрузите страницу: изменения здесь не сохраняются.",
+    syncDropped:
+      "Последнее изменение не применено: другой пользователь раньше изменил или удалил эту запись. На экране — текущие данные.",
+    syncConflict:
+      "Последнее изменение не сохранено: демо-данные менялись, пока оно сохранялось. На экране — текущие данные.",
+    dismiss: "Закрыть",
     menuGroup: "Прототип",
     release2: "Release 2",
     reset: "Сбросить демо-данные",
@@ -192,6 +214,17 @@ export const commonTexts = defineDictionary({
   kk: {
     prototype: "Прототип",
     prototypeHint: "Деректер ойдан шығарылған. Өзгерістер тек осы браузерде сақталады.",
+    prototypeHintShared: "Деректер ойдан шығарылған. Өзгерістер стендтің барлық пайдаланушыларына ортақ.",
+    resetDescriptionShared:
+      "Стендтің барлық пайдаланушылары бастапқы демо-деректерге оралады. Көрсетілімдегі өзгерістер жойылады.",
+    syncOffline: "Сақталмады: стендпен байланыс жоқ. Өзгерістер осы браузерде сақталған; қайталап жатырмыз.",
+    syncOutdated:
+      "Стендтегі демо-деректер платформаның жаңа нұсқасынан. Бетті қайта жүктеңіз: мұндағы өзгерістер сақталмайды.",
+    syncDropped:
+      "Соңғы өзгеріс қолданылмады: бұл жазбаны басқа пайдаланушы бұрын өзгертті немесе жойды. Экранда — ағымдағы деректер.",
+    syncConflict:
+      "Соңғы өзгеріс сақталмады: ол сақталып жатқанда демо-деректер өзгеріп отырды. Экранда — ағымдағы деректер.",
+    dismiss: "Жабу",
     menuGroup: "Прототип",
     release2: "Release 2",
     reset: "Демо-деректерді қалпына келтіру",

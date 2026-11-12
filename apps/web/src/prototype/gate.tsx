@@ -4,6 +4,7 @@ import { Link, Navigate, type RouteObject, useLocation, useParams, useRoutes } f
 import { useTranslations } from "use-intl";
 
 import { PageTitle } from "@/components/app/page-title";
+import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,7 +15,8 @@ import { authDestination, useMe } from "@/lib/session";
 import { PROTOTYPE_RELOAD, ProtoBoundary } from "./boundary";
 import { useCommonTexts } from "./labels";
 import { loadCabinet } from "./registry";
-import { resetProto } from "./store";
+import { dismissSyncNotice, useSyncStatus } from "./remote";
+import { resetProto, startProtoSync } from "./store";
 
 const isRole = (value: unknown): value is Role => (ROLES as readonly unknown[]).includes(value);
 
@@ -23,26 +25,63 @@ const isRole = (value: unknown): value is Role => (ROLES as readonly unknown[]).
  * чужой модуль по прямому адресу не открывается — переход на стартовую страницу своей роли
  * (`authDestination`), неизвестная роль или экран — «не найдено». Ошибка модуля или экрана (в том
  * числе из-за повреждённых демо-данных) остаётся внутри оболочки: сообщение и сброс демо-данных.
+ * Открытие кабинета решает режим хранилища (общий на сервере стенда или этот браузер, `remote.ts`).
  */
 export function PrototypeGate() {
   const { role } = useParams();
   const { pathname } = useLocation();
   const me = useMe().data;
+  useEffect(() => startProtoSync(), []);
   if (!me) return null;
   if (!isRole(role)) return <ProtoNotFound />;
   if (role !== me.user.role) return <Navigate to={authDestination(me)} replace />;
   return (
-    // Новый адрес снимает сбой экрана, но не перемонтирует дерево: layout-маршруты модуля сохраняют
-    // своё состояние. Чанк модуля не загрузился — одна перезагрузка, затем сообщение (boundary.tsx).
-    <ProtoBoundary
-      resetKey={pathname}
-      fallback={(retry) => <ProtoScreenError retry={retry} />}
-      chunkFallback={<ProtoChunkError />}
-    >
-      <Suspense fallback={<Skeleton className="h-40 w-full" />}>
-        <CabinetRoutes role={role} />
-      </Suspense>
-    </ProtoBoundary>
+    <>
+      <SyncNotice />
+      {/* Новый адрес снимает сбой экрана, но не перемонтирует дерево: layout-маршруты модуля сохраняют
+          своё состояние. Чанк модуля не загрузился — одна перезагрузка, затем сообщение (boundary.tsx). */}
+      <ProtoBoundary
+        resetKey={pathname}
+        fallback={(retry) => <ProtoScreenError retry={retry} />}
+        chunkFallback={<ProtoChunkError />}
+      >
+        <Suspense fallback={<Skeleton className="h-40 w-full" />}>
+          <CabinetRoutes role={role} />
+        </Suspense>
+      </ProtoBoundary>
+    </>
+  );
+}
+
+/**
+ * Связь с сервером стенда в общем режиме: «не сохранено, повторяем», устаревшая вкладка, правка не
+ * применена. В локальном режиме и при нормальной связи — ничего.
+ */
+function SyncNotice() {
+  const t = useCommonTexts();
+  const status = useSyncStatus();
+  const message = status.outdated
+    ? t("syncOutdated")
+    : status.offline
+      ? t("syncOffline")
+      : status.notice === "dropped"
+        ? t("syncDropped")
+        : status.notice === "conflict"
+          ? t("syncConflict")
+          : null;
+  if (!message) return null;
+  const dismissible = !status.outdated && !status.offline;
+  return (
+    <Alert className="mx-auto mb-4 max-w-7xl">
+      <AlertDescription className="text-foreground">{message}</AlertDescription>
+      {dismissible && (
+        <AlertAction>
+          <Button size="sm" variant="outline" onClick={dismissSyncNotice}>
+            {t("dismiss")}
+          </Button>
+        </AlertAction>
+      )}
+    </Alert>
   );
 }
 

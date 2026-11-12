@@ -223,6 +223,8 @@ services:
       DATABASE_URL: postgres://imbc:${DB_OWNER_PASSWORD}@postgres:5432/imbc
       DB_APP_ROLE: imbc_app
       SEED_DEMO: ${SEED_DEMO:-true}
+      # Таблица общего состояния прототипа кабинетов (prototype_state) — только при PROTOTYPE_CABINETS=true.
+      PROTOTYPE_CABINETS: ${PROTOTYPE_CABINETS:-false}
     command:
       - /bin/sh
       - -c
@@ -238,6 +240,8 @@ services:
       <<: *backend-env
       PROCESS_ROLE: api
       PORT: 3001
+      # Общее состояние прототипа кабинетов (/api/v1/prototype/state) — только при PROTOTYPE_CABINETS=true.
+      PROTOTYPE_CABINETS: ${PROTOTYPE_CABINETS:-false}
     depends_on:
       migrate: { condition: service_completed_successfully }
       buckets: { condition: service_completed_successfully }

@@ -8,3 +8,4 @@ export * from './review.js';
 export * from './admin.js';
 export * from './policy.js';
 export * from './auth.js';
+export * from './prototype.js';

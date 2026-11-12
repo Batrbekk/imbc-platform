@@ -4,6 +4,7 @@ import { afterEach } from "vitest";
 
 import type { Me } from "@/lib/session";
 import { createInitialState, type ProtoState } from "@/prototype/data";
+import { PROTOTYPE_STATE_URL } from "@/prototype/remote";
 import { getProtoState, setProtoState } from "@/prototype/store";
 
 import { type ApiReply, stubApi } from "../support/api";
@@ -56,9 +57,15 @@ export function sessionFor(role: Role, email = SESSION_EMAIL[role], fullName: st
   };
 }
 
-/** Запросы к /api/v1: экраны прототипа их не делают (берут данные из хранилища). */
+/**
+ * Запросы к /api/v1: экраны прототипа их не делают (берут данные из хранилища). Проверка режима
+ * хранилища при открытии кабинета (`GET /api/v1/prototype/state`, `remote.ts`) — не запрос экрана.
+ */
 export function apiV1Calls(api: Mock<typeof fetch>): string[] {
-  return api.mock.calls.map(([url]) => String(url)).filter((url) => url.includes("/api/v1/"));
+  return api.mock.calls
+    .filter(([url, init]) => !(String(url) === PROTOTYPE_STATE_URL && (init?.method ?? "GET") === "GET"))
+    .map(([url]) => String(url))
+    .filter((url) => url.includes("/api/v1/"));
 }
 
 /**

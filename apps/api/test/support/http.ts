@@ -35,6 +35,8 @@ export async function startHttp(options: {
   providers?: Provider[];
   /** Организация пользователя сеанса; по умолчанию одна на все роли. */
   organizationId?: string;
+  /** Дополнительные переменные окружения (ENV), например флаг `PROTOTYPE_CABINETS`. */
+  env?: Record<string, unknown>;
 }): Promise<HttpStand> {
   const audit = { record: vi.fn().mockResolvedValue(undefined) };
   const organizationId = options.organizationId ?? '00000000-0000-4000-8000-0000000000aa';
@@ -58,6 +60,11 @@ export async function startHttp(options: {
     };
   });
 
+  const env: Record<string, unknown> = {
+    SESSION_COOKIE_NAME: COOKIE,
+    PUBLIC_URL: 'https://imbc.example.kz',
+    ...options.env,
+  };
   class HttpStandModule {}
   Module({
     controllers: options.controllers,
@@ -65,14 +72,14 @@ export async function startHttp(options: {
       ...(options.providers ?? []),
       { provide: SessionService, useValue: { resolve } },
       { provide: AuditService, useValue: audit },
-      { provide: ENV, useValue: { SESSION_COOKIE_NAME: COOKIE, PUBLIC_URL: 'https://imbc.example.kz' } },
+      { provide: ENV, useValue: env },
       { provide: APP_GUARD, useClass: SessionGuard },
       { provide: APP_FILTER, useClass: ProblemDetailsFilter },
     ],
   })(HttpStandModule);
 
   const app = await NestFactory.create<NestExpressApplication>(HttpStandModule, { logger: false });
-  configureHttp(app);
+  configureHttp(app, { PROTOTYPE_CABINETS: env.PROTOTYPE_CABINETS === true });
   await app.listen(0, '127.0.0.1');
   const base = await app.getUrl();
 
