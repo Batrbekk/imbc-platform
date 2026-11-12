@@ -34,7 +34,9 @@ beforeEach(() => {
 
 // Своя пауза теста: нижняя граница шага опроса (100 мс) реальным часам теста не нужна.
 const fastSleep = (ms: number) => delay(Math.min(ms, 5)).then(() => undefined);
-const poll = (pollToken: string, deadlineMs = TIMING.deadlineMs) =>
+/** Срок с запасом для ожидаемого ответа (паузы — fastSleep); тесты срока передают короткий явно. */
+const GENEROUS_DEADLINE_MS = 10_000;
+const poll = (pollToken: string, deadlineMs = GENEROUS_DEADLINE_MS) =>
   pollCompanyInfo(client, pollToken, { deadlineAt: Date.now() + deadlineMs, timing: TIMING, sleep: fastSleep });
 
 async function caught(run: () => Promise<unknown>): Promise<AdataCallError> {
@@ -262,7 +264,7 @@ describe('AdataClient: два шага с опросом (EXT-02, IMBC-07)', () 
     expect([start.failure, start.httpStatus]).toEqual(['http_5xx', 503]);
     expectLeakFree(start, stub.baseUrl);
     const result = await pollCompanyInfo(c, '0000020991', {
-      deadlineAt: Date.now() + 1_000,
+      deadlineAt: Date.now() + GENEROUS_DEADLINE_MS,
       timing: TIMING,
       sleep: async () => {},
     });
@@ -284,7 +286,7 @@ describe('AdataClient: два шага с опросом (EXT-02, IMBC-07)', () 
     const start = await caught(() => c.startCompanyInfo(nextBin()));
     expect([start.failure, start.httpStatus]).toEqual(['http_4xx', 429]);
     const result = await pollCompanyInfo(c, '0000020991', {
-      deadlineAt: Date.now() + 1_000,
+      deadlineAt: Date.now() + GENEROUS_DEADLINE_MS,
       timing: TIMING,
       sleep: async () => {},
     });
@@ -352,7 +354,7 @@ describe('AdataClient: два шага с опросом (EXT-02, IMBC-07)', () 
     stub.scenario(bin, { kind: 'wait_forever' });
     const { pollToken } = await client.startCompanyInfo(bin);
     const started = Date.now();
-    expect(await poll(pollToken)).toEqual({ ready: false, failure: 'timeout' });
+    expect(await poll(pollToken, TIMING.deadlineMs)).toEqual({ ready: false, failure: 'timeout' });
     expect(Date.now() - started).toBeGreaterThanOrEqual(TIMING.deadlineMs - 5);
     expect(stub.requests.filter((r) => r.kind === 'check').length).toBeGreaterThan(1);
   });
