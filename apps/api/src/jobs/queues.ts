@@ -21,6 +21,7 @@ export const QUEUES = {
   activitySnapshotMonthly: 'activity-snapshot-monthly',
   runSubscriptions: 'run-subscriptions',
   adataPrefill: 'adata-prefill',
+  identitySync: 'identity-sync',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -62,6 +63,15 @@ export interface SendNotificationJob {
 
 export interface IdentityJob {
   subject: string;
+}
+
+/**
+ * Keycloak догоняет строку аккаунта после действия администратора (ADM-02, ADM-05, AUTH-06): включён,
+ * если не blocked, почта — из БД, `logout` завершает сеансы IdP. Почты в задании нет — только id.
+ */
+export interface IdentitySyncJob {
+  accountId: string;
+  logout: boolean;
 }
 
 export interface RefreshCatalogJob {

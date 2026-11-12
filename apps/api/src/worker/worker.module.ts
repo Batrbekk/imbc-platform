@@ -75,6 +75,7 @@ export class WorkerModule implements OnApplicationBootstrap {
       [QUEUES.activitySnapshotMonthly]: () => h.todo(QUEUES.activitySnapshotMonthly),
       [QUEUES.runSubscriptions]: () => h.todo(QUEUES.runSubscriptions),
       [QUEUES.adataPrefill]: (d) => this.adataPrefill.run(d),
+      [QUEUES.identitySync]: (d) => h.syncIdentity(d),
     };
 
     for (const [queue, run] of Object.entries(routes) as [QueueName, (data: never) => Promise<void>][]) {

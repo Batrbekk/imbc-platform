@@ -8,6 +8,7 @@ import {
   ROLES,
 } from '@imbc/contracts';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
+import { AccountLifecycleService } from '../src/modules/admin/account-lifecycle.service.js';
 import { AccountsController } from '../src/modules/admin/accounts.controller.js';
 import { AccountsService } from '../src/modules/admin/accounts.service.js';
 import { InvitationsService } from '../src/modules/admin/invitations.service.js';
@@ -42,6 +43,12 @@ const organizations = {
 const invitations = {
   invite: vi.fn(async () => structuredClone(ACCOUNT)),
   resend: vi.fn(async () => ({ status: 'password_email_queued' as const })),
+};
+const lifecycle = {
+  block: vi.fn(async () => structuredClone(ACCOUNT)),
+  unblock: vi.fn(async () => structuredClone(ACCOUNT)),
+  changeRole: vi.fn(async () => structuredClone(ACCOUNT)),
+  changeEmail: vi.fn(async () => structuredClone(ACCOUNT)),
 };
 const accounts = { list: vi.fn() };
 
@@ -121,13 +128,53 @@ const ROUTES: Route[] = [
     service: invitations.resend,
     args: [ACCOUNT_ID],
   },
+  {
+    method: 'POST',
+    path: `/api/v1/admin/accounts/${ACCOUNT_ID}/block`,
+    template: ADMIN_ROUTES.block,
+    status: 200,
+    response: ACCOUNT,
+    service: lifecycle.block,
+    args: [ACCOUNT_ID],
+  },
+  {
+    method: 'POST',
+    path: `/api/v1/admin/accounts/${ACCOUNT_ID}/unblock`,
+    template: ADMIN_ROUTES.unblock,
+    status: 200,
+    response: ACCOUNT,
+    service: lifecycle.unblock,
+    args: [ACCOUNT_ID],
+  },
+  {
+    method: 'PUT',
+    path: `/api/v1/admin/accounts/${ACCOUNT_ID}/role`,
+    template: ADMIN_ROUTES.role,
+    body: { role: 'director' },
+    invalid: { role: 'boss' },
+    status: 200,
+    response: ACCOUNT,
+    service: lifecycle.changeRole,
+    args: [ACCOUNT_ID, 'director'],
+  },
+  {
+    method: 'PUT',
+    path: `/api/v1/admin/accounts/${ACCOUNT_ID}/email`,
+    template: ADMIN_ROUTES.email,
+    body: { email: ' New.Login@Maker.Local ' },
+    invalid: { email: 'new@maker.local', emailVerified: true },
+    status: 200,
+    response: ACCOUNT,
+    service: lifecycle.changeEmail,
+    args: [ACCOUNT_ID, 'new.login@maker.local'],
+  },
 ];
 
 const ALLOWED = ROLES.filter((role) => can(role, 'accounts.manage'));
 const DENIED = ROLES.filter((role) => !can(role, 'accounts.manage'));
-const services = [...Object.values(organizations), ...Object.values(invitations)];
+const services = [...Object.values(organizations), ...Object.values(invitations), ...Object.values(lifecycle)];
 
-describe('действия администратора: организации, приглашения, ящик IMBC (ADM-01, ADM-03, GEN-08)', () => {
+describe('действия администратора: организации, приглашения, ящик IMBC, блокировка, роль и почта-логин (ADM-01, ADM-02, ADM-03, ADM-05, GEN-08)', () => {
   let http: HttpStand;
 
   beforeAll(async () => {
@@ -136,6 +183,7 @@ describe('действия администратора: организации,
       providers: [
         { provide: OrganizationsService, useValue: organizations },
         { provide: InvitationsService, useValue: invitations },
+        { provide: AccountLifecycleService, useValue: lifecycle },
         { provide: AccountsService, useValue: accounts },
       ],
     });
@@ -231,10 +279,11 @@ describe('действия администратора: организации,
 });
 
 describe('коды ошибок маршрутов администратора — контракт (ADMIN_PROBLEM_CODES)', () => {
-  // Сервисы, контроллеры, guard и поток Keycloak, через которые проходят пять маршрутов и список аккаунтов.
+  // Сервисы, контроллеры, guard и поток Keycloak, через которые проходят маршруты администратора и список аккаунтов.
   const SOURCES = [
     '../src/modules/admin/organizations.service.ts',
     '../src/modules/admin/invitations.service.ts',
+    '../src/modules/admin/account-lifecycle.service.ts',
     '../src/modules/admin/organizations.controller.ts',
     '../src/modules/admin/accounts.controller.ts',
     '../src/modules/auth/guards.ts',

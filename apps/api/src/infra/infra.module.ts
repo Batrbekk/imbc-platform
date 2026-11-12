@@ -4,12 +4,23 @@ import { Redis } from 'ioredis';
 import nodemailer, { type Transporter } from 'nodemailer';
 import { PgBoss } from 'pg-boss';
 import { ENV, type Env } from '../config/env.js';
+import { databaseErrorSummary } from '../database/pg-errors.js';
 import { ADATA_QUEUE_OPTIONS, QUEUES } from '../jobs/queues.js';
 
 export const VALKEY = Symbol('VALKEY');
 export const S3 = Symbol('S3');
 export const MAILER = Symbol('MAILER');
 export const QUEUE = Symbol('QUEUE');
+
+/**
+ * Ошибка самого pg-boss (API и worker): у ошибки базы — только сводка с фиксированным текстом, без текста
+ * запроса и значений строк (NFR-11); другая ошибка пишется как есть.
+ */
+export function logQueueError(logger: Pick<Logger, 'error'>, error: unknown): void {
+  const database = databaseErrorSummary(error);
+  if (database) logger.error(database, 'Queue database error');
+  else logger.error(error);
+}
 
 /**
  * Инфраструктурные клиенты API.
@@ -66,7 +77,7 @@ export class InfraModule implements OnModuleInit, OnApplicationShutdown {
   ) {}
 
   async onModuleInit(): Promise<void> {
-    this.queue.on('error', (error) => this.logger.error(error));
+    this.queue.on('error', (error) => logQueueError(this.logger, error));
     // Valkey — только кеш: недоступность пишется в лог не чаще раза в минуту и ничего не останавливает.
     let lastWarn = 0;
     this.valkey.on('error', (error: Error) => {
@@ -81,6 +92,8 @@ export class InfraModule implements OnModuleInit, OnApplicationShutdown {
     }
     // Чтение Adata ставит и API (первый вход), и worker (событие пароля) — до старта обработчиков.
     await this.queue.createQueue(QUEUES.adataPrefill, ADATA_QUEUE_OPTIONS);
+    // Действия администратора ставят identity-sync в своей транзакции (ADM-02, ADM-05); повторы — как у worker.
+    await this.queue.createQueue(QUEUES.identitySync, { retryLimit: 5, retryDelay: 30, retryBackoff: true });
     await this.valkey.connect().catch((error: unknown) => this.logger.warn(`Valkey недоступен: ${String(error)}`));
   }
 

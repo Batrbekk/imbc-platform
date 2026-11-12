@@ -6,7 +6,7 @@ import {
   type ImbcMailboxResult,
   imbcMailboxResultSchema,
 } from '@imbc/contracts';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { asc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { AuditService } from '../../common/audit.service.js';
@@ -14,7 +14,7 @@ import { parseOrThrow, ProblemException } from '../../common/problem.js';
 import { parseResponse } from '../../common/response.js';
 import { DB, type Database } from '../../database/database.module.js';
 import { boundLockWaits, lockWaitExceeded } from '../../database/lock-waits.js';
-import { uniqueViolation } from '../../database/pg-errors.js';
+import { databaseErrorSummary, uniqueViolation } from '../../database/pg-errors.js';
 import { organizations, userAccounts } from '../../database/schema/index.js';
 import type { AuthUser } from '../auth/auth.types.js';
 
@@ -38,7 +38,13 @@ export const ADMIN_ROUTES = {
   imbcMailbox: '/api/v1/admin/imbc-mailbox',
   invite: '/api/v1/admin/accounts',
   resend: '/api/v1/admin/accounts/:id/invitation',
+  block: '/api/v1/admin/accounts/:id/block',
+  unblock: '/api/v1/admin/accounts/:id/unblock',
+  role: '/api/v1/admin/accounts/:id/role',
+  email: '/api/v1/admin/accounts/:id/email',
 } as const;
+
+const logger = new Logger('AdminActions');
 
 /** Исполнитель перестал быть active administrator между guard и транзакцией действия. */
 class ActorDenied extends ProblemException {
@@ -74,7 +80,8 @@ export async function lockActor(tx: Database, actorId: string, targetId?: string
 
 /**
  * Отказ `lockActor` откатывается вместе с транзакцией действия; запрос без права пишется в аудит
- * (GEN-08, AUD-01) — здесь, после отката, той же записью, что у SessionGuard.
+ * (GEN-08, AUD-01) — здесь, после отката, той же записью, что у SessionGuard. Сбой самой записи
+ * не подменяет 403 ошибкой 500: в журнал — сводка, наружу — исходный отказ.
  */
 export async function auditActorDenial<T>(
   audit: AuditService,
@@ -87,15 +94,19 @@ export async function auditActorDenial<T>(
     return await run();
   } catch (error) {
     if (error instanceof ActorDenied)
-      await audit.record({
-        userId: actor.id,
-        organizationId: actor.organizationId,
-        action: 'accounts.manage',
-        objectType: 'route',
-        objectId: route,
-        outcome: 'denied',
-        ip,
-      });
+      try {
+        await audit.record({
+          userId: actor.id,
+          organizationId: actor.organizationId,
+          action: 'accounts.manage',
+          objectType: 'route',
+          objectId: route,
+          outcome: 'denied',
+          ip,
+        });
+      } catch (auditError) {
+        logger.error(databaseErrorSummary(auditError) ?? auditError, 'Denied action audit failed');
+      }
     throw error;
   }
 }

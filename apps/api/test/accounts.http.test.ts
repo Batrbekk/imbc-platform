@@ -1,5 +1,6 @@
 import { type AdminAccounts, adminAccountsSchema } from '@imbc/contracts';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AccountLifecycleService } from '../src/modules/admin/account-lifecycle.service.js';
 import { AccountsController } from '../src/modules/admin/accounts.controller.js';
 import { AccountsService } from '../src/modules/admin/accounts.service.js';
 import { InvitationsService } from '../src/modules/admin/invitations.service.js';
@@ -39,8 +40,9 @@ describe('GET /api/v1/admin/accounts', () => {
       controllers: [AccountsController],
       providers: [
         { provide: AccountsService, useValue: { list } },
-        // Приглашения — admin.http.test.ts.
+        // Приглашения, блокировка, роль и почта — admin.http.test.ts.
         { provide: InvitationsService, useValue: {} },
+        { provide: AccountLifecycleService, useValue: {} },
       ],
     });
   });

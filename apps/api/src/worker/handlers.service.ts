@@ -32,7 +32,7 @@ import { KeycloakAdminService } from '../modules/auth/keycloak-admin.service.js'
 import { SessionService } from '../modules/auth/session.service.js';
 import { sha256 } from '../modules/auth/crypto.js';
 import { ManufacturerOnboardingService } from '../modules/registration/onboarding.service.js';
-import type { IdentityJob, ScanFileJob, SendNotificationJob } from '../jobs/queues.js';
+import type { IdentityJob, IdentitySyncJob, ScanFileJob, SendNotificationJob } from '../jobs/queues.js';
 import { scanStream } from './clamd.js';
 
 type SecurityEvent = Awaited<ReturnType<KeycloakAdminService['securityEvents']>>[number];
@@ -150,6 +150,21 @@ export class JobHandlers {
   async cleanupIdentity({ subject }: IdentityJob): Promise<void> {
     const account = await this.db.query.userAccounts.findFirst({ where: eq(userAccounts.idpSubject, subject) });
     if (!account) await this.keycloak.deleteUser(subject);
+  }
+
+  /**
+   * Keycloak догоняет решение администратора (ADM-02, ADM-05, AUTH-06): всегда к текущей строке БД, а не
+   * к данным задания — повтор, порядок заданий и задание после следующего действия сходятся к одному.
+   * Аккаунт без субъекта (seed до первого входа) догонять нечего. Сбой Keycloak — повтор pg-boss.
+   */
+  async syncIdentity({ accountId, logout }: IdentitySyncJob): Promise<void> {
+    const [account] = await this.db
+      .select({ subject: userAccounts.idpSubject, state: userAccounts.state, email: userAccounts.email })
+      .from(userAccounts)
+      .where(eq(userAccounts.id, accountId));
+    if (!account?.subject) return;
+    await this.keycloak.updateUser(account.subject, { enabled: account.state !== 'blocked', email: account.email });
+    if (logout) await this.keycloak.logoutUser(account.subject);
   }
 
   /** Файлы выгрузок хранятся 90 дней (OPR-23); запись о запуске остаётся. */

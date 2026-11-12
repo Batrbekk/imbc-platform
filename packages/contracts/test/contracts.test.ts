@@ -6,6 +6,8 @@ import {
   catalogFilterSchema,
   catalogFilterToSearchParams,
   catalogItemSchema,
+  changeEmailSchema,
+  changeRoleSchema,
   checkBin,
   companyCardDataSchema,
   companyPageSchema,
@@ -178,6 +180,22 @@ describe('организации и приглашения администра�
     expect(imbcMailboxSchema.parse({ email: null })).toEqual({ email: null });
     expect(imbcMailboxSchema.safeParse({ email: 'not-an-email' }).success).toBe(false);
     expect(imbcMailboxSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('changeEmailSchema приводит к нижнему регистру', () => {
+    expect(changeEmailSchema.parse({ email: ' New.Login@Maker.Local ' })).toEqual({ email: 'new.login@maker.local' });
+    expect(changeEmailSchema.safeParse({ email: 'not-an-email' }).success).toBe(false);
+    expect(changeEmailSchema.safeParse({ email: 'a@maker.local', emailVerified: true }).success).toBe(false);
+  });
+
+  it('changeRoleSchema — роль из ROLES, лишний ключ — отказ; коды действий над аккаунтом в контракте (AUTH-06, ADM-05)', () => {
+    expect(changeRoleSchema.parse({ role: 'director' })).toEqual({ role: 'director' });
+    expect(changeRoleSchema.safeParse({ role: 'boss' }).success).toBe(false);
+    expect(
+      changeRoleSchema.safeParse({ role: 'expert', organizationId: '00000000-0000-4000-8000-000000000001' }).success,
+    ).toBe(false);
+    for (const code of ['self_action', 'role_fixed', 'not_manufacturer_account'])
+      expect(ADMIN_PROBLEM_CODES, code).toContain(code);
   });
 });
 

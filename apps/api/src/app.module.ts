@@ -9,6 +9,7 @@ import { ENV, type Env } from './config/env.js';
 import { DatabaseModule } from './database/database.module.js';
 import { InfraModule } from './infra/infra.module.js';
 import { MailService } from './mail/mail.service.js';
+import { AccountLifecycleService } from './modules/admin/account-lifecycle.service.js';
 import { AccountsController } from './modules/admin/accounts.controller.js';
 import { AccountsService } from './modules/admin/accounts.service.js';
 import { InvitationsService } from './modules/admin/invitations.service.js';
@@ -64,6 +65,7 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     AccountsService,
     OrganizationsService,
     InvitationsService,
+    AccountLifecycleService,
     MailService,
     AdataScheduler,
     IdentityProvisioningService,

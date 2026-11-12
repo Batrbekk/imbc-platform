@@ -117,10 +117,23 @@ export class KeycloakAdminService {
     if (!response.ok) throw new Error(`Keycloak required action: ${response.status}`);
   }
 
-  /** Блокировка: отключить пользователя и завершить его сеансы в IdP (AUTH-06). */
-  async disableUser(userId: string): Promise<void> {
-    await this.call(`/users/${userId}`, { method: 'PUT', body: JSON.stringify({ enabled: false }) });
-    await this.call(`/users/${userId}/logout`, { method: 'POST' });
+  /**
+   * Частичное обновление пользователя (`PUT /users/{id}`): включён ли он, почта-логин и её подтверждение,
+   * обязательные действия. Поля вне `patch` Keycloak не меняет; при `registrationEmailAsUsername` username
+   * следует за почтой. Почта и субъект в текст ошибки не попадают.
+   */
+  async updateUser(
+    subject: string,
+    patch: { email?: string; emailVerified?: boolean; enabled?: boolean; requiredActions?: string[] },
+  ): Promise<void> {
+    const response = await this.call(`/users/${subject}`, { method: 'PUT', body: JSON.stringify(patch) });
+    if (!response.ok) throw new KeycloakRequestError(response.status, 'update user');
+  }
+
+  /** Завершить сеансы пользователя в IdP (AUTH-06); пользователя уже нет — завершать нечего. */
+  async logoutUser(subject: string): Promise<void> {
+    const response = await this.call(`/users/${subject}/logout`, { method: 'POST' });
+    if (!response.ok && response.status !== 404) throw new KeycloakRequestError(response.status, 'logout user');
   }
 
   async deleteUser(userId: string): Promise<void> {

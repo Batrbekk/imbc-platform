@@ -159,7 +159,7 @@ imbc-platform/
 | Модуль | Отвечает за | Таблицы | Требования | В каркасе |
 |---|---|---|---|---|
 | Organizations | Типы организаций, БИН с контрольным разрядом, ящик IMBC | `organizations` | GEN-01–06, ADM-03 | схема, проверка БИН; администратор создаёт организации операторов и наблюдателей и ставит отметку major operator, задаёт ящик IMBC (маршруты — ниже) |
-| Identity and Access | Вход, сеансы BFF, email-код, доверенные устройства, ответственность, PolicyMatrix | `user_accounts`, `sessions`, `otp_codes`, `trusted_devices`, `responsibility_acceptances`, `auth_rate_limits`, `auth_security_events`, `auth_sync_state`, `revoked_idp_sessions`, `api_access` | AUTH-01–10, GEN-10–15 | общий auth-срез реализован; список организаций и аккаунтов для администратора (`GET /api/v1/admin/accounts`, с ящиком IMBC `imbcMailbox`; ADM-06), приглашение и его повтор (ADM-01, NOT-24); блокировка, смена роли и почты и автоматическая неактивность AUTH-07 впереди |
+| Identity and Access | Вход, сеансы BFF, email-код, доверенные устройства, ответственность, PolicyMatrix | `user_accounts`, `sessions`, `otp_codes`, `trusted_devices`, `responsibility_acceptances`, `auth_rate_limits`, `auth_security_events`, `auth_sync_state`, `revoked_idp_sessions`, `api_access` | AUTH-01–10, GEN-10–15 | общий auth-срез реализован; список организаций и аккаунтов для администратора (`GET /api/v1/admin/accounts`, с ящиком IMBC `imbcMailbox`; ADM-06), приглашение и его повтор (ADM-01, NOT-24); блокировка, смена роли и почты-логина с завершением сеансов (ADM-02, ADM-05, AUTH-06); автоматическая неактивность AUTH-07 впереди |
 | Profiles | Профиль из восьми секций, редакции, полнота | `manufacturer_profiles`, `profile_sections`, `section_revisions`, `contacts`, `shareholders`, `product_lines`, `equipment_*` | MAN-01–96 | черновик при регистрации; свой профиль только для чтения (`GET /api/v1/profiles/own`, GEN-11); данные Adata своего профиля только для чтения (`GET /api/v1/profiles/own/adata`) |
 | Review | Назначение, решения по секциям и документам | `review_assignments`, `review_decisions` | REV-01–20 | схема; очередь SME только для чтения (`GET /api/v1/reviews/queue`, REV-04) |
 | Documents | Карантин, скан, версии, сертификаты и документы | `file_objects`, `file_versions`, `certificates`, `documents` | MAN-70–83, DATA-05–07 | скан ClamAV, истечение сертификатов |
@@ -239,7 +239,7 @@ sequenceDiagram
   B->>A: запросы /api/v1/* с cookie сеанса
 ```
 
-Сеанс BFF: простой 30 минут, абсолютный срок 12 часов от аутентификации в IdP. Подписанный backchannel logout отзывает связанные сеансы по `sid` и предотвращает их повторное создание запоздавшим callback. События смены пароля обрабатываются worker раз в минуту: старые сеансы и доверие к устройствам отзываются до попыток отправить уведомления. Выход выполняется между BFF и IdP; браузер получает только локальный адрес страницы подтверждения выхода. Проверки состояния аккаунта и `auth_version` уже действуют на каждом запросе; административные операции блокировки и смены роли будут реализованы следующим этапом (AUTH-06).
+Сеанс BFF: простой 30 минут, абсолютный срок 12 часов от аутентификации в IdP. Подписанный backchannel logout отзывает связанные сеансы по `sid` и предотвращает их повторное создание запоздавшим callback. События смены пароля обрабатываются worker раз в минуту: старые сеансы и доверие к устройствам отзываются до попыток отправить уведомления. Выход выполняется между BFF и IdP; браузер получает только локальный адрес страницы подтверждения выхода. Проверки состояния аккаунта и `auth_version` действуют на каждом запросе; блокировка и смена роли администратором завершают сеансы сразу (AUTH-06, ниже).
 
 Маршруты администратора — все `@Can('accounts.manage')` (в матрице — только `administrator`; отказ — `403` и запись аудита `outcome: 'denied'`, GEN-08), ответы сверяются со строгими схемами `@imbc/contracts` и не содержат БИН, полей профиля и регистрации (ADM-06):
 
@@ -250,10 +250,23 @@ sequenceDiagram
 | `PUT /api/v1/admin/imbc-mailbox` | `{ email \| null }` (null снимает) | `200 { imbcMailbox }` | `400 validation` |
 | `POST /api/v1/admin/accounts` | `{ email, fullName, organizationId, role }` | `201 { account }` (`invited`) | `404 not_found`; `409 organization_not_invitable` (производитель); `400 role_not_allowed`; `409 email_exists`; `503 identity_unavailable` |
 | `POST /api/v1/admin/accounts/:id/invitation` | — | `202 { status: 'password_email_queued' }` | `404`; `409 not_invited`, `identity_not_bound` |
+| `POST /api/v1/admin/accounts/:id/block` | — | `200 { account }` | `404`; `409 self_action` |
+| `POST /api/v1/admin/accounts/:id/unblock` | — | `200 { account }` | `404` |
+| `PUT /api/v1/admin/accounts/:id/role` | `{ role }` | `200 { account }` | `404`; `409 self_action`, `role_fixed` (организация не IMBC); `400 role_not_allowed` |
+| `PUT /api/v1/admin/accounts/:id/email` | `{ email }` | `200 { account }` | `404`; `409 not_manufacturer_account`, `identity_not_bound`, `email_exists`; `503 identity_unavailable` |
 
 Каждое изменение пишет запись аудита с `isAccountEvent: true` в своей транзакции (`organization.created`, `organization.major_operator_changed` и `organization.mailbox_changed` с `{ from, to }`, `account.invited` с `{ email, role, organizationId }`, `account.invitation_resent` с `{ queued }` — `false`, если pg-boss в этом минутном окне уже держал задание); `objectType` — `organization` и `account`, как у прежних записей; IP запроса — только колонка `audit_entries.ip`. Повтор отметки или ящика без изменения — `200` без записи. Транзакция блокирует строки исполнителя и цели в порядке id (`lockActor`, `for no key update`: взаимные действия двух администраторов идут по очереди, без 40P01) и проверяет, что исполнитель всё ещё `active` `administrator`; иначе `403` и после отката — запись `accounts.manage` с `outcome: 'denied'` и путём маршрута, как у `SessionGuard`. Строка организации для отметки и ящика — тоже `for no key update`. Ожидание блокировок ограничено `boundLockWaits` (`apps/api/src/database/lock-waits.ts`), превышение — `503 busy`. Коды ошибок этих маршрутов — `ADMIN_PROBLEM_CODES` в `@imbc/contracts`.
 
 Автоматическое предупреждение и перевод аккаунтов в `inactive` после трёх месяцев без входа (AUTH-07) пока не реализованы: очередь `account-inactivity` имеет расписание и обработчик-заглушку.
+
+### Блокировка, роль и почта-логин (ADM-02, ADM-05, AUTH-06, MAN-05)
+
+`AccountLifecycleService`: каждое действие — одна транзакция под `lockActor` (исполнитель — всё ещё `active` `administrator`, иначе `403` и запись `denied`). «Завершить сеансы» — `auth_version + 1` и удаление строк `sessions` аккаунта в той же транзакции: следующий запрос открытой вкладки получает `401`, а вход «в полёте» не завершается — `SessionService` проверяет `state` и `auth_version` под блокировкой строки аккаунта в `verifyOtp`, `trustDevice`, `issueOtp` и `create`, callback отказывает заблокированному (`/login?error=no_account`). Роль сеанс не хранит: `resolve` читает её из `user_accounts` на каждом запросе. Повтор без изменения — `200` без записи и задания. Себя заблокировать и сменить себе роль нельзя (`409 self_action`).
+
+- **Блокировка** — `blocked`, сеансы завершены, аудит `account.blocked { from }`, задание `identity-sync { logout: true }`. **Разблокировка** — `invited`, если аккаунт не входил, иначе `active`; `inactive_since` очищается; аудит `account.unblocked { to }`, `identity-sync { logout: false }`. Прежние сеансы не возвращаются.
+- **Роль** меняется только у аккаунта организации IMBC и только на `expert`, `administrator`, `director` (`INVITABLE_ROLES.imbc`); у оператора, наблюдателя и производителя роль задана типом организации (`409 role_fixed`). Сеансы завершены, аудит `account.role_changed { from, to }`; Keycloak не меняется.
+- **Почта-логин** — только у производителя (MAN-05: сам он её не меняет; это единственный маршрут, меняющий почту) и только у аккаунта, связанного с пользователем Keycloak. Адрес, занятый в БД, — `409` без Keycloak. Затем сначала Keycloak (`updateUser` с `emailVerified: true`; `409` → `email_exists`, иной сбой → `503 identity_unavailable` и `identity-sync`, который вернёт Keycloak к адресу БД), потом транзакция: почта, сеансы и доверенные устройства (следующий вход пришлёт код NOT-02 на новый адрес), аудит `account.email_changed { from, to }`, `identity-sync { logout: true }`, у `invited` — `send-password-email` (NOT-01 на новый адрес). Сбой транзакции возвращает в Keycloak прежний адрес; не удалось и это — `identity-sync` вне транзакции. Адрес — только в `diff` аудита: в журнал и тексты ошибок не попадает.
+- **`identity-sync`** (worker) всегда приводит Keycloak к текущей строке БД — `enabled = state ≠ blocked`, почта из БД, `logout` по флагу задания (`POST /users/{id}/logout`, 404 — не ошибка). Задание несёт только `accountId`; без субъекта IdP — ничего не делает. Сбой Keycloak не отменяет решение администратора: задание повторяется до 5 раз, а вход и так проверяет состояние в БД.
 
 ### Регистрация производителя (MAN-01…MAN-03, FC-02, AUTH-01)
 
@@ -281,6 +294,7 @@ API ставит задания, выполняет их worker. Для `send-pa
 | `send-notification` | по событию | Письмо с дедупликацией по коду, ключу и адресу | работает |
 | `send-password-email` | регистрация или повтор приглашения | Вызов Keycloak для подтверждения email и установки пароля приглашённому аккаунту | работает |
 | `cleanup-identity` | неудачная компенсация регистрации | Удаление пользователя IdP, если аккаунт платформы не был создан | работает |
+| `identity-sync` | блокировка, разблокировка, смена почты; неудачная компенсация почты | Keycloak приводится к строке БД: включён ли пользователь, почта, выход из сеансов IdP | работает |
 | `certificate-expiry` | 00:30 ежедневно | Сертификаты с истёкшим сроком → `expired` (профиль не скрывается, REV-20) | работает |
 | `purge-export-files` | 01:00 ежедневно | Удаление файлов выгрузок старше 90 дней (OPR-23) | работает |
 | `purge-sessions` | каждый час, :15 | Просроченные сеансы, коды, доверенные устройства и служебные записи защиты входа | работает |
@@ -300,6 +314,7 @@ API ставит задания, выполняет их worker. Для `send-pa
 - **CSRF**: изменяющие запросы принимаются только со своего Origin; cookie `SameSite=Lax`, `HttpOnly`, на HTTPS — `Secure` и префикс `__Host-`.
 - **Ошибки** — RFC 9457 `application/problem+json` с машинным `code` (`bin_exists`, `mfa_required`, `forbidden`…); UI переводит их по коду.
 - **Логи** — pino; из строки журнала запроса вырезаются cookies, заголовки авторизации и `Set-Cookie`, а также IP клиента — заголовки `X-Forwarded-For`, `X-Real-IP`, `Forwarded`, адрес и порт сокета (`apps/api/src/common/logging.ts`; IP — персональные данные, FC-02; NFR-10, NFR-11). Непредвиденная ошибка базы (ошибка Drizzle или PostgreSQL в цепочке `cause`) пишется в журнал API и в `output` задания pg-boss только сводкой — SQLSTATE, ограничение, таблица, функция PostgreSQL и классы ошибок (`apps/api/src/database/pg-errors.ts`): текст, стек, запрос и параметры Drizzle, `detail` PostgreSQL несут почту, ФИО, БИН и IP. Секреты — только в переменных окружения.
+- **Консоль аккаунта Keycloak закрыта**: `/kc/realms/<realm>/account` и всё под ним отвечают `404` на обоих edge-прокси (`infrastructure/azure/Caddyfile` — `@accountConsole` до общего `@keycloak`, `infrastructure/nginx/nginx.conf` — `location ~*` до `location /kc/`). Стандартный интерфейс IdP не показывается (`AGENTS.md`), и сменить почту-логин в обход администратора нельзя (MAN-05). Открытыми остаются OIDC (`/protocol/openid-connect/*`, `/.well-known/*`), действия входа (`/login-actions/*`) и ресурсы темы (`/kc/resources/*`); консоль администратора и realm `master` закрывает `@private`. Локальный `pnpm dev` (`apps/web/dev-proxy.ts`) консоль не закрывает.
 - **Keycloak 26.4** проверяет пароли штатными механизмами; все видимые пользователю формы входа, установки и восстановления пароля — собственная тема IMBC на React и shadcn/ui из `infrastructure/keycloak/identity`. Политика паролей (≥ 12 символов), блокировка 10/15 минут, сеансы 30 минут / 12 часов и ссылки установки/сброса пароля 72 часа заданы в `imbc-realm.json`. Email-код, доверенное устройство и диалог ответственности — в BFF (таблица §5 архитектуры).
 
 ### Почта
@@ -308,7 +323,7 @@ API ставит задания, выполняет их worker. Для `send-pa
 
 | Письмо | Кто отправляет | Когда | Как |
 |---|---|---|---|
-| Подтверждение email и установка пароля, ссылка 72 часа (AUTH-01, NOT-01) | Keycloak по заданию worker | Регистрация или повторная отправка приглашения; административное приглашение — следующий этап | `send-password-email` → Admin API `execute-actions-email` |
+| Подтверждение email и установка пароля, ссылка 72 часа (AUTH-01, NOT-01) | Keycloak по заданию worker | Регистрация, приглашение и его повтор, смена почты приглашённого производителя (ADM-05) | `send-password-email` → Admin API `execute-actions-email` |
 | Сброс пароля (AUTH-08) | Keycloak | «Забыли пароль?» на странице входа IMBC | Штатный поток сброса с собственной темой IMBC |
 | Код входа, 6 цифр, 10 минут (AUTH-03, NOT-02) | API | Вход с недоверенного устройства | Сразу, без очереди — пользователь ждёт код |
 | Блокировка после 10 ошибок (AUTH-04, NOT-03) | Worker | Событие `USER_DISABLED_BY_TEMPORARY_LOCKOUT` в Keycloak, проверка раз в минуту | Очередь, одно письмо на блокировку |

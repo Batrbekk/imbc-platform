@@ -89,6 +89,17 @@ export const inviteAccountSchema = z
   .strict();
 export type InviteAccountInput = z.infer<typeof inviteAccountSchema>;
 
+/**
+ * Смена роли (AUTH-06): меняется только роль сотрудника IMBC — SME, администратор, директор
+ * (`INVITABLE_ROLES.imbc`); роль оператора, наблюдателя и производителя задана типом организации.
+ */
+export const changeRoleSchema = z.object({ role: z.enum(ROLES) }).strict();
+export type ChangeRoleInput = z.infer<typeof changeRoleSchema>;
+
+/** Смена почты-логина производителя администратором (ADM-05, MAN-05): адрес в нижнем регистре. */
+export const changeEmailSchema = z.object({ email: loginEmailSchema }).strict();
+export type ChangeEmailInput = z.infer<typeof changeEmailSchema>;
+
 export const adminAccountResultSchema = z.object({ account: adminAccountSchema }).strict();
 export type AdminAccountResult = z.infer<typeof adminAccountResultSchema>;
 
@@ -119,6 +130,9 @@ export const ADMIN_PROBLEM_CODES = [
   'role_not_allowed',
   'email_exists',
   'not_invited',
+  'self_action',
+  'role_fixed',
+  'not_manufacturer_account',
   'identity_not_bound',
   'identity_unavailable',
   'busy',

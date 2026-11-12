@@ -14,6 +14,7 @@ import * as schema from '../src/database/schema/index.js';
 import { boundLockWaits, sqlState } from '../src/database/lock-waits.js';
 import { seedDemo } from '../src/database/seed.js';
 import { QUEUES } from '../src/jobs/queues.js';
+import type { AccountLifecycleService } from '../src/modules/admin/account-lifecycle.service.js';
 import { AccountsController } from '../src/modules/admin/accounts.controller.js';
 import { AccountsService } from '../src/modules/admin/accounts.service.js';
 import { InvitationsService } from '../src/modules/admin/invitations.service.js';
@@ -53,6 +54,8 @@ describe.skipIf(!databaseUrl)(
           new IdentityProvisioningService(pool, queue, identity as KeycloakAdminService),
           new AuditService(db),
         ),
+        // Блокировка, роль и почта — account-lifecycle.integration.test.ts.
+        {} as AccountLifecycleService,
       );
 
     /** Код и статус отказа ProblemException. */

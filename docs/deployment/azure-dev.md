@@ -486,6 +486,30 @@ df -h /
 curl --fail --show-error https://imbc-dev-e1cde8dd.polandcentral.cloudapp.azure.com/api/health/ready
 ```
 
+### Задание `identity-sync`
+
+Блокировка, разблокировка и смена почты-логина действуют в БД сразу (сеансы BFF завершены в той же транзакции); Keycloak догоняет их заданием `identity-sync` worker: включён ли пользователь, почта из БД и выход из сеансов IdP. Задание несёт только id аккаунта и всегда приводит Keycloak к текущей строке БД, поэтому повтор безопасен. Состояние очереди:
+
+```bash
+sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
+  select state, count(*) from pgboss.job where name = 'identity-sync' group by state;" </dev/null
+```
+
+`failed` — пять повторов не прошли (обычно Keycloak недоступен или клиент `imbc-admin-api` без `manage-users`). Решение администратора от этого не меняется: вход проверяет состояние в БД. После восстановления Keycloak поставьте задание для аккаунта заново (команда печатает только id задания):
+
+```bash
+sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T worker node --input-type=module -e "
+import { PgBoss } from 'pg-boss';
+const boss = new PgBoss({ connectionString: process.env.DATABASE_URL, schema: process.env.PGBOSS_SCHEMA ?? 'pgboss', supervise: false, schedule: false });
+await boss.start();
+console.log(await boss.send('identity-sync', { accountId: '<id>', logout: true }));
+await boss.stop();"
+```
+
+В `output` неудачного задания — операция и статус Keycloak (`Keycloak update user: 503`, `Keycloak logout user: …`) или сетевая ошибка; почты нет ни в задании, ни в тексте ошибки.
+
+Консоль аккаунта Keycloak закрыта на Caddy: `curl -s -o /dev/null -w '%{http_code}' https://<стенд>/kc/realms/imbc/account/` — `404`, а `…/kc/realms/imbc/.well-known/openid-configuration` — `200`.
+
 ## Чтение Adata (IMBC-07, EXT-02)
 
 Каждое чтение — настоящий платный запрос: одна единица квоты заказчика (3 000 БИН в месяц). На стенде чтение **закрыто по умолчанию**: `ADATA_MONTHLY_LIMIT` в `compose.azure.yaml` — `0`, попытки заканчиваются `quota_exhausted` без запроса. Владелец открывает его на одно чтение строкой в серверной `.env` и закрывает сразу после — порядок ниже обязателен. Токен `ADATA_API_TOKEN` получает только сервис `worker`, из серверной `.env`; без него попытки заканчиваются `not_configured`.
