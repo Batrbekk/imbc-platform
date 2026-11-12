@@ -100,7 +100,11 @@ describe("кабинет SME: проверка профиля", () => {
     expect(p.review.personnel.decision).toBe("rejected");
     const mails = state().notifications.filter((n) => n.profileId === "p11" && n.notId === "NOT-05");
     expect(mails).toHaveLength(1);
-    expect(mails[0]!.params).toEqual({ result: "returned", rejected: "personnel" });
+    expect(mails[0]!.params).toEqual({
+      result: "returned",
+      rejected: "personnel",
+      "comment.personnel": "Оргструктура не совпадает с численностью персонала.",
+    });
     expect(state().audit.at(-1)).toMatchObject({ action: "profile.submit_result" });
     expect(await screen.findByText(/Returned: the profile is back with the manufacturer/)).toBeTruthy();
   });

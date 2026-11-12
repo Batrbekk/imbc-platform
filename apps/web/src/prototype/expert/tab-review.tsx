@@ -16,14 +16,14 @@ import type { ProfileDocument, ProtoProfile, ProtoState } from "@/prototype/data
 import { localized, translate, useDictionary } from "@/prototype/i18n";
 import { commonTexts, useCommonTexts } from "@/prototype/labels";
 import { accountName, ddResult } from "@/prototype/rules";
-import { newId, nowIso, useProto, useProtoUpdate } from "@/prototype/store";
+import { nowIso, useProto, useProtoUpdate } from "@/prototype/store";
 
 import { useExpertId } from "./actor";
 import { DossierSections, type ReviewItemRef } from "./dossier";
 import { dossierTexts } from "./dossier/texts";
-import { draftExt } from "./ext";
 import {
   canSubmitResult,
+  changesRoundStuck,
   isDecided,
   mandatoryCertificateTypes,
   resultOf,
@@ -32,6 +32,7 @@ import {
   sectionsToDecide,
   verifyBlockers,
 } from "./review";
+import { closeStuckRound, decideChange, decideSectionFull, submitResult } from "./rounds";
 import { summaryOf } from "./summary";
 import { texts } from "./texts";
 
@@ -69,7 +70,7 @@ export function ReviewTab({ profile }: { profile: ProtoProfile }) {
           subject: sectionSubject,
           summary: summaryOf(texts, decision === "verified" ? "auditAcceptChange" : "auditRejectChange", sectionIn),
         },
-        (draft) => decideChange(draft, profile.id, section, decision, comment, me),
+        (draft) => decideChange(draft, profile.id, section, decision, comment, me, nowIso()),
       );
       return;
     }
@@ -79,10 +80,7 @@ export function ReviewTab({ profile }: { profile: ProtoProfile }) {
         subject: sectionSubject,
         summary: summaryOf(texts, decision === "verified" ? "auditVerifySection" : "auditRejectSection", sectionIn),
       },
-      (draft) => {
-        const p = profileIn(draft, profile.id);
-        p.review[section] = { ...p.review[section], decision, comment, decidedBy: me, decidedAt: nowIso() };
-      },
+      (draft) => decideSectionFull(draft, profile.id, section, decision, comment, me, nowIso()),
     );
   };
 
@@ -102,8 +100,14 @@ export function ReviewTab({ profile }: { profile: ProtoProfile }) {
           section === "certificates"
             ? (p.pending.certificates ?? p.sections.certificates)
             : (p.pending.documents ?? p.sections.documents);
-        const target = (source as { id: string; status: string }[]).find((i) => i.id === item.id);
-        if (target) target.status = status;
+        const target = (source as { id: string; status: string; comment?: string | null }[]).find(
+          (i) => i.id === item.id,
+        );
+        if (target) {
+          target.status = status;
+          // Принятый документ теряет прежний комментарий отклонения.
+          if (status === "verified" && "comment" in target) target.comment = null;
+        }
         // Секция, уже принятая, снова ждёт решения: документ в ней изменил статус.
         if (p.review[section].decision === "verified" && mode === "full") {
           p.review[section] = { ...p.review[section], decision: null, decidedBy: null, decidedAt: null };
@@ -120,31 +124,14 @@ export function ReviewTab({ profile }: { profile: ProtoProfile }) {
         subject,
         summary: localized(texts, result === "verified" ? "auditSubmitVerified" : "auditSubmitReturned"),
       },
-      (draft) => {
-        const p = profileIn(draft, profile.id);
-        const at = nowIso();
-        const rejected = (Object.keys(p.review) as ProfileSection[]).filter((s) => p.review[s].decision === "rejected");
-        p.status = result;
-        if (result === "verified") {
-          p.verifiedAt = at;
-          p.lastConfirmedAt = at;
-          p.updateStatus = p.updateStatus ?? "active";
-          p.pendingChanges = false;
-          for (const s of Object.keys(p.review) as ProfileSection[]) p.review[s].changed = false;
-        }
-        // Одно письмо NOT-05 на одну отправку, с комментариями отклонённых секций (NOT-27).
-        draft.notifications.push({
-          id: newId("n"),
-          profileId: p.id,
-          notId: "NOT-05",
-          at,
-          recipients: ["account", "focal_point"],
-          params: result === "verified" ? { result } : { result, rejected: rejected.join(",") },
-          read: false,
-        });
-      },
+      (draft) => submitResult(draft, profile.id, result, nowIso()),
     );
   };
+
+  const closeRound = () =>
+    update({ action: "profile.close_changes", subject, summary: localized(texts, "auditCloseRound") }, (draft) =>
+      closeStuckRound(draft, profile, nowIso()),
+    );
 
   const dd = ddResult(state, profile.id);
   const outcome = resultOf(profile);
@@ -179,7 +166,11 @@ export function ReviewTab({ profile }: { profile: ProtoProfile }) {
                 <Progress value={(decided / toDecide.length) * 100} aria-label={t("reviewTitle")} />
               </div>
               <p className="text-xs text-muted-foreground">
-                {t("mandatoryHint", { types: mandatoryCertificateTypes(state).join(", ") })}
+                {t("mandatoryHint", {
+                  types: mandatoryCertificateTypes(state)
+                    .map((m) => m.label)
+                    .join(", "),
+                })}
               </p>
               {canAct && (
                 <div>
@@ -194,8 +185,25 @@ export function ReviewTab({ profile }: { profile: ProtoProfile }) {
               )}
             </>
           )}
-          {mode === "changes" && (
+          {mode === "changes" && !changesRoundStuck(profile) && (
             <p className="text-sm">{t("changesLeft", { count: format.number(toDecide.length) })}</p>
+          )}
+          {changesRoundStuck(profile) && (
+            <div className="flex flex-col gap-2">
+              <p className="text-sm">{t("roundStuck")}</p>
+              {mine && (
+                <div>
+                  <ConfirmAction
+                    variant="outline"
+                    label={t("closeRound")}
+                    title={t("closeRoundTitle")}
+                    description={t("closeRoundHint")}
+                    confirmLabel={t("closeRound")}
+                    onConfirm={closeRound}
+                  />
+                </div>
+              )}
+            </div>
           )}
           <p className="text-xs text-muted-foreground">{t("noEditHint")}</p>
         </CardContent>
@@ -225,46 +233,6 @@ export function ReviewTab({ profile }: { profile: ProtoProfile }) {
       />
     </div>
   );
-}
-
-/** Решение по ожидающему изменению (REV-08): принятое заменяет значения, отклонённое возвращается с комментарием. */
-function decideChange(
-  draft: ProtoState,
-  profileId: string,
-  section: ProfileSection,
-  decision: "verified" | "rejected",
-  comment: string | null,
-  me: string,
-) {
-  const p = profileIn(draft, profileId);
-  const at = nowIso();
-  const round = (draftExt(draft).changeRound[profileId] ??= { accepted: [], rejected: [] });
-  if (decision === "verified") {
-    const pending = p.pending[section];
-    if (pending !== undefined) (p.sections as unknown as Record<string, unknown>)[section] = pending;
-    delete p.pending[section];
-    // Принятая правка двигает квартал профиля (NOT-31).
-    p.lastConfirmedAt = at;
-    round.accepted.push(section);
-  } else {
-    round.rejected.push(section);
-  }
-  p.review[section] = { decision, comment, decidedBy: me, decidedAt: at, changed: false };
-  const left = (Object.keys(p.review) as ProfileSection[]).some((s) => p.review[s].changed);
-  if (!left) {
-    p.pendingChanges = false;
-    // Одно письмо NOT-05 со всеми принятыми и отклонёнными секциями; «возвращён» в нём нет (NOT-28).
-    draft.notifications.push({
-      id: newId("n"),
-      profileId,
-      notId: "NOT-05",
-      at,
-      recipients: ["account", "focal_point"],
-      params: { result: "changes", accepted: round.accepted.join(","), rejected: round.rejected.join(",") },
-      read: false,
-    });
-    delete draftExt(draft).changeRound[profileId];
-  }
 }
 
 function itemLabel(

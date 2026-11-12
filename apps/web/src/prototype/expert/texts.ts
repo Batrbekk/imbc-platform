@@ -84,6 +84,12 @@ export const texts = defineDictionary({
     mandatoryHint:
       "Mandatory certificate types: {types}. The certificates section is verified only when each of them is verified.",
     noEditHint: "The SME does not edit the manufacturer's data and does not submit a profile on its behalf.",
+    roundStuck:
+      "No changed section is left to decide, but the profile is still waiting with pending changes. Close the round so that it leaves the queue.",
+    closeRound: "Close the round",
+    closeRoundTitle: "Close the pending-changes round?",
+    closeRoundHint:
+      "The profile stays Verified and leaves the queue. If decisions were made in this round, the manufacturer gets one email with them.",
     verifySection: "Verify section",
     verifySectionNamed: "Verify section {section}",
     rejectSection: "Reject section",
@@ -247,6 +253,7 @@ export const texts = defineDictionary({
     // Журнал
     auditTake: "Took the profile for review",
     auditOpenReview: "Opened the profile: Under review",
+    auditCloseRound: "Closed the pending-changes round",
     auditVerifySection: "Verified the section {section}",
     auditRejectSection: "Rejected the section {section}",
     auditAcceptChange: "Accepted the change in {section}",
@@ -351,6 +358,12 @@ export const texts = defineDictionary({
     mandatoryHint:
       "Обязательные типы сертификатов: {types}. Секция сертификатов принимается, только когда каждый из них принят.",
     noEditHint: "SME не правит данные производителя и не отправляет профиль за него.",
+    roundStuck:
+      "Изменённых секций без решения не осталось, но профиль всё ещё ждёт с ожидающими изменениями. Закройте круг, чтобы он вышел из очереди.",
+    closeRound: "Закрыть круг",
+    closeRoundTitle: "Закрыть круг ожидающих изменений?",
+    closeRoundHint:
+      "Профиль остаётся Verified и выходит из очереди. Если в круге были решения, производитель получит одно письмо с ними.",
     verifySection: "Принять секцию",
     verifySectionNamed: "Принять секцию {section}",
     rejectSection: "Отклонить секцию",
@@ -504,6 +517,7 @@ export const texts = defineDictionary({
     openTiers: "AGAR",
     auditTake: "Взял профиль в работу",
     auditOpenReview: "Открыл профиль: Under review",
+    auditCloseRound: "Закрыл круг ожидающих изменений",
     auditVerifySection: "Принял секцию «{section}»",
     auditRejectSection: "Отклонил секцию «{section}»",
     auditAcceptChange: "Принял изменение в секции «{section}»",
@@ -607,6 +621,10 @@ export const texts = defineDictionary({
     mandatoryHint:
       "Міндетті сертификат түрлері: {types}. Әрқайсысы қабылданғанда ғана сертификаттар бөлімі қабылданады.",
     noEditHint: "SME өндіруші деректерін өзгертпейді және профильді оның атынан жібермейді.",
+    roundStuck: "Шешімсіз өзгерген бөлім қалмады, бірақ профиль әлі күтуде. Кезектен шығару үшін айналымды жабыңыз.",
+    closeRound: "Айналымды жабу",
+    closeRoundTitle: "Күтудегі өзгерістер айналымы жабылсын ба?",
+    closeRoundHint: "Профиль Verified болып қалады және кезектен шығады. Шешім болса, өндіруші бір хат алады.",
     verifySection: "Бөлімді қабылдау",
     verifySectionNamed: "{section} бөлімін қабылдау",
     rejectSection: "Бөлімді қабылдамау",
@@ -755,6 +773,7 @@ export const texts = defineDictionary({
     openTiers: "AGAR",
     auditTake: "Профильді жұмысқа алды",
     auditOpenReview: "Профильді ашты: Under review",
+    auditCloseRound: "Күтудегі өзгерістер айналымын жапты",
     auditVerifySection: "«{section}» бөлімін қабылдады",
     auditRejectSection: "«{section}» бөлімін қабылдамады",
     auditAcceptChange: "«{section}» бөліміндегі өзгерісті қабылдады",

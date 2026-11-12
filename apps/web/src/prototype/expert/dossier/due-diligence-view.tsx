@@ -18,17 +18,11 @@ import { useProto } from "@/prototype/store";
 
 import type { LineNote } from "../ext";
 import { lineKey } from "../ext";
+import { nextCheckDate } from "./helpers";
 import { FieldItem, Fields } from "./parts";
 import { dossierTexts } from "./texts";
 
 const groupOf = (line: DdCheckValue): DdGroup => DD_CHECKS.find((c) => c.id === line.checkId)?.group ?? "enterprise";
-
-/** Следующая плановая проверка: квартал от последней (IMBC-07). */
-function nextCheck(checkedAt: string): string {
-  const date = new Date(checkedAt);
-  date.setMonth(date.getMonth() + 3);
-  return date.toISOString();
-}
 
 export function DueDiligenceView({
   record,
@@ -102,7 +96,7 @@ export function DueDiligenceView({
           <FieldItem label={t("ddSetBy")}>
             {record.resultSetBy ? accountName(state, record.resultSetBy) : t("ddSetByConnector")}
           </FieldItem>
-          <FieldItem label={t("ddNextCheck")}>{format.date(nextCheck(record.checkedAt))}</FieldItem>
+          <FieldItem label={t("ddNextCheck")}>{format.date(nextCheckDate(record.checkedAt))}</FieldItem>
           {record.comment && <FieldItem label={t("comment")}>{record.comment}</FieldItem>}
         </Fields>
         {record.report && <FileRow label={t("ddReport")} file={record.report} />}
