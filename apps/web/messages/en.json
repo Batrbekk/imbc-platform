@@ -90,7 +90,12 @@
     "binHint": "12 digits",
     "email": "Corporate email address",
     "heardAboutUs": "How did you hear about the platform",
-    "acceptTerms": "I accept the platform terms of use",
+    "acceptPlatformTerms": "I accept the platform terms of use",
+    "acceptPersonalData": "I agree to the personal data policy",
+    "acceptNda": "I accept the non-disclosure agreement (NDA), version {version}",
+    "ndaHint": "The NDA covers the demand forecast and the technical requirements (STR and KTRE). They open once IMBC verifies your profile.",
+    "read": "Read",
+    "readDocument": "Read: {title}",
     "submit": "Register",
     "success": "A password setup link will be sent to {email}. It is valid for 72 hours.",
     "errors": {
@@ -101,10 +106,13 @@
       "company_name": "Enter a company name between 2 and 300 characters.",
       "email_invalid": "Enter a valid email address.",
       "heard_about_us": "Keep your answer within 500 characters.",
-      "terms_required": "Confirm that you agree to the terms of use."
+      "platform_terms_required": "Accept the platform terms of use.",
+      "personal_data_required": "Agree to the personal data policy.",
+      "nda_required": "Accept the NDA.",
+      "heard_about_us_required": "Tell us how you heard about the platform.",
+      "nda_version_changed": "The NDA has been updated. Read the new version and accept it again."
     },
     "emailHint": "Your password setup link and sign-in codes will be sent here.",
-    "optional": "(optional)",
     "successTitle": "Registration received",
     "deliveryHint": "Wait for the email and check your spam folder.",
     "resend": "Send the link again",
@@ -113,7 +121,24 @@
     "rateLimited": "Too many requests. Wait a minute and try again.",
     "requestError": "We could not process your request. Check your connection and try again.",
     "recoverAccount": "Recover access",
-    "alreadyRegistered": "Already registered?"
+    "alreadyRegistered": "Already registered?",
+    "termsLoadError": "Could not load the agreement texts.",
+    "ndaUnavailable": "Registration is temporarily unavailable: the NDA text has not been published. Contact IMBC."
+  },
+  "legal": {
+    "placeholder": "Placeholder",
+    "close": "Close",
+    "terms": {
+      "title": "Platform terms of use",
+      "body": "PLACEHOLDER — NOT A LEGAL TEXT. IMBC will provide the platform terms of use. This text exists only for the test environment and must not be relied on."
+    },
+    "privacy": {
+      "title": "Personal data policy",
+      "body": "PLACEHOLDER — NOT A LEGAL TEXT. IMBC will provide the personal data policy. This text exists only for the test environment and must not be relied on."
+    },
+    "nda": {
+      "title": "Non-disclosure agreement (NDA), version {version}"
+    }
   },
   "catalog": {
     "title": "Manufacturer catalog",
