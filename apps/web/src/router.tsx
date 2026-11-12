@@ -56,6 +56,12 @@ export const routes: RouteObject[] = [
         lazy: lazyPage(() => import("@/components/app/app-shell"), (m) => m.AppShell),
         children: [
           {
+            // Очередь проверки SME (REV-01, REV-04).
+            path: "reviews",
+            handle: { title: "reviews.title" } satisfies AppRouteHandle,
+            lazy: lazyPage(() => import("@/routes/app/reviews"), (m) => m.ReviewsPage),
+          },
+          {
             path: "catalog",
             handle: { title: "catalog.title" } satisfies AppRouteHandle,
             lazy: lazyPage(() => import("@/routes/app/catalog"), (m) => m.CatalogPage),

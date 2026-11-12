@@ -17,6 +17,7 @@
     "notifications": "Notifications"
   },
   "nav": {
+    "reviews": "Review queue",
     "catalog": "Catalog",
     "dashboard": "Dashboard",
     "profile": "Company profile",
@@ -257,6 +258,20 @@
     "readOnlyHint": "Editing the profile will be available in a later release.",
     "loadError": "Could not load the profile.",
     "accountHint": "Your account details and sign-in security are available on your account page."
+  },
+  "reviews": {
+    "title": "Profile review queue",
+    "manufacturer": "Manufacturer",
+    "status": "Status",
+    "assignee": "SME",
+    "unassigned": "Not assigned",
+    "registeredAt": "Registered",
+    "pendingChanges": "Pending changes",
+    "statusFilter": "Status",
+    "statusAll": "All",
+    "found": "{count, plural, one {{total} profile} other {{total} profiles}}",
+    "empty": "The queue is empty.",
+    "loadError": "Could not load the queue."
   },
   "notFound": {
     "title": "Page not found",

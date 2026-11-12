@@ -1,5 +1,12 @@
 import { can } from "@imbc/contracts";
-import { BuildingIcon, LayoutDashboardIcon, LogOutIcon, SearchIcon, UserRoundIcon } from "lucide-react";
+import {
+  BuildingIcon,
+  ClipboardListIcon,
+  LayoutDashboardIcon,
+  LogOutIcon,
+  SearchIcon,
+  UserRoundIcon,
+} from "lucide-react";
 import { useEffect } from "react";
 import { Link, Outlet, useLocation, useMatches, useNavigate } from "react-router";
 import { useTranslations } from "use-intl";
@@ -85,9 +92,11 @@ export function AppShell() {
 
   const role = me.data.user.role;
   // Дашборд — первым: это стартовая страница оператора, наблюдателя и директора (OPR-31).
+  // Очередь проверки — перед каталогом: у SME она первая, это его стартовая страница.
   // `active` — начала адресов, на которых пункт подсвечен; по умолчанию — его href.
   const items: { href: string; label: string; icon: typeof SearchIcon; show: boolean; active?: string[] }[] = [
     { href: "/dashboard", label: t("nav.dashboard"), icon: LayoutDashboardIcon, show: !!can(role, "dashboard.read") },
+    { href: "/reviews", label: t("nav.reviews"), icon: ClipboardListIcon, show: !!can(role, "review.take") },
     {
       href: "/catalog",
       label: t("nav.catalog"),

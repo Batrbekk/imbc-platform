@@ -9,6 +9,7 @@ import {
   computeBinCheckDigit,
   normalizeCompanyName,
   type CommodityGroup,
+  type ProfileStatus,
   type Role,
   type UpdateStatus,
 } from '@imbc/contracts';
@@ -152,6 +153,19 @@ const COMPANIES: {
   },
 ];
 
+/**
+ * Профили очереди SME (REV-01, REV-04): организации без строк в catalog_visible и без аккаунтов.
+ * `assigned` — профиль назначен демо-эксперту; `daysAgo` — дата регистрации, задаёт порядок очереди.
+ * Draft в очередь не входит.
+ */
+const QUEUE_COMPANIES: { name: string; status: ProfileStatus; assigned: boolean; daysAgo: number }[] = [
+  { name: 'ТОО «Жаңа Демо Құрылыс»', status: 'submitted', assigned: false, daysAgo: 6 },
+  { name: 'ТОО «Демо Агро Өнім»', status: 'submitted', assigned: false, daysAgo: 4 },
+  { name: 'ТОО «Демо Электро Монтаж»', status: 'under_review', assigned: true, daysAgo: 3 },
+  { name: 'ТОО «Демо Жоба»', status: 'draft', assigned: false, daysAgo: 1 },
+];
+const SME_EMAIL = 'expert@imbc.local';
+
 /** Записывает демо-данные в одной транзакции. Пул не закрывает. */
 export async function seedDemo(pool: pg.Pool): Promise<void> {
   const db = drizzle(pool, { schema, casing: 'snake_case' });
@@ -191,12 +205,19 @@ export async function seedDemo(pool: pg.Pool): Promise<void> {
           organizationId: org!.id,
           status: 'verified',
           updateStatus: c.updateStatus,
+          // Регистрация — за 30 дней до верификации.
+          registeredAt: new Date(verifiedAt.getTime() - 30 * 86_400_000),
           verifiedAt,
           completenessPct: 100,
         })
         .onConflictDoUpdate({
           target: manufacturerProfiles.organizationId,
-          set: { status: 'verified', updateStatus: c.updateStatus },
+          // verified_at строки на стенде не меняется: дата регистрации считается от сохранённой.
+          set: {
+            status: 'verified',
+            updateStatus: c.updateStatus,
+            registeredAt: sql`coalesce(${manufacturerProfiles.verifiedAt} - interval '30 days', ${manufacturerProfiles.registeredAt})`,
+          },
         })
         .returning();
       const until = new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10);
@@ -261,6 +282,29 @@ export async function seedDemo(pool: pg.Pool): Promise<void> {
         })
         .onConflictDoNothing();
     }
+
+    // Очередь SME. Статус, назначение и дата регистрации задаются при каждом запуске: строки
+    // прежнего запуска возвращаются к демо-состоянию.
+    const [sme] = await tx
+      .select({ id: userAccounts.id })
+      .from(userAccounts)
+      .where(sql`lower(${userAccounts.email}) = ${SME_EMAIL}`);
+    for (const [i, q] of QUEUE_COMPANIES.entries()) {
+      const [org] = await tx
+        .insert(organizations)
+        .values({ type: 'manufacturer', name: q.name, bin: demoBin(COMPANIES.length + i + 1) })
+        .onConflictDoUpdate({ target: organizations.bin, targetWhere: sql`bin is not null`, set: { name: q.name } })
+        .returning();
+      const state = {
+        status: q.status,
+        assignedExpertId: q.assigned ? (sme?.id ?? null) : null,
+        registeredAt: new Date(Date.now() - q.daysAgo * 86_400_000),
+      };
+      await tx
+        .insert(manufacturerProfiles)
+        .values({ organizationId: org!.id, ...state })
+        .onConflictDoUpdate({ target: manufacturerProfiles.organizationId, set: state });
+    }
   });
 }
 
@@ -270,7 +314,9 @@ async function main(): Promise<void> {
   const pool = new pg.Pool({ connectionString: url, max: 1, application_name: 'imbc-seed' });
   try {
     await seedDemo(pool);
-    console.log(`Демо-данные: ${PEOPLE.length} учётных записей, ${COMPANIES.length} компаний в каталоге`);
+    console.log(
+      `Демо-данные: ${PEOPLE.length} учётных записей, ${COMPANIES.length} компаний в каталоге, профилей вне каталога: ${QUEUE_COMPANIES.length}`,
+    );
   } finally {
     await pool.end();
   }

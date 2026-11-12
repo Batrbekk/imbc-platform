@@ -21,7 +21,7 @@ describe('authentication navigation', () => {
   it('стартовая страница по роли: дашборд у оператора, наблюдателя и директора (OPR-31)', () => {
     const expected: Record<Role, string> = {
       manufacturer: '/profile',
-      expert: '/catalog',
+      expert: '/reviews',
       administrator: '/account',
       director: '/dashboard',
       operator: '/dashboard',
@@ -38,6 +38,8 @@ describe('authentication navigation', () => {
           return can(role, 'catalog.search') !== null;
         case '/profile':
           return can(role, 'profile.edit') !== null;
+        case '/reviews':
+          return can(role, 'review.take') !== null;
         case '/account':
           return true; // своя учётная запись: действия в матрице нет, открыта каждой роли
         default:
@@ -57,6 +59,7 @@ describe('страница после входа: destinationFor', () => {
     ['/catalog', 'catalog.search'],
     ['/dashboard', 'dashboard.read'],
     ['/profile', 'profile.edit'],
+    ['/reviews', 'review.take'],
   ];
 
   it.each(ROLES)('без сохранённого адреса %s попадает на стартовую страницу', (role) => {
@@ -64,7 +67,7 @@ describe('страница после входа: destinationFor', () => {
       expect(destinationFor(role, saved), String(saved)).toBe(roleHome(role));
   });
 
-  it.each(ROLES)('страница по праву матрицы: %s на /catalog, /dashboard, /profile', (role) => {
+  it.each(ROLES)('страница по праву матрицы: %s на /catalog, /dashboard, /profile, /reviews', (role) => {
     for (const [path, action] of guarded) {
       const allowed = can(role, action) !== null;
       for (const saved of [path, `${path}?q=steel&page=2#results`, `${path}/`, `${path}//`, `${path}/123?tab=docs`])
@@ -77,6 +80,16 @@ describe('страница после входа: destinationFor', () => {
       expect(destinationFor(role, '/profile?tab=main'), role).toBe(
         role === 'manufacturer' ? '/profile?tab=main' : roleHome(role),
       );
+  });
+
+  it('/reviews — только SME, остальные на стартовую', () => {
+    for (const role of ROLES)
+      for (const saved of ['/reviews', '/reviews?status=submitted', '/reviews/', '/reviews/x'])
+        expect(destinationFor(role, saved), `${role} ${saved}`).toBe(role === 'expert' ? saved : roleHome(role));
+    expect(destinationFor('director', '/reviews')).toBe('/dashboard');
+    expect(destinationFor('administrator', '/reviews')).toBe('/account');
+    // Путь сравнивается декодированным, как у роутера.
+    expect(destinationFor('operator', '/%72eviews')).toBe('/dashboard');
   });
 
   it('/companies/<id>: открыт ролям с catalog.search, производитель и администратор уходят на стартовую (GEN-08)', () => {
@@ -98,7 +111,7 @@ describe('страница после входа: destinationFor', () => {
     // Роль без права уходит на стартовую страницу и с вложенного адреса.
     expect(destinationFor('manufacturer', '/catalog/123')).toBe('/profile');
     expect(destinationFor('administrator', '/catalog/123')).toBe('/account');
-    expect(destinationFor('expert', '/dashboard/x')).toBe('/catalog');
+    expect(destinationFor('expert', '/dashboard/x')).toBe('/reviews');
     expect(destinationFor('operator', '/profile/edit')).toBe('/dashboard');
     // Другое имя страницы — не каталог и не дашборд: его разбирает маршрутизатор («не найдено»).
     expect(destinationFor('manufacturer', '/catalogue')).toBe('/catalogue');
@@ -140,7 +153,7 @@ describe('страница после входа: destinationFor', () => {
   it('путь сравнивается декодированным, как его сопоставляет React Router; адрес возвращается как был', () => {
     expect(destinationFor('manufacturer', '/%63atalog')).toBe('/profile');
     expect(destinationFor('administrator', '/%63atalog/123')).toBe('/account');
-    expect(destinationFor('expert', '/%64ashboard')).toBe('/catalog');
+    expect(destinationFor('expert', '/%64ashboard')).toBe('/reviews');
     expect(destinationFor('operator', '/%70rofile')).toBe('/dashboard');
     expect(destinationFor('operator', '/%6Cogin')).toBe('/dashboard');
     // Роль с правом получает исходный адрес без перекодирования.

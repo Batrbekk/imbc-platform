@@ -36,6 +36,8 @@ describe('стартовая страница на сервере (OPR-31, GEN-0
     ['/catalog', 'catalog.search'],
     // /profile — рабочее место производителя: у остальных ролей стартовая страница.
     ['/profile', 'profile.edit'],
+    // /reviews — очередь проверки, только у SME.
+    ['/reviews', 'review.take'],
   ];
 
   it.each(ROLES)('после входа %s попадает на разрешённую страницу', (role) => {
@@ -59,7 +61,7 @@ describe('стартовая страница на сервере (OPR-31, GEN-0
 
   it('закодированный путь сравнивается декодированным: /%63atalog — это каталог', () => {
     expect(postLoginPath('manufacturer', '/%63atalog')).toBe('/profile');
-    expect(postLoginPath('expert', '/%64ashboard')).toBe('/catalog');
+    expect(postLoginPath('expert', '/%64ashboard')).toBe('/reviews');
     expect(postLoginPath('operator', '/%63atalog')).toBe('/%63atalog');
     expect(postLoginPath('manufacturer', '/%2F%2Fevil.example')).toBe('/%2F%2Fevil.example');
   });

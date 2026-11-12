@@ -24,7 +24,7 @@ afterEach(() => {
 const HOME: Record<Me["user"]["role"], string> = {
   manufacturer: "/profile",
   administrator: "/account",
-  expert: "/catalog",
+  expert: "/reviews",
   director: "/dashboard",
   operator: "/dashboard",
   observer: "/dashboard",
@@ -110,6 +110,7 @@ function stubWorkspace(user: Me) {
     "GET /api/v1/catalog/search": { body: EMPTY_PAGE },
     "GET /api/v1/dashboard": { body: DASHBOARD },
     [`GET ${OWN_PROFILE}`]: { body: OWN_PROFILE_BODY },
+    "GET /api/v1/reviews/queue": { body: { items: [], total: 0 } },
   });
 }
 
@@ -186,11 +187,49 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     expect(apiCalls(api)).toEqual([]);
   });
 
-  it("эксперт на /dashboard/ уходит на /catalog; /catalog/ ему открыт", async () => {
+  it("SME после входа и с закрытой страницы попадает на /reviews", async () => {
+    for (const entry of ["/", "/dashboard/", "/profile?tab=main"]) {
+      stubWorkspace(me("expert"));
+      const { router } = renderRoute(entry, { locale: "ru" });
+      await waitFor(() => expect(router.state.location.pathname, entry).toBe("/reviews"));
+      expect(await screen.findByRole("heading", { level: 1, name: ru.reviews.title })).toBeTruthy();
+      expect(document.title).toBe(`${ru.reviews.title} · ${ru.common.appName}`);
+      cleanup();
+    }
+  });
+
+  it("директор на /reviews уходит на /dashboard", async () => {
+    const api = stubWorkspace(me("director"));
+    const { router } = renderRoute("/reviews?status=submitted");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/dashboard"));
+    expect(await screen.findByRole("heading", { name: kk.dashboard.title })).toBeTruthy();
+    expect(apiCalls(api).filter((url) => url.startsWith("/api/v1/reviews"))).toEqual([]);
+    expect(screen.queryByRole("link", { name: kk.nav.reviews })).toBeNull();
+  });
+
+  it("меню SME: очередь проверки, каталог, аккаунт", async () => {
+    stubWorkspace(me("expert"));
+    const { router, user } = renderRoute("/reviews", { locale: "en" });
+
+    await screen.findByRole("heading", { level: 1, name: en.reviews.title });
+    const menu = screen.getAllByRole("link").filter((link) => link.dataset.sidebar === "menu-button");
+    expect(menu.map((link) => link.textContent)).toEqual([en.nav.reviews, en.nav.catalog, en.nav.account]);
+    expect(menu.map((link) => link.getAttribute("href"))).toEqual(["/reviews", "/catalog", "/account"]);
+    expect(menu[0]!.hasAttribute("data-active")).toBe(true);
+    expect(menu[1]!.hasAttribute("data-active")).toBe(false);
+
+    await user.click(menu[1]!);
+    expect(router.state.location.pathname).toBe("/catalog");
+    expect(await screen.findByRole("heading", { name: en.catalog.title })).toBeTruthy();
+    expect(screen.getByRole("link", { name: en.nav.reviews }).hasAttribute("data-active")).toBe(false);
+  });
+
+  it("эксперт на /dashboard/ уходит на /reviews; /catalog/ ему открыт", async () => {
     stubWorkspace(me("expert"));
     let { router } = renderRoute("/dashboard/");
-    await waitFor(() => expect(router.state.location.pathname).toBe("/catalog"));
-    expect(await screen.findByRole("heading", { name: kk.catalog.title })).toBeTruthy();
+    await waitFor(() => expect(router.state.location.pathname).toBe("/reviews"));
+    expect(await screen.findByRole("heading", { name: kk.reviews.title })).toBeTruthy();
     cleanup();
 
     stubWorkspace(me("expert"));
@@ -300,7 +339,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
       ["operator", ["/dashboard", "/catalog", "/account"]],
       ["observer", ["/dashboard", "/catalog", "/account"]],
       ["director", ["/dashboard", "/catalog", "/account"]],
-      ["expert", ["/catalog", "/account"]],
+      ["expert", ["/reviews", "/catalog", "/account"]],
       ["manufacturer", ["/profile", "/account"]],
       ["administrator", ["/account"]],
     ];
@@ -308,6 +347,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     for (const [role, hrefs] of expected) {
       const fromPolicy = [
         can(role, "dashboard.read") && "/dashboard",
+        can(role, "review.take") && "/reviews",
         can(role, "catalog.search") && "/catalog",
         can(role, "profile.edit") && "/profile",
         "/account",

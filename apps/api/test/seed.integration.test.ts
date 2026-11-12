@@ -118,7 +118,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
     await seedDemo(pool);
 
     expect(await counts()).toEqual(first);
-    expect(first).toEqual({ organizations: 11, accounts: 6, visible: 8 });
+    expect(first).toEqual({ organizations: 15, accounts: 6, visible: 8 });
     expect((await accounts()).map((a) => a.email)).toEqual(['observer@observer.local']);
   });
 
@@ -151,6 +151,82 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
       // Стенд после прежней версии: строки уже есть с card = { demo: true }; повторный запуск их перезаписывает.
       await pool.query(`update catalog_visible set card = '{"demo": true}'::jsonb`);
     }
+  });
+
+  it('очередь seed: два submitted, один under_review у эксперта, draft вне проекции', async () => {
+    const queue = async () =>
+      (
+        await pool.query<{ name: string; status: string; expert: string | null; visible: boolean }>(
+          `select o.name, p.status, a.email as expert,
+                  exists (select 1 from catalog_visible c where c.organization_id = o.id) as visible
+           from manufacturer_profiles p
+           join organizations o on o.id = p.organization_id
+           left join user_accounts a on a.id = p.assigned_expert_id
+           where p.status <> 'verified'
+           order by p.registered_at, o.name`,
+        )
+      ).rows;
+    const expected = [
+      { name: 'ТОО «Жаңа Демо Құрылыс»', status: 'submitted', expert: null, visible: false },
+      { name: 'ТОО «Демо Агро Өнім»', status: 'submitted', expert: null, visible: false },
+      { name: 'ТОО «Демо Электро Монтаж»', status: 'under_review', expert: 'expert@imbc.local', visible: false },
+      { name: 'ТОО «Демо Жоба»', status: 'draft', expert: null, visible: false },
+    ];
+
+    await seedDemo(pool);
+    expect(await queue(), 'первый').toEqual(expected);
+    // Стенд после ручных действий: статус и назначение расходятся с seed; повторный запуск их возвращает.
+    await pool.query(
+      `update manufacturer_profiles set status = 'returned', assigned_expert_id = null
+       where organization_id in (select id from organizations where name like 'ТОО «Демо Электро%')`,
+    );
+    await pool.query(
+      `update manufacturer_profiles set status = 'under_review',
+         assigned_expert_id = (select id from user_accounts where lower(email) = 'expert@imbc.local')
+       where organization_id in (select id from organizations where name = 'ТОО «Демо Жоба»')`,
+    );
+    await seedDemo(pool);
+    expect(await queue(), 'повторный').toEqual(expected);
+    // У новых организаций нет аккаунтов.
+    const accounts = await pool.query(
+      `select a.email from user_accounts a join organizations o on o.id = a.organization_id
+       where o.bin is not null and o.name in ($1, $2, $3, $4)`,
+      expected.map((e) => e.name),
+    );
+    expect(accounts.rows).toEqual([]);
+  });
+
+  it('дата регистрации верифицированного демо-профиля раньше даты верификации — после первого и повторного запуска', async () => {
+    const later = async () =>
+      (
+        await pool.query<{ name: string }>(
+          `select o.name from manufacturer_profiles p join organizations o on o.id = p.organization_id
+           where p.status = 'verified' and not (p.registered_at < p.verified_at)`,
+        )
+      ).rows;
+    const verified = async () =>
+      (
+        await pool.query<{ n: number }>(
+          "select count(*)::int as n from manufacturer_profiles where status = 'verified'",
+        )
+      ).rows[0]!.n;
+
+    await seedDemo(pool);
+    expect(await verified()).toBe(8);
+    expect(await later(), 'первый').toEqual([]);
+    // Стенд до исправления: registered_at — момент первого запуска seed, позже verified_at.
+    await pool.query(`update manufacturer_profiles set registered_at = now() where status = 'verified'`);
+    expect(await later()).toHaveLength(8);
+    const before = await pool.query<{ id: string; verified_at: Date }>(
+      "select id, verified_at from manufacturer_profiles where status = 'verified' order by id",
+    );
+    await seedDemo(pool);
+    expect(await later(), 'повторный').toEqual([]);
+    // verified_at существующих строк не меняется.
+    const after = await pool.query<{ id: string; verified_at: Date }>(
+      "select id, verified_at from manufacturer_profiles where status = 'verified' order by id",
+    );
+    expect(after.rows).toEqual(before.rows);
   });
 
   it('статус актуальности профиля и его строки в проекции совпадают после первого и повторного запуска (UPD-04, UPD-06)', async () => {

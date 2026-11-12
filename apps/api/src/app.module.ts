@@ -20,6 +20,8 @@ import { HealthController } from './modules/health/health.controller.js';
 import { ProfilesController } from './modules/profiles/profiles.controller.js';
 import { ProfilesService } from './modules/profiles/profiles.service.js';
 import { RegistrationController } from './modules/registration/registration.controller.js';
+import { ReviewsController } from './modules/reviews/reviews.controller.js';
+import { ReviewsService } from './modules/reviews/reviews.service.js';
 
 @Module({
   imports: [
@@ -40,7 +42,14 @@ import { RegistrationController } from './modules/registration/registration.cont
     InfraModule,
     AuditModule,
   ],
-  controllers: [HealthController, AuthController, RegistrationController, CatalogController, ProfilesController],
+  controllers: [
+    HealthController,
+    AuthController,
+    RegistrationController,
+    CatalogController,
+    ProfilesController,
+    ReviewsController,
+  ],
   providers: [
     OidcService,
     SessionService,
@@ -48,6 +57,7 @@ import { RegistrationController } from './modules/registration/registration.cont
     KeycloakAdminService,
     ProfilesService,
     CatalogService,
+    ReviewsService,
     MailService,
     { provide: APP_GUARD, useClass: SessionGuard },
     { provide: APP_FILTER, useClass: ProblemDetailsFilter },

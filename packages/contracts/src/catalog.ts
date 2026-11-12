@@ -6,7 +6,7 @@ import { COMMODITY_GROUPS, PROFILE_TIERS, UPDATE_STATUSES } from './enums.js';
  * один и тот же объект парсится в Next.js (nuqs) и в API (query string).
  * Между фильтрами — AND, внутри одного фильтра — OR (OPR-04).
  */
-const csv = <T extends z.ZodType>(item: T) =>
+export const csv = <T extends z.ZodType>(item: T) =>
   z.preprocess((value) => {
     if (value === undefined || value === null || value === '') return undefined;
     if (Array.isArray(value)) return value.flatMap((v) => String(v).split(','));
