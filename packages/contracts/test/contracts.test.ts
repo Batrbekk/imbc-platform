@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ADMIN_PROBLEM_CODES,
   type Action,
   can,
   catalogFilterSchema,
@@ -151,6 +152,12 @@ describe('организации и приглашения администра�
     expect(
       createOrganizationSchema.safeParse({ name: 'Организация', type: 'operator', bin: '980540000381' }).success,
     ).toBe(false);
+  });
+
+  it('коды ошибок маршрутов администратора — без повторов, snake_case (ADMIN_PROBLEM_CODES)', () => {
+    expect(new Set(ADMIN_PROBLEM_CODES).size).toBe(ADMIN_PROBLEM_CODES.length);
+    for (const code of ADMIN_PROBLEM_CODES) expect(code).toMatch(/^[a-z]+(_[a-z]+)*$/);
+    expect(ADMIN_PROBLEM_CODES).toContain('organization_not_invitable');
   });
 
   it('приглашение и ящик IMBC: почта в нижнем регистре, лишний ключ — отказ (ADM-01, раздел 8.2)', () => {

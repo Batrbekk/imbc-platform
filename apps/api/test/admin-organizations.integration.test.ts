@@ -11,13 +11,14 @@ import { AuditService } from '../src/common/audit.service.js';
 import { ProblemException } from '../src/common/problem.js';
 import type { Database } from '../src/database/database.module.js';
 import * as schema from '../src/database/schema/index.js';
+import { boundLockWaits, sqlState } from '../src/database/lock-waits.js';
 import { seedDemo } from '../src/database/seed.js';
 import { QUEUES } from '../src/jobs/queues.js';
 import { AccountsController } from '../src/modules/admin/accounts.controller.js';
 import { AccountsService } from '../src/modules/admin/accounts.service.js';
 import { InvitationsService } from '../src/modules/admin/invitations.service.js';
 import { OrganizationsController } from '../src/modules/admin/organizations.controller.js';
-import { OrganizationsService } from '../src/modules/admin/organizations.service.js';
+import { ADMIN_ROUTES, lockActor, OrganizationsService } from '../src/modules/admin/organizations.service.js';
 import type { AuthContext } from '../src/modules/auth/auth.types.js';
 import { IdentityProvisioningService } from '../src/modules/auth/identity-provisioning.service.js';
 import { KeycloakAdminService, KeycloakRequestError } from '../src/modules/auth/keycloak-admin.service.js';
@@ -90,6 +91,25 @@ describe.skipIf(!databaseUrl)(
         ).rows[0]!.n,
       );
 
+    /** Задания письма субъекта и число разных минутных окон singletonKey среди них. */
+    const jobSlots = async (subject: string) => {
+      const { rows } = await pool.query<{ n: string; slots: string }>(
+        `select count(*) as n, count(distinct singleton_on) as slots from pgboss_auth_test.job
+          where name = $1 and data->>'subject' = $2`,
+        [QUEUES.sendPasswordEmail, subject],
+      );
+      return { count: Number(rows[0]!.n), slots: Number(rows[0]!.slots) };
+    };
+
+    /** Второй администратор IMBC в состоянии `state`. */
+    const administrator = async (state: 'active' | 'blocked' = 'active'): Promise<AuthContext> => {
+      const id = randomUUID();
+      await db
+        .insert(schema.userAccounts)
+        .values({ id, organizationId: imbcId, email: `${id}@imbc.local`, role: 'administrator', state });
+      return { ...admin, user: { ...admin.user, id, email: `${id}@imbc.local` } };
+    };
+
     const accountRow = (email: string) =>
       db.query.userAccounts.findFirst({ where: sql`lower(${schema.userAccounts.email}) = ${email}` });
 
@@ -98,13 +118,6 @@ describe.skipIf(!databaseUrl)(
 
     const invite = (organizationId: string, role: Role, email = `${randomUUID()}@invite.local`) =>
       accountsController().invite(admin, { email, fullName: 'Приглашённый Сотрудник', organizationId, role }, REQUEST);
-
-    /** singletonKey дедуплицирует в минутном окне pg-boss: тест повтора не начинается в его последние секунды. */
-    const awaitFreshSingletonWindow = async () => {
-      const { rows } = await pool.query<{ s: number }>('select extract(second from now())::float8 as s');
-      const second = Number(rows[0]!.s);
-      if (second > 50) await new Promise((resolve) => setTimeout(resolve, (61 - second) * 1000));
-    };
 
     beforeAll(async () => {
       pool = openTestPool();
@@ -190,6 +203,17 @@ describe.skipIf(!databaseUrl)(
       await expect(
         controller.create(admin, { name: 'Оператор с БИН', type: 'operator', bin: '980540000381' }, REQUEST),
       ).rejects.toBeInstanceOf(ZodError);
+
+      // Сервис сам не доверяет схеме контроллера: тип не из CREATABLE_ORGANIZATION_TYPES — 400 до базы.
+      const service = new OrganizationsService(db, new AuditService(db));
+      for (const type of ['imbc', 'manufacturer'])
+        await expect(
+          service.create(admin.user, { name: `Сервис ${type}`, type, isMajorOperator: false } as never, null),
+        ).rejects.toBeInstanceOf(ZodError);
+      await expect(
+        service.create(admin.user, { name: 'Сервис major', type: 'observer', isMajorOperator: true }, null),
+      ).rejects.toBeInstanceOf(ZodError);
+      expect((await pool.query(`select 1 from organizations where name like 'Сервис %'`)).rowCount).toBe(0);
 
       // Две одинаковые организации одновременно: одна создана, вторая — 409 (organizations_name_uq).
       const same = `Параллельный ${randomUUID()}`;
@@ -502,17 +526,24 @@ describe.skipIf(!databaseUrl)(
 
     it('повтор приглашения: invited — одно задание и при двух повторах подряд (singletonKey); active и blocked — 409 not_invited; аккаунт seed без субъекта — 409 identity_not_bound', async () => {
       const observer = await createOrganization('observer');
-      await awaitFreshSingletonWindow();
       const { account } = await invite(observer.id, 'observer');
       const subject = (await accountRow(account.email))!.idpSubject!;
       const controller = accountsController();
       expect(await controller.resend(admin, account.id, REQUEST)).toEqual({ status: 'password_email_queued' });
       expect(await controller.resend(admin, account.id, REQUEST)).toEqual({ status: 'password_email_queued' });
-      expect(await jobs(subject)).toBe(1);
-      expect(await audits('account.invitation_resent', account.id)).toEqual([
-        expect.objectContaining({ is_account_event: true, ip: '192.0.2.10', user_id: admin.user.id }),
-        expect.objectContaining({ is_account_event: true, ip: '192.0.2.10', user_id: admin.user.id }),
-      ]);
+      // pg-boss дедуплицирует по (name, singleton_on, singleton_key), singleton_on — время БД с шагом 60 с.
+      // Приглашение и два повтора укладываются не больше чем в два окна: заданий по одному на окно, не больше двух.
+      const after = await jobSlots(subject);
+      expect(after.count).toBe(after.slots);
+      expect(after.count).toBeLessThanOrEqual(2);
+      // Аудит честен: queued — задание действительно поставлено; хотя бы один повтор попал в окно с заданием.
+      const resent = await audits('account.invitation_resent', account.id);
+      expect(resent).toHaveLength(2);
+      for (const row of resent)
+        expect(row).toMatchObject({ is_account_event: true, ip: '192.0.2.10', user_id: admin.user.id });
+      const queued = resent.map((row) => (row.diff as { queued: boolean }).queued);
+      expect(queued.filter(Boolean).length).toBe(after.count - 1);
+      expect(queued).toContain(false);
       // Keycloak повтор не трогает: письмо отправит задание.
       expect(keycloak.createUser).toHaveBeenCalledOnce();
 
@@ -531,7 +562,7 @@ describe.skipIf(!databaseUrl)(
       });
       for (const id of [randomUUID(), 'not-a-uuid'])
         expect(await problem(controller.resend(admin, id, REQUEST)), id).toEqual({ status: 404, code: 'not_found' });
-      expect(await jobs(subject)).toBe(1);
+      expect(await jobSlots(subject)).toEqual(after);
       expect(await audits('account.invitation_resent', seed.id)).toEqual([]);
     });
 
@@ -564,16 +595,11 @@ describe.skipIf(!databaseUrl)(
       });
     });
 
-    it('исполнитель уже не active administrator — 403 в транзакции действия, изменений нет (GEN-08)', async () => {
-      const id = randomUUID();
-      await db.insert(schema.userAccounts).values({
-        id,
-        organizationId: imbcId,
-        email: `${id}@imbc.local`,
-        role: 'administrator',
-        state: 'blocked',
-      });
-      const blocked: AuthContext = { ...admin, user: { ...admin.user, id, email: `${id}@imbc.local` } };
+    it('исполнитель уже не active administrator — 403 в транзакции действия, запись denied в аудите, изменений нет (GEN-08, AUD-01)', async () => {
+      // Сеанс прошёл guard, затем аккаунт заблокировали: сервис вызывается напрямую уже заблокированным.
+      const blocked = await administrator('active');
+      const id = blocked.user.id;
+      await pool.query(`update user_accounts set state = 'blocked' where id = $1`, [id]);
       const name = `Заблокированный ${randomUUID()}`;
       const organizations = organizationsController();
       expect(await problem(organizations.create(blocked, { name, type: 'operator' }, REQUEST))).toEqual({
@@ -598,6 +624,73 @@ describe.skipIf(!databaseUrl)(
       expect(await accountRow(email)).toBeUndefined();
       // Пользователь Keycloak уже создан — удаляется компенсацией.
       expect(keycloak.deleteUser).toHaveBeenCalledOnce();
+      const operator = await createOrganization('operator');
+      expect(
+        await problem(
+          new OrganizationsService(db, new AuditService(db)).setMajorOperator(blocked.user, operator.id, true, null),
+        ),
+      ).toEqual({ status: 403, code: 'forbidden' });
+      expect(await problem(accountsController().resend(blocked, randomUUID(), REQUEST))).toEqual({
+        status: 403,
+        code: 'forbidden',
+      });
+
+      // Каждый отказ — одна запись, как у SessionGuard: действие accounts.manage, объект — маршрут.
+      const { rows } = await pool.query<{ object_type: string; object_id: string; outcome: string; ip: string | null }>(
+        `select object_type, object_id, outcome, host(ip) as ip from audit_entries
+          where user_id = $1 and action = 'accounts.manage' order by at, id`,
+        [id],
+      );
+      expect(rows).toEqual([
+        { object_type: 'route', object_id: ADMIN_ROUTES.createOrganization, outcome: 'denied', ip: '192.0.2.10' },
+        { object_type: 'route', object_id: ADMIN_ROUTES.imbcMailbox, outcome: 'denied', ip: '192.0.2.10' },
+        { object_type: 'route', object_id: ADMIN_ROUTES.invite, outcome: 'denied', ip: '192.0.2.10' },
+        { object_type: 'route', object_id: ADMIN_ROUTES.majorOperator, outcome: 'denied', ip: null },
+        { object_type: 'route', object_id: ADMIN_ROUTES.resend, outcome: 'denied', ip: '192.0.2.10' },
+      ]);
+      expect(
+        (await pool.query(`select 1 from audit_entries where user_id = $1 and outcome <> 'denied'`, [id])).rowCount,
+      ).toBe(0);
+    });
+
+    it('два администратора одновременно берут блокировку друг друга и обновляют чужую строку — оба завершаются без 40P01, по очереди (GEN-08)', async () => {
+      const first = await administrator();
+      const second = await administrator();
+      let signal!: () => void;
+      const firstLocked = new Promise<void>((resolve) => {
+        signal = resolve;
+      });
+      // Транзакция действия над чужим аккаунтом: lockActor, пауза, затем изменение строки цели.
+      const demote = (actor: AuthContext, targetId: string, onLocked?: () => void) =>
+        db.transaction(async (raw) => {
+          const tx = raw as unknown as Database;
+          await boundLockWaits(tx);
+          await lockActor(tx, actor.user.id, targetId);
+          onLocked?.();
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          await tx.update(schema.userAccounts).set({ state: 'blocked' }).where(eq(schema.userAccounts.id, targetId));
+        });
+      const one = demote(first, second.user.id, signal);
+      await firstLocked;
+      const two = demote(second, first.user.id);
+      const [a, b] = await Promise.allSettled([one, two]);
+
+      for (const result of [a, b])
+        if (result.status === 'rejected') expect(sqlState(result.reason), 'deadlock').not.toBe('40P01');
+      expect(a.status).toBe('fulfilled');
+      // Второй ждёт первого и перечитывает себя уже заблокированным: 403, а не взаимная блокировка 40P01.
+      expect(b.status).toBe('rejected');
+      const reason = (b as PromiseRejectedResult).reason as ProblemException;
+      expect(reason).toBeInstanceOf(ProblemException);
+      expect({ status: reason.getStatus(), code: reason.code }).toEqual({ status: 403, code: 'forbidden' });
+      const states = await pool.query<{ id: string; state: string }>(
+        'select id, state from user_accounts where id = any($1::uuid[])',
+        [[first.user.id, second.user.id]],
+      );
+      expect(Object.fromEntries(states.rows.map((r) => [r.id, r.state]))).toEqual({
+        [first.user.id]: 'active',
+        [second.user.id]: 'blocked',
+      });
     });
   },
 );

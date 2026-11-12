@@ -5,6 +5,7 @@ import { AuditModule } from '../common/audit.service.js';
 import { ConfigModule } from '../config/config.module.js';
 import { ENV, type Env } from '../config/env.js';
 import { DatabaseModule } from '../database/database.module.js';
+import { redactDatabaseError } from '../database/pg-errors.js';
 import { InfraModule, QUEUE } from '../infra/infra.module.js';
 import { MailService } from '../mail/mail.service.js';
 import { ADATA_DEFAULT_TIMING } from '../modules/adata/adata.client.js';
@@ -88,7 +89,12 @@ export class WorkerModule implements OnApplicationBootstrap {
             },
       );
       await this.boss.work(queue, async (jobs) => {
-        for (const job of jobs) await run(job.data as never);
+        try {
+          for (const job of jobs) await run(job.data as never);
+        } catch (error) {
+          // pg-boss сохраняет ошибку обработчика в output задания: у ошибки базы — только сводка (NFR-11).
+          throw redactDatabaseError(error);
+        }
       });
     }
     for (const s of SCHEDULES) {

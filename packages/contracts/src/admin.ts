@@ -100,3 +100,28 @@ export type AdminOrganizationResult = z.infer<typeof adminOrganizationResultSche
 /** Повтор приглашения поставлен в очередь (NOT-24, AUTH-01). */
 export const invitationResentSchema = z.object({ status: z.literal('password_email_queued') }).strict();
 export type InvitationResent = z.infer<typeof invitationResentSchema>;
+
+/**
+ * Коды problem+json, которые возвращают маршруты администратора (их сервисы, SessionGuard и поток
+ * Keycloak): по ним страница выбирает сообщение. `validation` — ошибка схемы тела, `internal` — сбой 500.
+ */
+export const ADMIN_PROBLEM_CODES = [
+  'validation',
+  'unauthenticated',
+  'mfa_required',
+  'responsibility_required',
+  'forbidden',
+  'bad_origin',
+  'not_found',
+  'organization_exists',
+  'not_operator',
+  'organization_not_invitable',
+  'role_not_allowed',
+  'email_exists',
+  'not_invited',
+  'identity_not_bound',
+  'identity_unavailable',
+  'busy',
+  'internal',
+] as const;
+export type AdminProblemCode = (typeof ADMIN_PROBLEM_CODES)[number];

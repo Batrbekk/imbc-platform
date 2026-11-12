@@ -16,7 +16,7 @@ import { AuditService } from '../../common/audit.service.js';
 import { parseOrThrow, ProblemException } from '../../common/problem.js';
 import { parseResponse } from '../../common/response.js';
 import { DB, type Database } from '../../database/database.module.js';
-import { boundLockWaits, sqlState } from '../../database/lock-waits.js';
+import { boundLockWaits, lockWaitExceeded } from '../../database/lock-waits.js';
 import { ndaVersion, organizations, userAccounts } from '../../database/schema/index.js';
 import { QUEUE } from '../../infra/infra.module.js';
 import { QUEUES } from '../../jobs/queues.js';
@@ -28,9 +28,6 @@ const ndaUnavailable = () =>
   new ProblemException(503, 'nda_unavailable', 'Регистрация временно недоступна. Попробуйте позже.');
 const registrationUnavailable = () =>
   new ProblemException(503, 'identity_unavailable', 'Регистрация временно недоступна. Попробуйте снова.');
-
-/** Ожидание блокировки или оператора сверх `boundLockWaits` (lock_not_available, query_canceled). */
-const LOCK_WAIT_EXCEEDED = new Set(['55P03', '57014']);
 
 /**
  * Текущая версия NDA для формы и для регистрации — одно условие: нет текущей или её текст пуст
@@ -162,7 +159,7 @@ export class RegistrationController {
         },
       );
     } catch (error) {
-      if (LOCK_WAIT_EXCEEDED.has(sqlState(error) as string)) throw registrationUnavailable();
+      if (lockWaitExceeded(error)) throw registrationUnavailable();
       const conflict = provisioningConflict(error);
       if (conflict === 'email_exists') throw new ProblemException(409, conflict, 'Этот email уже используется');
       if (conflict === 'bin_exists')

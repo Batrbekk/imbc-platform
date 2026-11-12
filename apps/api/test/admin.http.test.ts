@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs';
 import {
+  ADMIN_PROBLEM_CODES,
   type AdminAccountResult,
   type AdminOrganizationResult,
   can,
@@ -10,7 +12,7 @@ import { AccountsController } from '../src/modules/admin/accounts.controller.js'
 import { AccountsService } from '../src/modules/admin/accounts.service.js';
 import { InvitationsService } from '../src/modules/admin/invitations.service.js';
 import { OrganizationsController } from '../src/modules/admin/organizations.controller.js';
-import { OrganizationsService } from '../src/modules/admin/organizations.service.js';
+import { ADMIN_ROUTES, OrganizationsService } from '../src/modules/admin/organizations.service.js';
 import { type HttpStand, startHttp } from './support/http.js';
 
 // Граница HTTP действий администратора: настоящий SessionGuard; права — из матрицы, accounts.manage (GEN-08, GEN-10).
@@ -46,6 +48,8 @@ const accounts = { list: vi.fn() };
 interface Route {
   method: 'POST' | 'PUT';
   path: string;
+  /** Путь маршрута, как его пишет в аудит SessionGuard (`req.route.path`). */
+  template: string;
   body?: unknown;
   /** Тело, которое схема отклоняет (400 validation). */
   invalid?: unknown;
@@ -60,6 +64,7 @@ const ROUTES: Route[] = [
   {
     method: 'POST',
     path: '/api/v1/admin/organizations',
+    template: ADMIN_ROUTES.createOrganization,
     body: { name: 'Оператор', type: 'operator' },
     invalid: { name: 'Оператор', type: 'manufacturer' },
     status: 201,
@@ -70,6 +75,7 @@ const ROUTES: Route[] = [
   {
     method: 'PUT',
     path: `/api/v1/admin/organizations/${ORGANIZATION_ID}/major-operator`,
+    template: ADMIN_ROUTES.majorOperator,
     body: { isMajorOperator: true },
     invalid: { isMajorOperator: 'yes' },
     status: 200,
@@ -80,6 +86,7 @@ const ROUTES: Route[] = [
   {
     method: 'PUT',
     path: '/api/v1/admin/imbc-mailbox',
+    template: ADMIN_ROUTES.imbcMailbox,
     body: { email: 'Mail@IMBC.local' },
     invalid: { email: 'not-an-email' },
     status: 200,
@@ -90,6 +97,7 @@ const ROUTES: Route[] = [
   {
     method: 'POST',
     path: '/api/v1/admin/accounts',
+    template: ADMIN_ROUTES.invite,
     body: {
       email: 'new@operator.local',
       fullName: 'Новый оператор',
@@ -107,6 +115,7 @@ const ROUTES: Route[] = [
   {
     method: 'POST',
     path: `/api/v1/admin/accounts/${ACCOUNT_ID}/invitation`,
+    template: ADMIN_ROUTES.resend,
     status: 202,
     response: { status: 'password_email_queued' },
     service: invitations.resend,
@@ -170,7 +179,14 @@ describe('действия администратора: организации,
       expect(await res.json()).toMatchObject({ status: 403, code: 'forbidden' });
       expect(http.audit.record).toHaveBeenCalledOnce();
       expect(http.audit.record).toHaveBeenCalledWith(
-        expect.objectContaining({ outcome: 'denied', action: 'accounts.manage', userId: expect.any(String) }),
+        expect.objectContaining({
+          outcome: 'denied',
+          action: 'accounts.manage',
+          userId: expect.any(String),
+          // Тот же объект пишет отказ в транзакции действия (lockActor): ADMIN_ROUTES.
+          objectType: 'route',
+          objectId: route.template,
+        }),
       );
       for (const service of services) expect(service).not.toHaveBeenCalled();
     },
@@ -211,5 +227,28 @@ describe('действия администратора: организации,
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ status: 400, code: 'validation' });
     for (const service of services) expect(service).not.toHaveBeenCalled();
+  });
+});
+
+describe('коды ошибок маршрутов администратора — контракт (ADMIN_PROBLEM_CODES)', () => {
+  // Сервисы, контроллеры, guard и поток Keycloak, через которые проходят пять маршрутов и список аккаунтов.
+  const SOURCES = [
+    '../src/modules/admin/organizations.service.ts',
+    '../src/modules/admin/invitations.service.ts',
+    '../src/modules/admin/organizations.controller.ts',
+    '../src/modules/admin/accounts.controller.ts',
+    '../src/modules/auth/guards.ts',
+    '../src/modules/auth/identity-provisioning.service.ts',
+  ];
+
+  it('каждый код ProblemException этих файлов есть в списке, и каждый код списка встречается', () => {
+    const thrown = new Set<string>();
+    for (const source of SOURCES) {
+      const text = readFileSync(new URL(source, import.meta.url), 'utf8');
+      for (const match of text.matchAll(/new ProblemException\(\s*\d+,\s*'([a-z_]+)'/g)) thrown.add(match[1]!);
+    }
+    // validation — ZodError схемы (ProblemDetailsFilter), internal — непредвиденная ошибка (500).
+    const expected = new Set<string>([...thrown, 'validation', 'internal']);
+    expect([...expected].sort()).toEqual([...ADMIN_PROBLEM_CODES].sort());
   });
 });

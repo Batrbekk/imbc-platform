@@ -22,7 +22,7 @@ import { QUEUE } from '../../infra/infra.module.js';
 import { QUEUES } from '../../jobs/queues.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { IdentityProvisioningService, provisioningConflict } from '../auth/identity-provisioning.service.js';
-import { busy, isUuid, lockActor, notFound } from './organizations.service.js';
+import { ADMIN_ROUTES, auditActorDenial, busy, isUuid, lockActor, notFound } from './organizations.service.js';
 
 const emailExists = () => new ProblemException(409, 'email_exists', 'Этот email уже используется');
 
@@ -59,6 +59,17 @@ export class InvitationsService {
       .where(sql`lower(${userAccounts.email}) = ${input.email}`);
     if (taken) throw emailExists();
 
+    return auditActorDenial(this.audit, actor, ADMIN_ROUTES.invite, ip, () =>
+      this.provision(actor, input, organization.id, ip),
+    );
+  }
+
+  private async provision(
+    actor: AuthUser,
+    input: InviteAccountInput,
+    organizationId: string,
+    ip: string | null,
+  ): Promise<AdminAccountResult> {
     try {
       const account = await this.provisioning.provision(
         { email: input.email, firstName: input.fullName, locale: 'kk' },
@@ -69,7 +80,7 @@ export class InvitationsService {
           const [row] = await tx
             .insert(userAccounts)
             .values({
-              organizationId: organization.id,
+              organizationId,
               email: input.email,
               fullName: input.fullName,
               role: input.role,
@@ -89,9 +100,9 @@ export class InvitationsService {
               userId: actor.id,
               organizationId: actor.organizationId,
               action: 'account.invited',
-              objectType: 'user_account',
+              objectType: 'account',
               objectId: row!.id,
-              diff: { email: input.email, role: input.role, organizationId: organization.id },
+              diff: { email: input.email, role: input.role, organizationId },
               isAccountEvent: true,
               ip,
             },
@@ -111,10 +122,16 @@ export class InvitationsService {
 
   /**
    * Повтор письма установки пароля (NOT-24, AUTH-01) — только аккаунту invited с субъектом Keycloak.
-   * Задание дедуплицируется по субъекту (`singletonKey`), как у регистрации; запись аудита — каждый раз.
+   * Задание дедуплицируется по субъекту (`singletonKey`), как у регистрации; запись аудита — каждый раз,
+   * `queued: false`, если в этом окне задание уже было и pg-boss нового не поставил.
    */
   async resend(actor: AuthUser, accountId: string, ip: string | null = null): Promise<InvitationResent> {
     if (!isUuid(accountId)) throw notFound();
+    await auditActorDenial(this.audit, actor, ADMIN_ROUTES.resend, ip, () => this.queueResend(actor, accountId, ip));
+    return parseResponse(invitationResentSchema, { status: 'password_email_queued' }, 'повтор приглашения');
+  }
+
+  private async queueResend(actor: AuthUser, accountId: string, ip: string | null): Promise<void> {
     try {
       await withQueueTransaction(this.pool, async (tx, queueDb) => {
         await boundLockWaits(tx);
@@ -125,7 +142,7 @@ export class InvitationsService {
         // Аккаунт seed без входа ещё не привязан к пользователю Keycloak (план, расхождение 20).
         if (!target.idpSubject)
           throw new ProblemException(409, 'identity_not_bound', 'Аккаунт ещё не связан с учётной записью входа');
-        await this.queue.send(
+        const jobId = await this.queue.send(
           QUEUES.sendPasswordEmail,
           { subject: target.idpSubject },
           { db: queueDb, singletonKey: target.idpSubject, singletonSeconds: 60 },
@@ -135,8 +152,9 @@ export class InvitationsService {
             userId: actor.id,
             organizationId: actor.organizationId,
             action: 'account.invitation_resent',
-            objectType: 'user_account',
+            objectType: 'account',
             objectId: accountId,
+            diff: { queued: jobId !== null },
             isAccountEvent: true,
             ip,
           },
@@ -147,6 +165,5 @@ export class InvitationsService {
       if (lockWaitExceeded(error)) throw busy();
       throw error;
     }
-    return parseResponse(invitationResentSchema, { status: 'password_email_queued' }, 'повтор приглашения');
   }
 }

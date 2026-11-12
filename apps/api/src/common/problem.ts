@@ -1,6 +1,7 @@
 import { type ArgumentsHost, Catch, type ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { ZodError, type z } from 'zod';
+import { databaseErrorSummary } from '../database/pg-errors.js';
 
 /** Ошибка в формате RFC 9457 (архитектура §11). `code` — машинный код правила. */
 export class ProblemException extends HttpException {
@@ -59,7 +60,11 @@ export class ProblemDetailsFilter implements ExceptionFilter {
         code: `http_${status}`,
       };
     } else {
-      this.logger.error(exception);
+      // Ошибка базы: текст Drizzle содержит запрос и параметры, detail PostgreSQL — значения строк (почта,
+      // ФИО, БИН, IP). В журнал — только сводка без них (NFR-11).
+      const database = databaseErrorSummary(exception);
+      if (database) this.logger.error(database, 'Unexpected database error');
+      else this.logger.error(exception);
     }
 
     if (status === 429 && typeof body.retryAfter === 'number') {

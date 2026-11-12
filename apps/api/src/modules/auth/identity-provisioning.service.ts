@@ -4,6 +4,7 @@ import type pg from 'pg';
 import type { PgBoss } from 'pg-boss';
 import { ProblemException } from '../../common/problem.js';
 import { PG_POOL, type Database } from '../../database/database.module.js';
+import { uniqueViolation } from '../../database/pg-errors.js';
 import { withQueueTransaction } from '../../database/transaction.js';
 import { QUEUE } from '../../infra/infra.module.js';
 import { QUEUES } from '../../jobs/queues.js';
@@ -71,15 +72,8 @@ export class IdentityProvisioningService {
 
 /** Нарушение уникальности почты, субъекта IdP или БИН (код 23505 pg или его обёртки Drizzle) → код 409. */
 export function provisioningConflict(error: unknown): 'email_exists' | 'bin_exists' | null {
-  let cause: unknown = error;
-  for (let depth = 0; cause && typeof cause === 'object' && depth < 6; depth++) {
-    const item = cause as { code?: string; constraint?: string; cause?: unknown };
-    if (item.code === '23505') {
-      if (item.constraint === 'user_accounts_email_uq' || item.constraint === 'user_accounts_idp_subject_uq')
-        return 'email_exists';
-      if (item.constraint === 'organizations_bin_uq') return 'bin_exists';
-    }
-    cause = item.cause;
-  }
+  const constraint = uniqueViolation(error);
+  if (constraint === 'user_accounts_email_uq' || constraint === 'user_accounts_idp_subject_uq') return 'email_exists';
+  if (constraint === 'organizations_bin_uq') return 'bin_exists';
   return null;
 }
