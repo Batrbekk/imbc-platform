@@ -23,7 +23,7 @@ afterEach(() => {
 
 const HOME: Record<Me["user"]["role"], string> = {
   manufacturer: "/profile",
-  administrator: "/account",
+  administrator: "/admin/accounts",
   expert: "/reviews",
   director: "/dashboard",
   operator: "/dashboard",
@@ -76,10 +76,16 @@ function withCompanyPage(): RouteObject[] {
   ];
 }
 
-/** Свой профиль запрашивает стартовая страница производителя /profile, а не закрытая страница. */
+/**
+ * Запросы стартовых страниц, а не закрытой страницы: свой профиль — у производителя (/profile),
+ * организации и аккаунты — у администратора (/admin/accounts).
+ */
 const OWN_PROFILE = "/api/v1/profiles/own";
+const ADMIN_ACCOUNTS = "/api/v1/admin/accounts";
 const apiCalls = (api: ReturnType<typeof stubApi>) =>
-  api.mock.calls.map(([url]) => String(url)).filter((url) => url.startsWith("/api/v1/") && url !== OWN_PROFILE);
+  api.mock.calls
+    .map(([url]) => String(url))
+    .filter((url) => url.startsWith("/api/v1/") && url !== OWN_PROFILE && url !== ADMIN_ACCOUNTS);
 const DASHBOARD: Dashboard = {
   total: 0,
   byRegion: [],
@@ -111,6 +117,7 @@ function stubWorkspace(user: Me) {
     "GET /api/v1/dashboard": { body: DASHBOARD },
     [`GET ${OWN_PROFILE}`]: { body: OWN_PROFILE_BODY },
     "GET /api/v1/reviews/queue": { body: { items: [], total: 0 } },
+    [`GET ${ADMIN_ACCOUNTS}`]: { body: { organizations: [] } },
   });
 }
 
@@ -144,7 +151,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     expect(router.state.location.search).toBe("?returnTo=%2Fcatalog%3Fregion%3DKZ-ATY");
   });
 
-  it("производитель на /catalog уходит на /profile; администратор на /dashboard — на /account", async () => {
+  it("производитель на /catalog уходит на /profile; администратор на /dashboard — на /admin/accounts", async () => {
     stubWorkspace(me("manufacturer"));
     let { router } = renderRoute("/catalog");
     await waitFor(() => expect(router.state.location.pathname).toBe("/profile"));
@@ -162,8 +169,8 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     cleanup();
     stubWorkspace(me("administrator"));
     ({ router } = renderRoute("/dashboard"));
-    await waitFor(() => expect(router.state.location.pathname).toBe("/account"));
-    expect(await screen.findByRole("heading", { name: kk.account.title })).toBeTruthy();
+    await waitFor(() => expect(router.state.location.pathname).toBe("/admin/accounts"));
+    expect(await screen.findByRole("heading", { name: kk.adminAccounts.title })).toBeTruthy();
   });
 
   it.each(ROLES)("%s со входа на / попадает на стартовую страницу роли и видит её первым пунктом меню (OPR-31)", async (role) => {
@@ -196,6 +203,45 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
       expect(document.title).toBe(`${ru.reviews.title} · ${ru.common.appName}`);
       cleanup();
     }
+  });
+
+  it("администратор с закрытой страницы (например /companies/x) попадает на /admin/accounts", async () => {
+    for (const entry of ["/companies/x", "/catalog?q=steel", "/dashboard/", "/reviews", "/profile?tab=main"]) {
+      const api = stubWorkspace(me("administrator"));
+      const { router } = renderRoute(entry, { locale: "ru" });
+      await waitFor(() => expect(router.state.location.pathname, entry).toBe("/admin/accounts"));
+      expect(await screen.findByRole("heading", { level: 1, name: ru.adminAccounts.title })).toBeTruthy();
+      expect(document.title).toBe(`${ru.adminAccounts.title} · ${ru.common.appName}`);
+      expect(apiCalls(api), entry).toEqual([]);
+      cleanup();
+    }
+  });
+
+  it("SME на /admin/accounts уходит на свою стартовую /reviews", async () => {
+    const api = stubWorkspace(me("expert"));
+    const { router } = renderRoute("/admin/accounts");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/reviews"));
+    expect(await screen.findByRole("heading", { name: kk.reviews.title })).toBeTruthy();
+    expect(api.mock.calls.map(([url]) => String(url)).filter((url) => url.startsWith(ADMIN_ACCOUNTS))).toEqual([]);
+    expect(screen.queryByRole("link", { name: kk.nav.adminAccounts })).toBeNull();
+  });
+
+  it("меню администратора: аккаунты и мой аккаунт; на /admin/accounts активен только пункт «Аккаунты»", async () => {
+    stubWorkspace(me("administrator"));
+    const { router, user } = renderRoute("/admin/accounts", { locale: "en" });
+
+    await screen.findByRole("heading", { level: 1, name: en.adminAccounts.title });
+    const menu = () => screen.getAllByRole("link").filter((link) => link.dataset.sidebar === "menu-button");
+    expect(menu().map((link) => link.textContent)).toEqual([en.nav.adminAccounts, en.nav.account]);
+    expect(menu().map((link) => link.getAttribute("href"))).toEqual(["/admin/accounts", "/account"]);
+    expect(menu().map((link) => link.hasAttribute("data-active"))).toEqual([true, false]);
+
+    // «Мой аккаунт» по-прежнему открыт администратору; подсвечен только он.
+    await user.click(menu()[1]!);
+    expect(router.state.location.pathname).toBe("/account");
+    expect(await screen.findByRole("heading", { name: en.account.title })).toBeTruthy();
+    expect(menu().map((link) => link.hasAttribute("data-active"))).toEqual([false, true]);
   });
 
   it("директор на /reviews уходит на /dashboard", async () => {
@@ -251,12 +297,14 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     }
   });
 
-  it("производитель на /companies/x уходит на /profile, администратор — на /account", async () => {
+  it("производитель на /companies/x уходит на /profile, администратор — на /admin/accounts", async () => {
     for (const role of ["manufacturer", "administrator"] as const) {
       const api = stubWorkspace(me(role));
       const { router } = renderRoute("/companies/00000000-0000-4000-8000-000000000010?x=1");
 
-      await waitFor(() => expect(router.state.location.pathname).toBe(role === "manufacturer" ? "/profile" : "/account"));
+      await waitFor(() =>
+        expect(router.state.location.pathname).toBe(role === "manufacturer" ? "/profile" : "/admin/accounts"),
+      );
       await screen.findAllByText(`${role}@${role}.local`);
       expect(apiCalls(api)).toEqual([]);
       cleanup();
@@ -341,7 +389,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
       ["director", ["/dashboard", "/catalog", "/account"]],
       ["expert", ["/reviews", "/catalog", "/account"]],
       ["manufacturer", ["/profile", "/account"]],
-      ["administrator", ["/account"]],
+      ["administrator", ["/admin/accounts", "/account"]],
     ];
     expect(expected.map(([role]) => role).sort()).toEqual([...ROLES].sort());
     for (const [role, hrefs] of expected) {
@@ -350,6 +398,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
         can(role, "review.take") && "/reviews",
         can(role, "catalog.search") && "/catalog",
         can(role, "profile.edit") && "/profile",
+        can(role, "accounts.manage") && "/admin/accounts",
         "/account",
       ].filter(Boolean);
       expect(fromPolicy, role).toEqual(hrefs);

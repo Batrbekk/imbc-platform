@@ -6,6 +6,7 @@ import {
   LogOutIcon,
   SearchIcon,
   UserRoundIcon,
+  UsersIcon,
 } from "lucide-react";
 import { useEffect } from "react";
 import { Link, Outlet, useLocation, useMatches, useNavigate } from "react-router";
@@ -93,6 +94,8 @@ export function AppShell() {
   const role = me.data.user.role;
   // Дашборд — первым: это стартовая страница оператора, наблюдателя и директора (OPR-31).
   // Очередь проверки — перед каталогом: у SME она первая, это его стартовая страница.
+  // Аккаунты — перед «Моим аккаунтом»: у администратора это первый пункт и стартовая страница.
+  // Адрес не `/accounts`: `/account` подсвечивался бы и на нём (startsWith).
   // `active` — начала адресов, на которых пункт подсвечен; по умолчанию — его href.
   const items: { href: string; label: string; icon: typeof SearchIcon; show: boolean; active?: string[] }[] = [
     { href: "/dashboard", label: t("nav.dashboard"), icon: LayoutDashboardIcon, show: !!can(role, "dashboard.read") },
@@ -106,6 +109,12 @@ export function AppShell() {
       active: ["/catalog", "/companies"],
     },
     { href: "/profile", label: t("nav.profile"), icon: BuildingIcon, show: !!can(role, "profile.edit") },
+    {
+      href: "/admin/accounts",
+      label: t("nav.adminAccounts"),
+      icon: UsersIcon,
+      show: !!can(role, "accounts.manage"),
+    },
     { href: "/account", label: t("nav.account"), icon: UserRoundIcon, show: true },
   ].filter((i) => i.show);
 

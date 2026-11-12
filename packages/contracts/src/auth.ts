@@ -26,15 +26,16 @@ export function safeReturnTo(value: unknown, fallback = '/'): string {
 
 /**
  * Стартовая страница роли после входа. У оператора, наблюдателя и директора IMBC — дашборд
- * (OPR-31). У SME — очередь проверки (решение для демо; спецификация стартовую SME не задаёт).
+ * (OPR-31). У SME — очередь проверки, у администратора — организации и аккаунты (решение для
+ * демо; спецификация стартовые SME и администратора не задаёт).
  * Роль вправе открыть свою стартовую страницу по матрице прав: `/dashboard` — `dashboard.read`,
- * `/reviews` — `review.take`.
+ * `/reviews` — `review.take`, `/admin/accounts` — `accounts.manage`.
  * Таблица по всем ролям: новая роль без стартовой страницы не компилируется.
  */
 const ROLE_HOME: Record<Role, string> = {
   manufacturer: '/profile',
   expert: '/reviews',
-  administrator: '/account',
+  administrator: '/admin/accounts',
   director: '/dashboard',
   operator: '/dashboard',
   observer: '/dashboard',
@@ -51,6 +52,7 @@ const GUARDED_PAGES = new Map<string, Action>([
   ['/dashboard', 'dashboard.read'],
   ['/profile', 'profile.edit'],
   ['/reviews', 'review.take'],
+  ['/admin/accounts', 'accounts.manage'],
 ]);
 
 /**

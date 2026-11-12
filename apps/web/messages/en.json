@@ -21,6 +21,7 @@
     "catalog": "Catalog",
     "dashboard": "Dashboard",
     "profile": "Company profile",
+    "adminAccounts": "Accounts",
     "account": "My account",
     "toggleSidebar": "Show or hide the menu",
     "sheetTitle": "Menu",
@@ -272,6 +273,31 @@
     "found": "{count, plural, one {{total} profile} other {{total} profiles}}",
     "empty": "The queue is empty.",
     "loadError": "Could not load the queue."
+  },
+  "adminAccounts": {
+    "title": "Organisations and accounts",
+    "typeValue": {
+      "imbc": "IMBC",
+      "operator": "Operator",
+      "observer": "Observer",
+      "manufacturer": "Manufacturer"
+    },
+    "majorOperator": "Major operator",
+    "email": "Email",
+    "name": "Name",
+    "role": "Role",
+    "state": "State",
+    "stateValue": {
+      "invited": "Invited",
+      "active": "Active",
+      "inactive": "Inactive",
+      "blocked": "Blocked"
+    },
+    "lastSignIn": "Last sign-in",
+    "never": "Never",
+    "noAccounts": "No accounts",
+    "empty": "No organisations.",
+    "loadError": "Could not load accounts."
   },
   "notFound": {
     "title": "Page not found",

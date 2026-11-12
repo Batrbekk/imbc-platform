@@ -5,5 +5,6 @@ export * from './catalog.js';
 export * from './company.js';
 export * from './profile.js';
 export * from './review.js';
+export * from './admin.js';
 export * from './policy.js';
 export * from './auth.js';

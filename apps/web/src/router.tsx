@@ -78,6 +78,12 @@ export const routes: RouteObject[] = [
             lazy: lazyPage(() => import("@/routes/app/dashboard"), (m) => m.DashboardPage),
           },
           {
+            // Организации и аккаунты для администратора (ADM-02, ADM-06).
+            path: "admin/accounts",
+            handle: { title: "adminAccounts.title" } satisfies AppRouteHandle,
+            lazy: lazyPage(() => import("@/routes/app/admin-accounts"), (m) => m.AdminAccountsPage),
+          },
+          {
             path: "account",
             handle: { title: "account.title" } satisfies AppRouteHandle,
             lazy: lazyPage(() => import("@/routes/app/account"), (m) => m.AccountPage),

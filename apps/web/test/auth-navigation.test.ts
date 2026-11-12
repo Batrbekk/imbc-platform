@@ -7,7 +7,7 @@ describe("authDestination", () => {
   it("без сохранённого адреса — стартовая страница роли: дашборд у оператора, наблюдателя и директора (OPR-31)", () => {
     const homes: Record<Role, string> = {
       manufacturer: "/profile",
-      administrator: "/account",
+      administrator: "/admin/accounts",
       expert: "/reviews",
       director: "/dashboard",
       operator: "/dashboard",
@@ -20,7 +20,7 @@ describe("authDestination", () => {
 
   it("a saved catalogue URL cannot send a manufacturer or administrator to forbidden content", () => {
     expect(authDestination({ user: { role: "manufacturer" } }, "/catalog?q=steel")).toBe("/profile");
-    expect(authDestination({ user: { role: "administrator" } }, "/catalog")).toBe("/account");
+    expect(authDestination({ user: { role: "administrator" } }, "/catalog")).toBe("/admin/accounts");
     expect(authDestination({ user: { role: "expert" } }, "/dashboard")).toBe("/reviews");
     // Профиль компании — только у производителя (profile.edit).
     expect(authDestination({ user: { role: "operator" } }, "/profile")).toBe("/dashboard");
@@ -39,7 +39,7 @@ describe("authDestination", () => {
     expect(authDestination({ user: { role: "operator" } }, "/catalog/123")).toBe("/catalog/123");
     // Вложенный и закодированный путь каталога для роли без права — стартовая страница.
     expect(authDestination({ user: { role: "manufacturer" } }, "/catalog/123")).toBe("/profile");
-    expect(authDestination({ user: { role: "administrator" } }, "/catalog/123")).toBe("/account");
+    expect(authDestination({ user: { role: "administrator" } }, "/catalog/123")).toBe("/admin/accounts");
     expect(authDestination({ user: { role: "manufacturer" } }, "/%63atalog")).toBe("/profile");
     expect(authDestination({ user: { role: "manufacturer" } }, "/catalogue")).toBe("/catalogue");
     expect(authDestination({ user: { role: "manufacturer" } }, "/account")).toBe("/account");

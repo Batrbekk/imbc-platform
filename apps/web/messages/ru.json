@@ -21,6 +21,7 @@
     "catalog": "Каталог",
     "dashboard": "Дашборд",
     "profile": "Профиль компании",
+    "adminAccounts": "Аккаунты",
     "account": "Моя учётная запись",
     "toggleSidebar": "Показать или скрыть меню",
     "sheetTitle": "Меню",
@@ -272,6 +273,31 @@
     "found": "{count, plural, one {{total} профиль} few {{total} профиля} many {{total} профилей} other {{total} профиля}}",
     "empty": "Очередь пуста.",
     "loadError": "Не удалось загрузить очередь."
+  },
+  "adminAccounts": {
+    "title": "Организации и аккаунты",
+    "typeValue": {
+      "imbc": "IMBC",
+      "operator": "Оператор",
+      "observer": "Наблюдатель",
+      "manufacturer": "Производитель"
+    },
+    "majorOperator": "Крупный оператор",
+    "email": "Email",
+    "name": "Имя",
+    "role": "Роль",
+    "state": "Состояние",
+    "stateValue": {
+      "invited": "Приглашён",
+      "active": "Активен",
+      "inactive": "Неактивен",
+      "blocked": "Заблокирован"
+    },
+    "lastSignIn": "Последний вход",
+    "never": "Не входил",
+    "noAccounts": "Аккаунтов нет",
+    "empty": "Организаций нет.",
+    "loadError": "Не удалось загрузить аккаунты."
   },
   "notFound": {
     "title": "Страница не найдена",

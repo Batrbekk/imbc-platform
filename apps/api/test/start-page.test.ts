@@ -38,6 +38,8 @@ describe('стартовая страница на сервере (OPR-31, GEN-0
     ['/profile', 'profile.edit'],
     // /reviews — очередь проверки, только у SME.
     ['/reviews', 'review.take'],
+    // /admin/accounts — организации и аккаунты, только у администратора.
+    ['/admin/accounts', 'accounts.manage'],
   ];
 
   it.each(ROLES)('после входа %s попадает на разрешённую страницу', (role) => {
@@ -53,7 +55,7 @@ describe('стартовая страница на сервере (OPR-31, GEN-0
         can(role, 'catalog.search') ? '/catalog/123?tab=docs' : roleHome(role),
       );
     expect(postLoginPath('manufacturer', '/catalog/123')).toBe('/profile');
-    expect(postLoginPath('administrator', '/catalog/123')).toBe('/account');
+    expect(postLoginPath('administrator', '/catalog/123')).toBe('/admin/accounts');
     expect(postLoginPath('operator', '/catalog/123')).toBe('/catalog/123');
     // Похожее имя — другая страница, шлюз каталога его не касается.
     for (const role of ROLES) expect(postLoginPath(role, '/catalogue'), role).toBe('/catalogue');

@@ -11,7 +11,7 @@
 
 ## Routes
 
-- All routes are in `src/router.tsx`. Keep the existing addresses: `/`, `/login`, `/register`, `/auth/verify`, `/auth/responsibility`, `/catalog`, `/dashboard`, `/account`, `/profile`. BFF redirects point at them.
+- All routes are in `src/router.tsx`. Keep the existing addresses: `/`, `/login`, `/register`, `/auth/verify`, `/auth/responsibility`, `/catalog`, `/companies/:profileId`, `/dashboard`, `/reviews`, `/admin/accounts`, `/account`, `/profile`. BFF redirects point at them.
 - Application pages and the `AppShell` layout are `lazy` routes (one chunk each); the root route has `ErrorBoundary` (`src/routes/route-error.tsx`, one guarded reload on a failed chunk) and `HydrateFallback`. `"*"` stays last.
 - Each page renders one `PageTitle` (`src/components/app/page-title.tsx`). It sets `document.title` in a layout effect, which updates the single `<title>` of `index.html`, and resets it to the platform name on unmount; do not render `<title>` elements, React 19 would hoist a second one into `<head>`.
 - The root route (`src/routes/root.tsx`) has a visually hidden `aria-live="polite"` region (`RouteAnnouncer`) that reads the new `document.title` to screen readers after the path changes; it is silent on the first render and on query-string changes. Give every page a meaningful `PageTitle`: that is what gets announced.

@@ -21,6 +21,7 @@
     "catalog": "Каталог",
     "dashboard": "Дашборд",
     "profile": "Компания профилі",
+    "adminAccounts": "Аккаунттар",
     "account": "Менің тіркелгім",
     "toggleSidebar": "Мәзірді көрсету немесе жасыру",
     "sheetTitle": "Мәзір",
@@ -272,6 +273,31 @@
     "found": "{count, plural, other {{total} профиль}}",
     "empty": "Кезек бос.",
     "loadError": "Кезекті жүктеу мүмкін болмады."
+  },
+  "adminAccounts": {
+    "title": "Ұйымдар мен аккаунттар",
+    "typeValue": {
+      "imbc": "IMBC",
+      "operator": "Оператор",
+      "observer": "Бақылаушы",
+      "manufacturer": "Өндіруші"
+    },
+    "majorOperator": "Ірі оператор",
+    "email": "Email",
+    "name": "Аты",
+    "role": "Рөлі",
+    "state": "Күйі",
+    "stateValue": {
+      "invited": "Шақырылған",
+      "active": "Белсенді",
+      "inactive": "Белсенді емес",
+      "blocked": "Бұғатталған"
+    },
+    "lastSignIn": "Соңғы кіру",
+    "never": "Кірмеген",
+    "noAccounts": "Аккаунт жоқ",
+    "empty": "Ұйым жоқ.",
+    "loadError": "Аккаунттарды жүктеу мүмкін болмады."
   },
   "notFound": {
     "title": "Бет табылмады",
