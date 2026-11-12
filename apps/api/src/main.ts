@@ -12,7 +12,7 @@ async function bootstrap(): Promise<void> {
   const env = app.get<Env>(ENV);
 
   app.useLogger(app.get(Logger));
-  configureHttp(app);
+  configureHttp(app, env);
   app.enableShutdownHooks();
 
   // OpenAPI 3.1 — контракт для Web UI и операторов (раздел 13 спецификации).

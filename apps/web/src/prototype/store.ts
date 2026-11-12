@@ -6,10 +6,13 @@ import { useMe } from "@/lib/session";
 import { type AuditEvent, createInitialState, type ProtoState, SCHEMA_VERSION } from "./data";
 import { ACCOUNT, accounts as seedAccounts } from "./data/accounts";
 import { DEMO_PROFILE_ID } from "./data/profiles";
+import { type Change, createSync } from "./remote";
 
 /**
- * Хранилище прототипа: одно состояние на браузер в `localStorage`, общее для всех ролей. Ведущий
- * выходит и входит другой ролью — следующая роль видит, что сделала предыдущая. Сервера нет.
+ * Хранилище прототипа: одно состояние, общее для всех ролей. Если сервер стенда хранит общее
+ * состояние (`remote.ts`, `PROTOTYPE_CABINETS=true`), оно одно на всех пользователей и браузеры стенда,
+ * а `localStorage` — копия для мгновенной отрисовки; иначе состояние живёт в `localStorage` браузера.
+ * Ведущий выходит и входит другой ролью — следующая роль видит, что сделала предыдущая.
  */
 export const STORAGE_KEY = "imbc-prototype-v1";
 
@@ -79,14 +82,48 @@ export function getProtoState(): ProtoState {
   return state;
 }
 
-/** Заменяет состояние целиком. Для тестов и сброса; экраны меняют данные через `useProtoUpdate`. */
-export function setProtoState(next: ProtoState): void {
+/** Состояние в память и `localStorage`, перерисовка экранов. */
+function replace(next: ProtoState): void {
   state = next;
   save(next);
   emit();
 }
 
-/** «Сбросить демо-данные»: исходные данные во всех ролях этого браузера. В журнал не пишется. */
+/**
+ * Документ сервера: этой схемы — годен; объект с более новой версией схемы — сборка устарела;
+ * остальное (пусто, старая схема, повреждён) заменяется исходными данными.
+ */
+function classify(doc: unknown): "usable" | "newer" | "unusable" {
+  if (isState(doc)) return "usable";
+  const version = (doc as { version?: unknown } | null)?.version;
+  return typeof version === "number" && version > SCHEMA_VERSION ? "newer" : "unusable";
+}
+
+const sync = createSync<ProtoState>({ current: getProtoState, replace, initial: createInitialState, classify });
+
+/** Правка в память сразу; в общем режиме — и на сервер (`remote.ts`). */
+function apply(change: Change<ProtoState>): void {
+  replace(change.apply(getProtoState()));
+  sync.record(change);
+}
+
+/**
+ * Кабинет открыт: один раз на загрузку страницы узнать у сервера режим (`remote.ts`). Вызывает шлюз
+ * роли (`gate.tsx`).
+ */
+export function startProtoSync(): void {
+  sync.start();
+}
+
+/**
+ * Заменяет состояние целиком — в общем режиме для всех пользователей стенда. Для тестов и сброса;
+ * экраны меняют данные через `useProtoUpdate`.
+ */
+export function setProtoState(next: ProtoState): void {
+  apply({ apply: () => next });
+}
+
+/** «Сбросить демо-данные»: исходные данные во всех ролях (в общем режиме — у всех). В журнал не пишется. */
 export function resetProto(): void {
   setProtoState(createInitialState());
 }
@@ -96,10 +133,12 @@ function subscribe(listener: () => void) {
   return () => listeners.delete(listener);
 }
 
-// Другая вкладка того же браузера записала состояние: открытые вкладки перечитывают его.
+// Другая вкладка того же браузера записала состояние: открытые вкладки перечитывают его. В общем
+// режиме источник один — сервер: каждая вкладка синхронизируется с ним сама.
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (event) => {
     if (event.key !== null && event.key !== STORAGE_KEY) return;
+    if (sync.getStatus().mode === "shared") return;
     state = load();
     emit();
   });
@@ -189,10 +228,16 @@ export function nowIso(): string {
  * после него в журнал дописывается событие от `actor`. Вне React — для тестов и редких случаев.
  */
 export function commit(actor: ProtoActor, audit: AuditInput, recipe: (draft: ProtoState) => void): void {
-  const draft = structuredClone(getProtoState());
-  recipe(draft);
-  draft.audit.push({ id: newId("au"), at: nowIso(), actor, ...audit });
-  setProtoState(draft);
+  const event = { id: newId("au"), at: nowIso(), actor, ...audit };
+  // После конфликта записи (409) рецепт применяется заново к состоянию сервера (`remote.ts`).
+  apply({
+    apply: (base) => {
+      const draft = structuredClone(base);
+      recipe(draft);
+      draft.audit.push(event);
+      return draft;
+    },
+  });
 }
 
 /** `const update = useProtoUpdate(); update({ action, subject, summary }, (draft) => { … })`. */

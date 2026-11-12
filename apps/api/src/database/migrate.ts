@@ -9,6 +9,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
 import { backfillSpecV13 } from './backfill.js';
+import { createPrototypeTable } from './prototype-store.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = process.env.MIGRATIONS_DIR ?? resolve(here, '../../drizzle');
@@ -29,6 +30,13 @@ async function main(): Promise<void> {
       `Перенос v1.3: organizations ${moved.organizations}, user_accounts ${moved.userAccounts}, ` +
         `manufacturer_profiles ${moved.manufacturerProfiles}, catalog_visible ${moved.catalogVisible}`,
     );
+
+    // Общее состояние прототипа кабинетов — вне журнала Drizzle, только при флаге; до выдачи прав роли
+    // приложения, чтобы GRANT ниже захватил и эту таблицу.
+    if (process.env.PROTOTYPE_CABINETS === 'true') {
+      await createPrototypeTable(pool);
+      console.log('Таблица prototype_state готова');
+    }
 
     // Журнал аудита — только добавление (AUD-02): у роли приложения нет UPDATE/DELETE.
     const appRole = process.env.DB_APP_ROLE;

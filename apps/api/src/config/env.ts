@@ -43,6 +43,14 @@ const envSchema = z
         .optional(),
     ),
     DEV_FIXED_OTP_ACCOUNTS: developmentOtpAccounts,
+    /**
+     * Общее состояние прототипа кабинетов ролей (`apps/web/src/prototype`) в таблице `prototype_state`:
+     * маршруты `/api/v1/prototype/state` и таблица (задание `migrate`) есть только при `true`.
+     */
+    PROTOTYPE_CABINETS: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((value) => value === 'true'),
     PORT: z.coerce.number().int().default(3001),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
     /** Роль процесса из одного образа: api (HTTP) или worker (очередь и расписание). */
