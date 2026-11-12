@@ -1,4 +1,4 @@
-import { computeBinCheckDigit } from "@imbc/contracts";
+import { computeBinCheckDigit, LEGAL_PLACEHOLDER_MARKER } from "@imbc/contracts";
 import { focusManager } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Providers } from "@/components/app/providers";
 import { leaveApp } from "@/lib/leave-app";
-import { LegalDialog, PLACEHOLDER } from "@/routes/auth/legal-dialog";
+import { LegalDialog } from "@/routes/auth/legal-dialog";
 import type { Me } from "@/lib/session";
 
 import en from "../messages/en.json";
@@ -622,6 +622,35 @@ describe("регистрация производителя (MAN-01, MAN-02, FC-
     expect(JSON.parse(String(second?.[1]?.body))).toMatchObject({ ndaVersion: 2 });
   });
 
+  it("перечитывание вернуло 503 nda_unavailable — «Регистрация временно недоступна» на месте галочки, отправка недоступна, введённое на месте", async () => {
+    let unpublished = false;
+    stubApi({
+      [TERMS_PATH]: () =>
+        unpublished
+          ? Response.json(
+              { type: "about:blank", title: "nda_unavailable", status: 503, code: "nda_unavailable" },
+              { status: 503 },
+            )
+          : Response.json({ nda: { version: 1, body: "NDA body" } }),
+    });
+    const { user } = renderRoute("/register");
+    await user.type(await screen.findByLabelText(kk.register.companyName), "ТОО Тест");
+    await user.click(await screen.findByRole("checkbox", { name: ndaLabel(kk) }));
+
+    unpublished = true;
+    try {
+      await returnToTabLater();
+
+      expect(await screen.findByText(kk.register.ndaUnavailable)).toBeTruthy();
+      expect(screen.queryByRole("checkbox", { name: ndaLabel(kk) })).toBeNull();
+      expect(submitButton().disabled).toBe(true);
+      expect(describedBy(submitButton())).toContain(kk.register.ndaUnavailable);
+      expect((screen.getByLabelText(kk.register.companyName) as HTMLInputElement).value).toBe("ТОО Тест");
+    } finally {
+      focusManager.setFocused(undefined);
+    }
+  });
+
   it("terms 503 — «Регистрация временно недоступна», сбой сети — повтор; кнопка отправки недоступна", async () => {
     stubApi({ [TERMS_PATH]: problem(503, "nda_unavailable") });
     renderRoute("/register");
@@ -662,10 +691,10 @@ describe("регистрация производителя (MAN-01, MAN-02, FC-
   it("отметка «Заглушка» есть тогда и только тогда, когда текст начинается с маркера временного текста (FC-02)", async () => {
     // Маркер и тексты не расходятся: заглушки условий и политики во всех языках начинаются с него.
     for (const messages of [kk, ru, en]) {
-      expect(messages.legal.terms.body).toMatch(PLACEHOLDER);
-      expect(messages.legal.privacy.body).toMatch(PLACEHOLDER);
+      expect(messages.legal.terms.body).toMatch(LEGAL_PLACEHOLDER_MARKER);
+      expect(messages.legal.privacy.body).toMatch(LEGAL_PLACEHOLDER_MARKER);
     }
-    expect(SEED_NDA).toMatch(PLACEHOLDER);
+    expect(SEED_NDA).toMatch(LEGAL_PLACEHOLDER_MARKER);
 
     for (const [locale, messages] of [
       ["kk", kk],

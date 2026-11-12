@@ -1,3 +1,4 @@
+import { LEGAL_PLACEHOLDER_MARKER } from "@imbc/contracts";
 import { type ReactElement, useId } from "react";
 import { useTranslations } from "use-intl";
 
@@ -14,15 +15,10 @@ import {
 } from "@/components/ui/dialog";
 
 /**
- * Маркер временного текста: с него начинаются заглушки условий и политики в файлах переводов и текст NDA
- * из seed стенда. Отметку «Заглушка» решает сам текст: настоящий текст IMBC придёт без маркера (FC-02).
- */
-export const PLACEHOLDER = /^(PLACEHOLDER|ВРЕМЕННЫЙ ТЕКСТ|УАҚЫТША МӘТІН) — /;
-
-/**
  * Текст соглашения перед галочкой формы регистрации (MAN-01): условия платформы, политика персональных
  * данных, NDA. Текст — обычный, абзацы разделены пустой строкой; HTML не разбирается. Временный текст
- * помечен «Заглушка», чтобы его не приняли за юридический. Закрытие возвращает фокус на кнопку-триггер.
+ * (начинается с LEGAL_PLACEHOLDER_MARKER) помечен «Заглушка», чтобы его не приняли за юридический.
+ * Закрытие возвращает фокус на кнопку-триггер.
  */
 export function LegalDialog({ title, body, trigger }: { title: string; body: string; trigger: ReactElement }) {
   const t = useTranslations("legal");
@@ -33,7 +29,7 @@ export function LegalDialog({ title, body, trigger }: { title: string; body: str
       {/* Своя кнопка закрытия: у встроенной подпись «Close» не переводится (LANG-01). */}
       <DialogContent showCloseButton={false} className="flex max-h-[85dvh] flex-col sm:max-w-lg">
         <DialogHeader>
-          {PLACEHOLDER.test(body.trimStart()) && <Badge variant="secondary">{t("placeholder")}</Badge>}
+          {LEGAL_PLACEHOLDER_MARKER.test(body.trimStart()) && <Badge variant="secondary">{t("placeholder")}</Badge>}
           <DialogTitle id={titleId} className="leading-snug">
             {title}
           </DialogTitle>

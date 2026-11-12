@@ -16,6 +16,7 @@ import {
   inviteAccountSchema,
   loginEmailSchema,
   registrationRequestSchema,
+  LEGAL_PLACEHOLDER_MARKER,
   registrationTermsReadSchema,
   registrationTermsSchema,
   normalizeCompanyName,
@@ -108,6 +109,13 @@ describe('регистрация производителя (MAN-01, FC-02, GEN-
     });
     expect(registrationTermsSchema.safeParse({ nda: { version: 1, body: '' } }).success).toBe(false);
     expect(registrationTermsSchema.safeParse({ nda: { version: 1, body: 'Текст', id: 'x' } }).success).toBe(false);
+  });
+
+  it('маркер временного текста: три начальные фразы с длинным тире; дефис или другие слова — не заглушка (FC-02)', () => {
+    for (const text of ['PLACEHOLDER — NOT A LEGAL TEXT.', 'ВРЕМЕННЫЙ ТЕКСТ — НЕ ЮРИДИЧЕСКИЙ ДОКУМЕНТ.', 'УАҚЫТША МӘТІН — ЗАҢДЫҚ ҚҰЖАТ ЕМЕС.'])
+      expect(text, text).toMatch(LEGAL_PLACEHOLDER_MARKER);
+    for (const text of ['PLACEHOLDER - NOT A LEGAL TEXT.', 'ВРЕМЕННЫЙ ТЕКСТ – НЕ ДОКУМЕНТ.', 'Настоящий текст соглашения.', ' PLACEHOLDER — с пробелом впереди.'])
+      expect(text, text).not.toMatch(LEGAL_PLACEHOLDER_MARKER);
   });
 
   it('форма читает текст условий нестрого: новое поле API не мешает, неверная форма ответа — отказ (FC-02, NFR-06)', () => {

@@ -1,4 +1,5 @@
 import { QueryCache, QueryClient } from "@tanstack/react-query";
+import { ZodError } from "zod";
 
 import { ApiError } from "./api";
 import { meKey } from "./session";
@@ -6,8 +7,10 @@ import { meKey } from "./session";
 /**
  * Повтор запроса: сбой сети и 5xx — до двух раз. 4xx не повторяем: это ответ сервера, а не сбой сети.
  * `503 nda_unavailable` — тоже ответ (NDA не опубликована): повтор только тратит лимит маршрута (FC-02).
+ * Ответ неверной формы (ZodError разбора) повтор не исправит.
  */
 export function retryQuery(count: number, error: unknown): boolean {
+  if (error instanceof ZodError) return false;
   if (error instanceof ApiError && (error.status < 500 || error.code === "nda_unavailable")) return false;
   return count < 2;
 }

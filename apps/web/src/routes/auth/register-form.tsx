@@ -71,8 +71,10 @@ export function RegisterForm() {
     // Ответ неверной формы — ошибка загрузки, а не «undefined нұсқа» и галочка без номера версии.
     queryFn: async () => registrationTermsReadSchema.parse(await api<unknown>("/v1/registrations/terms")),
   });
+  const ndaUnavailable = terms.error instanceof ApiError && terms.error.code === "nda_unavailable";
   // Последний удачный ответ остаётся на экране и при сбое перечитывания; устаревшую версию отвергнет сервер (409).
-  const nda = terms.data?.nda;
+  // NDA снята с публикации (503 nda_unavailable) — отправка получила бы тот же 503: галочку заменяет сообщение.
+  const nda = ndaUnavailable ? undefined : terms.data?.nda;
   const ndaAccepted = nda !== undefined && form.ndaVersion === nda.version;
   // Отмечена версия, которой больше нет: фоновое перечитывание принесло новую.
   const ndaOutdated = nda !== undefined && form.ndaVersion !== null && form.ndaVersion !== nda.version;
@@ -163,7 +165,6 @@ export function RegisterForm() {
     setForm((current) => ({ ...current, [field]: checked }));
     setErrors((current) => ({ ...current, [field]: undefined }));
   };
-  const ndaUnavailable = terms.error instanceof ApiError && terms.error.code === "nda_unavailable";
   // Без текста NDA сообщение стоит на месте галочки, при сбое перечитывания — под ней.
   const termsAlert = terms.isError && (
     <Alert variant="destructive">

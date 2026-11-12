@@ -27,6 +27,9 @@ export const registrationRequestSchema = z
   .strict();
 export type RegistrationRequest = z.input<typeof registrationRequestSchema>;
 
+/** Начало временного текста (заглушки) соглашения: по нему форма показывает отметку «Заглушка» (FC-02). */
+export const LEGAL_PLACEHOLDER_MARKER = /^(PLACEHOLDER|ВРЕМЕННЫЙ ТЕКСТ|УАҚЫТША МӘТІН) — /;
+
 /** Текст текущей версии NDA для формы регистрации (MAN-01, FC-02). */
 export const registrationTermsSchema = z
   .object({ nda: z.object({ version: z.number().int().positive(), body: z.string().min(1) }).strict() })
