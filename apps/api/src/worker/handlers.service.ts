@@ -235,7 +235,8 @@ export class JobHandlers {
 
   /**
    * Установка пароля создаёт профиль (MAN-03, NOT-23) — с ней ставится одно чтение Adata (IMBC-07).
-   * Сбой не мешает отзыву сеансов и письмам NOT-03; повтор события в окне опроса даёт skipped.
+   * Сбой не мешает отзыву сеансов и письмам NOT-03. Повтор события в пятиминутном окне опроса даёт skipped,
+   * а для попытки в quota_exhausted или not_configured — requeued (новое задание и запись аудита).
    */
   private async requestAdataRead(subject: string): Promise<void> {
     try {

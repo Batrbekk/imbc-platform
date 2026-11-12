@@ -263,7 +263,7 @@
       "title": "Data from Adata",
       "waiting": "Requesting company data from Adata. This usually takes up to two minutes.",
       "received": "Received from Adata on {date}",
-      "unavailable": "Adata did not answer the request. The fields below are not prefilled.",
+      "unavailable": "Could not get the data from Adata. The fields below are not prefilled.",
       "notConfigured": "The connection to Adata is not set up on this platform yet.",
       "quotaExhausted": "The monthly Adata request limit has been reached. The data will be requested at your next sign-in after the limit resets.",
       "notRequested": "Adata was not queried for this profile.",
