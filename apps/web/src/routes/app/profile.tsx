@@ -14,6 +14,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useFormat } from "@/i18n/format";
 import { api } from "@/lib/api";
 
+import { AdataReadCard } from "./profile-adata";
+
 /**
  * Профиль своей компании, только для чтения (MAN-41, MAN-46, IMBC-22). Сервер отдаёт только профиль
  * организации сеанса (GEN-11). Заголовок страницы и вкладки — «Профиль компании».
@@ -33,7 +35,11 @@ export function ProfilePage() {
       </h1>
 
       {result.data ? (
-        <ProfileView profile={result.data} />
+        <>
+          <ProfileView profile={result.data} />
+          {/* Чтение Adata — свой запрос; без профиля его нет (MAN-07). */}
+          <AdataReadCard />
+        </>
       ) : result.isError ? (
         <Alert variant="destructive">
           <AlertDescription>{t("loadError")}</AlertDescription>
