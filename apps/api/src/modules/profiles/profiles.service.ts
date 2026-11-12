@@ -1,13 +1,23 @@
-import { type OwnProfile, ownProfileSchema, PROFILE_SECTIONS } from '@imbc/contracts';
+import {
+  type OwnAdataRead,
+  ownAdataReadSchema,
+  type OwnProfile,
+  ownProfileSchema,
+  PREFILL_FIELDS,
+  PROFILE_SECTIONS,
+} from '@imbc/contracts';
 import { Inject, Injectable } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { ProblemException } from '../../common/problem.js';
 import { parseResponse } from '../../common/response.js';
 import { DB, type Database } from '../../database/database.module.js';
 import {
   catalogVisible,
+  externalCheck,
+  externalCheckAttempt,
   manufacturerProfiles,
   organizations,
+  prefilledValue,
   profileSections,
   sectionRevisions,
 } from '../../database/schema/index.js';
@@ -64,6 +74,64 @@ export class ProfilesService {
       },
       'свой профиль',
     );
+  }
+
+  /**
+   * Чтение Adata своего профиля (MAN-06, MAN-07, IMBC-07). Профиль, проверка, попытка и значения ищутся только
+   * по организации сеанса (GEN-11); у организации без профиля — 404. Нет проверки или попытки — not_requested,
+   * queued и polling — waiting, иначе состояние попытки; недоступность Adata — состояние, не ошибка (EXT-04).
+   * Значения — только у received. failure, poll_token, bin, value попытки и квота не выбираются, а строгая
+   * схема ответа не пропустит лишний ключ. Adata не вызывается, попытка и задание не создаются.
+   */
+  async ownAdata(organizationId: string): Promise<OwnAdataRead> {
+    const p = manufacturerProfiles;
+    const a = externalCheckAttempt;
+    const [row] = await this.db
+      .select({ attemptId: a.id, state: a.state, requestedAt: a.requestedAt, completedAt: a.completedAt })
+      .from(p)
+      .leftJoin(
+        externalCheck,
+        and(
+          eq(externalCheck.profileId, p.id),
+          eq(externalCheck.organizationId, organizationId),
+          eq(externalCheck.connector, 'adata'),
+        ),
+      )
+      .leftJoin(a, eq(a.id, externalCheck.latestAttemptId))
+      .where(eq(p.organizationId, organizationId))
+      .limit(1);
+    if (!row) throw new ProblemException(404, 'not_found', 'Профиль не найден');
+
+    const read = (value: OwnAdataRead) => parseResponse(ownAdataReadSchema, value, 'чтение Adata');
+    if (!row.attemptId || !row.state || !row.requestedAt)
+      return read({ state: 'not_requested', requestedAt: null, readAt: null, fields: [] });
+
+    const requestedAt = row.requestedAt.toISOString();
+    if (row.state !== 'received') {
+      const state = row.state === 'queued' || row.state === 'polling' ? 'waiting' : row.state;
+      return read({ state, requestedAt, readAt: null, fields: [] });
+    }
+
+    const v = prefilledValue;
+    const values = await this.db
+      .select({ field: v.field, value: v.value, label: v.label, readAt: v.readAt })
+      .from(v)
+      .where(and(eq(v.attemptId, row.attemptId), eq(v.organizationId, organizationId), eq(v.source, 'adata')))
+      .orderBy(asc(v.position));
+    // Порядок показа — PREFILL_FIELDS; поле, которого Adata не вернул, в ответ не входит.
+    const fields = PREFILL_FIELDS.flatMap((field) => {
+      const rows = values.filter((r) => r.field === field);
+      if (rows.length === 0) return [];
+      return [
+        {
+          field,
+          source: 'adata' as const,
+          readAt: rows[0]!.readAt.toISOString(),
+          items: rows.map(({ value, label }) => ({ value, label })),
+        },
+      ];
+    });
+    return read({ state: 'received', requestedAt, readAt: row.completedAt?.toISOString() ?? null, fields });
   }
 
   /**

@@ -1,5 +1,5 @@
 // Оболочка рабочих страниц: интерфейс прячет недоступное, решает сервер (GEN-08, GEN-10).
-import { can, type Dashboard, type OwnProfile, ROLES, roleHome } from "@imbc/contracts";
+import { can, type Dashboard, type OwnAdataRead, type OwnProfile, ROLES, roleHome } from "@imbc/contracts";
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import { useEffect } from "react";
 import type { NonIndexRouteObject, RouteObject } from "react-router";
@@ -77,6 +77,7 @@ function withCompanyPage(): RouteObject[] {
 }
 
 const OWN_PROFILE = "/api/v1/profiles/own";
+const OWN_ADATA = "/api/v1/profiles/own/adata";
 const ADMIN_ACCOUNTS = "/api/v1/admin/accounts";
 /** Все запросы к /api/v1 — без исключений. */
 const apiCalls = (api: ReturnType<typeof stubApi>) =>
@@ -84,7 +85,7 @@ const apiCalls = (api: ReturnType<typeof stubApi>) =>
 
 /** Запросы стартовой страницы роли: после перехода с закрытой страницы других запросов к /api/v1 нет. */
 const START_REQUESTS: Record<Me["user"]["role"], string[]> = {
-  manufacturer: [OWN_PROFILE],
+  manufacturer: [OWN_PROFILE, OWN_ADATA],
   expert: ["/api/v1/reviews/queue"],
   administrator: [ADMIN_ACCOUNTS],
   director: ["/api/v1/dashboard"],
@@ -118,12 +119,15 @@ const OWN_PROFILE_BODY: OwnProfile = {
   verifiedAt: null,
 };
 
+const OWN_ADATA_BODY: OwnAdataRead = { state: "not_requested", requestedAt: null, readAt: null, fields: [] };
+
 function stubWorkspace(user: Me) {
   return stubApi({
     "GET /api/auth/me": { body: user },
     "GET /api/v1/catalog/search": { body: EMPTY_PAGE },
     "GET /api/v1/dashboard": { body: DASHBOARD },
     [`GET ${OWN_PROFILE}`]: { body: OWN_PROFILE_BODY },
+    [`GET ${OWN_ADATA}`]: { body: OWN_ADATA_BODY },
     "GET /api/v1/reviews/queue": { body: { items: [], total: 0 } },
     [`GET ${ADMIN_ACCOUNTS}`]: { body: { organizations: [] } },
   });
