@@ -1,5 +1,5 @@
 // Письма производителю (раздел 8.2): результат проверки, сроки сертификатов, актуальность, запросы.
-// NOT-05, NOT-06, NOT-12, NOT-13, NOT-15, NOT-16, NOT-18, NOT-32.
+// NOT-05, NOT-06, NOT-12, NOT-13, NOT-15, NOT-16, NOT-18, NOT-27, NOT-28, NOT-32.
 import type { ProfileSection } from "@imbc/contracts";
 import { Link } from "react-router";
 
@@ -75,7 +75,7 @@ function NotificationBody({ n }: { n: ManufacturerNotification }) {
   const p = n.params;
   switch (n.notId) {
     case "NOT-05":
-      return <p className="text-sm">{p.result === "verified" ? t("notBody05Verified") : t("notBody05Returned")}</p>;
+      return <ReviewResult params={p} />;
     case "NOT-06":
       return (
         <p className="text-sm">
@@ -92,7 +92,7 @@ function NotificationBody({ n }: { n: ManufacturerNotification }) {
       return <p className="text-sm">{t("notBody16")}</p>;
     case "NOT-13": {
       // Письмо говорит, что спросил оператор, и не называет его (NOT-32).
-      const section = isSection(p.section) ? (p.section as ProfileSection) : null;
+      const section = isSection(p.section) ? p.section : null;
       return (
         <div className="flex flex-col gap-2 text-sm">
           <p>{section ? t("notBody13Section", { section: common(`section.${section}`) }) : t("notBody13")}</p>
@@ -104,4 +104,45 @@ function NotificationBody({ n }: { n: ManufacturerNotification }) {
       );
     }
   }
+}
+
+/** Секции из списка письма через запятую; неизвестные ключи пропускаются (старые записи). */
+const sectionsOf = (value: string | undefined): ProfileSection[] =>
+  (value ?? "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(isSection);
+
+/**
+ * NOT-05 по `result`: verified; returned — отклонённые секции с комментариями (NOT-27); changes —
+ * принятые и отклонённые правки с комментариями, без слов «профиль возвращён» (NOT-28).
+ */
+function ReviewResult({ params }: { params: Record<string, string> }) {
+  const t = useDictionary(screenTexts);
+  const common = useCommonTexts();
+  const result = params.result;
+  if (result === "verified") return <p className="text-sm">{t("notBody05Verified")}</p>;
+  const accepted = sectionsOf(params.accepted);
+  const rejected = sectionsOf(params.rejected);
+  return (
+    <div className="flex flex-col gap-2 text-sm">
+      <p>{result === "changes" ? t("notBody05Changes") : t("notBody05Returned")}</p>
+      {result === "changes" && accepted.length > 0 && (
+        <p>{t("notAccepted", { sections: accepted.map((s) => common(`section.${s}`)).join(", ") })}</p>
+      )}
+      {rejected.length > 0 && (
+        <div>
+          <p>{t("notRejected")}</p>
+          <ul className="list-disc pl-5">
+            {rejected.map((s) => (
+              <li key={s}>
+                <span className="font-medium">{common(`section.${s}`)}</span>
+                {params[`comment.${s}`] && <span className="text-muted-foreground"> — {params[`comment.${s}`]}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
 }

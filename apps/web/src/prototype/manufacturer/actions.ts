@@ -8,7 +8,19 @@ import { localized, translate } from "../i18n";
 import { commonTexts } from "../labels";
 import { currentNda } from "../rules";
 import { extOf, newId, nowIso, useActor, useProtoUpdate } from "../store";
-import { EMPTY_EXT, fileSlots, historyKey, isLocked, type ManufacturerExt, readExt, sameFile, SECTIONS } from "./model";
+import {
+  changedPendingSections,
+  currentSections,
+  EMPTY_EXT,
+  fileSlots,
+  sameValue,
+  historyKey,
+  isLocked,
+  type ManufacturerExt,
+  readExt,
+  sameFile,
+  SECTIONS,
+} from "./model";
 import { type TextKey, texts } from "./texts";
 
 const LOCALES: Locale[] = ["en", "ru", "kk"];
@@ -37,8 +49,10 @@ export function useManufacturerActions(profile: ProtoProfile) {
    * Сохранить секцию (MAN-40). Draft и Returned — значения профиля; Verified — ожидающая правка,
    * операторы видят прежние значения (MAN-45, REV-08). Заменённый файл уходит в историю (MAN-36).
    */
-  const saveSection = <S extends ProfileSection>(section: S, value: ProfileSections[S]) => {
-    if (isLocked(profile)) return;
+  const saveSection = <S extends ProfileSection>(section: S, value: ProfileSections[S]): boolean => {
+    if (isLocked(profile)) return false;
+    // Сохранение без изменений — не правка: ни записи, ни события журнала.
+    if (sameValue(value, currentSections(profile)[section])) return false;
     update(
       {
         action: "section.save",
@@ -56,15 +70,13 @@ export function useManufacturerActions(profile: ProtoProfile) {
             ext.fileHistory[key] = [...(ext.fileHistory[key] ?? []), old];
           }
         }
-        if (p.status === "verified") {
-          p.pending[section] = value;
-          p.review[section].changed = true;
-        } else {
-          p.sections[section] = value;
-          if (p.review[section].decision !== null) p.review[section].changed = true;
-        }
+        if (p.status === "verified") p.pending[section] = value;
+        else p.sections[section] = value;
+        // «Правили после последнего решения SME»: ставит только кабинет производителя, снимает SME.
+        p.review[section].changed = true;
       },
     );
+    return true;
   };
 
   /** «Отправить на проверку» с подтверждением достоверности (MAN-42); Draft или Returned → Submitted. */
@@ -74,12 +86,11 @@ export function useManufacturerActions(profile: ProtoProfile) {
       if (p.status !== "draft" && p.status !== "returned") return;
       p.status = "submitted";
       p.submittedAt = nowIso();
-      // Отклонённые и изменённые секции ждут нового решения; верифицированные без правок остаются (MAN-44).
+      // Новое решение нужно только по изменённым секциям; решения по нетронутым сохраняются,
+      // `changed` остаётся для SME (MAN-44, NOT-29).
       for (const s of SECTIONS) {
         const r = p.review[s];
-        if (r.decision === "rejected" || (r.decision !== null && r.changed)) {
-          p.review[s] = { ...r, decision: null, comment: null, decidedBy: null, decidedAt: null };
-        }
+        if (r.changed) p.review[s] = { ...r, decision: null, comment: null, decidedBy: null, decidedAt: null };
       }
       for (const item of [...p.sections.certificates, ...p.sections.documents]) {
         if (item.status === "uploaded") item.status = "under_review";
@@ -98,7 +109,8 @@ export function useManufacturerActions(profile: ProtoProfile) {
   const sendChanges = () =>
     update({ action: "profile.send_changes", subject, summary: localized(texts, "auditSendChanges") }, (draft) => {
       const p = find(draft, profile.id);
-      if (p.status !== "verified" || Object.keys(p.pending).length === 0) return;
+      // Без правок после последнего решения SME отправлять нечего (MAN-45).
+      if (p.status !== "verified" || changedPendingSections(p).length === 0) return;
       p.pendingChanges = true;
       for (const item of [...(p.pending.certificates ?? []), ...(p.pending.documents ?? [])]) {
         if (item.status === "uploaded") item.status = "under_review";

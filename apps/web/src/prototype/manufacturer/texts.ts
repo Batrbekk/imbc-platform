@@ -5,7 +5,7 @@ import { useProto } from "../store";
 
 export const texts = defineDictionary({
   en: {
-    menuProfile: "Company profile",
+    menuProfile: "Profile sections",
     menuUpdateStatus: "Update status",
     menuRequests: "Operator requests",
     menuForecast: "Demand forecast",
@@ -70,6 +70,7 @@ export const texts = defineDictionary({
     sendChangesDescription:
       "The changed sections go to the SME who verified the profile. The profile stays Verified while they are checked.",
     noPending: "No pending changes yet.",
+    sendChangesNeedEdit: "Correct a rejected section first: nothing has been edited since the SME's decision.",
     unlock: "Unlock to edit",
     unlockTitle: "Unlock the profile?",
     unlockDescription:
@@ -99,6 +100,7 @@ export const texts = defineDictionary({
     operatorsSeeVerified:
       "The profile is Verified: a saved change becomes a pending change. Operators see the last verified values until the SME accepts it.",
     saved: "Section saved.",
+    nothingChanged: "Nothing changed: the section was not saved.",
     savedPending: "Saved as a pending change. Send the changes for review from the profile page.",
     save: "Save section",
     remove: "Remove",
@@ -199,6 +201,7 @@ export const texts = defineDictionary({
     shareholderN: "Shareholder {n}",
     addShareholder: "Add shareholder",
     sharesTotal: "Total of shares: {total} %",
+    errShare: "Shareholder {n}: enter the share in percent.",
     sharesWarning: "The shares total {total} %, not 100 %. You can still send the profile for review.",
 
     noProducts: "No product lines yet.",
@@ -256,7 +259,7 @@ export const texts = defineDictionary({
     auditRead: "Marked an email as read",
   },
   ru: {
-    menuProfile: "Профиль компании",
+    menuProfile: "Разделы профиля",
     menuUpdateStatus: "Актуальность",
     menuRequests: "Запросы операторов",
     menuForecast: "Прогноз спроса",
@@ -322,6 +325,7 @@ export const texts = defineDictionary({
     sendChangesDescription:
       "Изменённые секции уйдут SME, который верифицировал профиль. Пока их проверяют, профиль остаётся Verified.",
     noPending: "Ожидающих правок пока нет.",
+    sendChangesNeedEdit: "Сначала исправьте отклонённую секцию: после решения SME ничего не изменено.",
     unlock: "Разблокировать для правки",
     unlockTitle: "Разблокировать профиль?",
     unlockDescription:
@@ -351,6 +355,7 @@ export const texts = defineDictionary({
     operatorsSeeVerified:
       "Профиль верифицирован: сохранённая правка станет ожидающей. Операторы видят последние верифицированные значения, пока SME её не примет.",
     saved: "Секция сохранена.",
+    nothingChanged: "Ничего не изменилось: секция не сохранялась.",
     savedPending: "Сохранено как ожидающая правка. Отправьте изменения на проверку со страницы профиля.",
     save: "Сохранить секцию",
     remove: "Удалить",
@@ -451,6 +456,7 @@ export const texts = defineDictionary({
     shareholderN: "Акционер {n}",
     addShareholder: "Добавить акционера",
     sharesTotal: "Сумма долей: {total} %",
+    errShare: "Акционер {n}: укажите долю в процентах.",
     sharesWarning: "Сумма долей — {total} %, а не 100 %. Профиль всё равно можно отправить на проверку.",
 
     noProducts: "Продуктовых линий пока нет.",
@@ -508,7 +514,7 @@ export const texts = defineDictionary({
     auditRead: "Письмо отмечено прочитанным",
   },
   kk: {
-    menuProfile: "Компания профилі",
+    menuProfile: "Профиль бөлімдері",
     menuUpdateStatus: "Өзектілік",
     menuRequests: "Оператор сұраулары",
     menuForecast: "Сұраныс болжамы",
@@ -573,6 +579,7 @@ export const texts = defineDictionary({
     sendChangesDescription:
       "Өзгерген бөлімдер профильді верификациялаған SME-ге жіберіледі. Тексеріс кезінде профиль Verified күйінде қалады.",
     noPending: "Күтудегі түзетулер әзірге жоқ.",
+    sendChangesNeedEdit: "Алдымен қабылданбаған бөлімді түзетіңіз: SME шешімінен кейін ештеңе өзгертілмеген.",
     unlock: "Түзету үшін бұғатты ашу",
     unlockTitle: "Профильдің бұғатын ашу керек пе?",
     unlockDescription:
@@ -602,6 +609,7 @@ export const texts = defineDictionary({
     operatorsSeeVerified:
       "Профиль верификацияланған: сақталған түзету күтудегі түзетуге айналады. SME қабылдағанша операторлар соңғы верификацияланған мәндерді көреді.",
     saved: "Бөлім сақталды.",
+    nothingChanged: "Ештеңе өзгермеді: бөлім сақталмады.",
     savedPending: "Күтудегі түзету ретінде сақталды. Өзгерістерді профиль бетінен тексеруге жіберіңіз.",
     save: "Бөлімді сақтау",
     remove: "Жою",
@@ -702,6 +710,7 @@ export const texts = defineDictionary({
     shareholderN: "Акционер {n}",
     addShareholder: "Акционер қосу",
     sharesTotal: "Үлестер сомасы: {total} %",
+    errShare: "Акционер {n}: үлесті пайызбен көрсетіңіз.",
     sharesWarning: "Үлестер сомасы {total} %, 100 % емес. Профильді бәрібір тексеруге жіберуге болады.",
 
     noProducts: "Өнім желілері әзірге жоқ.",

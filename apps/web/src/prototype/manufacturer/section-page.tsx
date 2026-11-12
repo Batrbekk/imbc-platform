@@ -1,5 +1,5 @@
 // Секция профиля на своём адресе: форма, полнота, статус, комментарий SME, блокировка.
-// MAN-40, MAN-41, MAN-43, MAN-44, MAN-45, MAN-46.
+// MAN-40, MAN-41, MAN-43, MAN-44, MAN-45, MAN-46, REV-07.
 import type { ProfileSection } from "@imbc/contracts";
 import { ArrowLeftIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
@@ -21,7 +21,7 @@ import { CertificatesForm, DocumentsForm } from "./forms-documents";
 import { ContactsForm, MainForm, PersonnelForm, ShareholdersForm } from "./forms-company";
 import { ProductionForm, ProductsForm } from "./forms-products";
 import { LockedContext } from "./locked";
-import { currentSections, isLocked, isSection, sectionCompleteness, sectionState } from "./model";
+import { currentSections, isLocked, isSection, sectionCompleteness, sectionState, visibleRejection } from "./model";
 import { ManufacturerPage } from "./page";
 import { MissingList, SectionStateBadge } from "./parts";
 import { texts } from "./texts";
@@ -67,13 +67,14 @@ function SectionScreen({ section, back }: { section: ProfileSection; back: React
   const [notice, setNotice] = useState<string | null>(null);
   const values = currentSections(profile);
   const completeness = sectionCompleteness(state, section, values);
-  const review = profile.review[section];
+  // Решение SME — только после закрытия проверки (REV-07, MAN-44).
+  const rejection = visibleRejection(profile, section);
   const locked = isLocked(profile);
   const verified = profile.status === "verified";
 
   const save = <S extends ProfileSection>(s: S, value: ProfileSections[S]) => {
-    actions.saveSection(s, value);
-    setNotice(verified ? t("savedPending") : t("saved"));
+    const saved = actions.saveSection(s, value);
+    setNotice(!saved ? t("nothingChanged") : verified ? t("savedPending") : t("saved"));
   };
 
   return (
@@ -87,10 +88,10 @@ function SectionScreen({ section, back }: { section: ProfileSection; back: React
             : t("sectionCompleteness", { percent: format.number(completeness.percent) })}
         </span>
       </div>
-      {review.decision === "rejected" && review.comment && (
+      {rejection !== null && (
         <Alert variant="destructive">
           <AlertTitle>{t("rejectedTitle")}</AlertTitle>
-          <AlertDescription>{t("smeComment", { comment: review.comment })}</AlertDescription>
+          {rejection && <AlertDescription>{t("smeComment", { comment: rejection })}</AlertDescription>}
         </Alert>
       )}
       {locked && (
@@ -112,8 +113,8 @@ function SectionScreen({ section, back }: { section: ProfileSection; back: React
       <Card>
         <CardContent>
           <LockedContext value={locked}>
-            {/* Ключ по журналу: после сохранения, сброса или смены профиля форма берёт значения заново. */}
-            <SectionForm key={`${profile.id}:${state.audit.length}`} section={section} profile={profile} save={save} />
+            {/* Ключ — профиль и секция: события журнала из другой вкладки не сбрасывают несохранённую правку. */}
+            <SectionForm key={`${profile.id}:${section}`} section={section} profile={profile} save={save} />
           </LockedContext>
         </CardContent>
       </Card>

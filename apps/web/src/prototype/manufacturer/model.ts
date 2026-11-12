@@ -185,17 +185,54 @@ export function profileCompleteness(state: ProtoState, profile: ProtoProfile) {
 export type SectionState =
   "not_sent" | "submitted" | "under_review" | "verified" | "rejected" | "corrected" | "pending" | "pending_sent";
 
+/**
+ * Решения SME видны производителю, только когда проверка закрыта: профиль Returned (MAN-44, REV-07)
+ * или Verified без отправленных правок (решения по pending changes после закрытия круга, REV-08).
+ * Пока профиль Submitted, Under review или правки у SME, промежуточные решения не показываются.
+ */
+export function decisionsVisible(profile: ProtoProfile): boolean {
+  return profile.status === "returned" || (profile.status === "verified" && !profile.pendingChanges);
+}
+
+/** Отклонение SME с комментарием, если его уже можно показать производителю. */
+export function visibleRejection(profile: ProtoProfile, section: ProfileSection): string | null {
+  const r = profile.review[section];
+  return decisionsVisible(profile) && r.decision === "rejected" ? (r.comment ?? "") : null;
+}
+
+/**
+ * Статус секции только из общих полей: `review[section].decision`, `changed` («правили после
+ * последнего решения SME»), `pending[section]` и `pendingChanges` («правки у SME»).
+ */
 export function sectionState(profile: ProtoProfile, section: ProfileSection): SectionState {
-  const review = profile.review[section];
-  if (profile.status === "verified") {
-    if (profile.pending[section] !== undefined) return profile.pendingChanges ? "pending_sent" : "pending";
-    return review.decision === "rejected" ? "rejected" : "verified";
+  const r = profile.review[section];
+  switch (profile.status) {
+    case "verified":
+      if (profile.pending[section] === undefined) return "verified";
+      if (profile.pendingChanges) return "pending_sent";
+      if (r.decision === "rejected" && !r.changed) return "rejected";
+      return "pending";
+    case "submitted":
+      return "submitted";
+    case "under_review":
+      return "under_review";
+    case "returned":
+      if (r.changed) return "corrected";
+      if (r.decision === "rejected") return "rejected";
+      return r.decision === "verified" ? "verified" : "not_sent";
+    case "draft":
+      return r.changed && r.decision !== null ? "corrected" : "not_sent";
   }
-  if (review.decision === "rejected") return review.changed ? "corrected" : "rejected";
-  if (review.decision === "verified") return "verified";
-  if (profile.status === "submitted") return "submitted";
-  if (profile.status === "under_review") return "under_review";
-  return "not_sent";
+}
+
+/** Секции, которые правили после последнего решения SME: только их можно отправить (MAN-45, REV-08). */
+export function changedPendingSections(profile: ProtoProfile): ProfileSection[] {
+  return SECTIONS.filter((s) => profile.pending[s] !== undefined && profile.review[s].changed);
+}
+
+/** Значения секции равны текущим — сохранять нечего. */
+export function sameValue(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 /** Файлы секции по слотам: замена файла в слоте кладёт прежнюю версию в историю (MAN-36). */

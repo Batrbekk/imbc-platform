@@ -8,7 +8,7 @@ import type { Certificate, ProfileDocument } from "../data";
 import { useDictionary } from "../i18n";
 import { newId, useProto } from "../store";
 import { AddButton, CheckField, ChoiceField, FieldGrid, FileSlot, RowCard, SaveBar, TextField } from "./fields";
-import { type FormProps, mandatoryTypes, sameFile, today } from "./model";
+import { decisionsVisible, type FormProps, mandatoryTypes, sameFile, today } from "./model";
 import { useReference } from "./reference";
 import { texts, useDocumentLabel } from "./texts";
 
@@ -29,6 +29,7 @@ const emptyCertificate = (type: string, mandatory: boolean): Certificate => ({
 
 export function CertificatesForm({ profile, initial, onSave }: FormProps<"certificates">) {
   const t = useDictionary(texts);
+  const shown = decisionsVisible(profile);
   const state = useProto();
   const mandatory = mandatoryTypes(state, "certificate_types");
   const types = useReference("certificate_types");
@@ -51,6 +52,15 @@ export function CertificatesForm({ profile, initial, onSave }: FormProps<"certif
       rows.map((c) => {
         const before = initial.find((x) => x.id === c.id);
         const changed = !before || !sameFile(before.file, c.file) || before.expiresOn !== c.expiresOn;
+        // Нетронутый сертификат остаётся как был: сохранение без правки — не правка.
+        if (
+          !changed &&
+          before.type === c.type &&
+          before.number === c.number &&
+          before.issuer === c.issuer &&
+          before.issuedOn === c.issuedOn
+        )
+          return before;
         const next = { ...c, mandatory: mandatory.includes(c.type) };
         if (changed) {
           next.status = c.file ? "uploaded" : "missing";
@@ -83,7 +93,7 @@ export function CertificatesForm({ profile, initial, onSave }: FormProps<"certif
           }
           onRemove={() => setRows((prev) => prev.filter((x) => x.id !== c.id))}
         >
-          {c.comment && (
+          {shown && c.comment && (
             <Alert variant="destructive">
               <AlertDescription>{t("smeComment", { comment: c.comment })}</AlertDescription>
             </Alert>
@@ -162,6 +172,7 @@ export function CertificatesForm({ profile, initial, onSave }: FormProps<"certif
 
 export function DocumentsForm({ profile, initial, onSave }: FormProps<"documents">) {
   const t = useDictionary(texts);
+  const shown = decisionsVisible(profile);
   const documentLabel = useDocumentLabel();
   const state = useProto();
   const types = mandatoryTypes(state, "document_types") as ProfileDocument["type"][];
@@ -205,7 +216,7 @@ export function DocumentsForm({ profile, initial, onSave }: FormProps<"documents
             </span>
           }
         >
-          {d.comment && (
+          {shown && d.comment && (
             <Alert variant="destructive">
               <AlertDescription>{t("smeComment", { comment: d.comment })}</AlertDescription>
             </Alert>

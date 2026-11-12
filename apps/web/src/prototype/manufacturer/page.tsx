@@ -1,6 +1,7 @@
 // Каркас экрана кабинета производителя: ProtoPage и переключатель ведущего «показать как».
 // Переключатель — не возможность платформы: он только выбирает профиль демо-данных (GEN-11 в продукте).
 import type { ReactNode } from "react";
+import { Navigate, useLocation } from "react-router";
 
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -70,4 +71,10 @@ function ViewAsBar() {
       <p className="text-xs text-muted-foreground">{t("viewAsHint")}</p>
     </div>
   );
+}
+
+/** Начальный адрес кабинета ведёт на профиль и сохраняет выбор ведущего в адресе (`?as=`). */
+export function IndexRedirect() {
+  const { search } = useLocation();
+  return <Navigate to={{ pathname: "profile", search }} replace />;
 }

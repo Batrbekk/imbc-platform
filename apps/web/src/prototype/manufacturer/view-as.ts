@@ -12,11 +12,12 @@ export const VIEW_AS_OPTIONS = ["p01", "p02", "p07", "p04", "p03", "p12", "p09",
 
 export const VIEW_AS_PARAM = "as";
 
-let chosen: string | null = null;
+/** Выбор ведущего вместе с аккаунтом, при котором он сделан: другой вход в той же вкладке его не видит. */
+let chosen: { accountId: string | null; profileId: string } | null = null;
 const listeners = new Set<() => void>();
 
-function setChosen(id: string | null) {
-  chosen = id;
+function setChosen(next: typeof chosen) {
+  chosen = next;
   for (const listener of listeners) listener();
 }
 
@@ -46,18 +47,20 @@ export function useViewedProfile(): { profile: ProtoProfile; own: boolean; selec
     () => chosen,
   );
   const fromAddress = params.get(VIEW_AS_PARAM);
-  const id = isOption(fromAddress) ? fromAddress : remembered;
+  const accountId = actor.accountId;
+  const id = isOption(fromAddress) ? fromAddress : remembered?.accountId === accountId ? remembered.profileId : null;
 
   useEffect(() => {
-    if (isOption(fromAddress) && fromAddress !== chosen) setChosen(fromAddress);
-  }, [fromAddress]);
+    if (isOption(fromAddress) && (chosen?.profileId !== fromAddress || chosen.accountId !== accountId))
+      setChosen({ accountId, profileId: fromAddress });
+  }, [fromAddress, accountId]);
 
   const profiles = useProto((s) => s.profiles);
   const own = profiles.find((p) => p.organizationId === actor.organizationId);
   const profile = profiles.find((p) => p.id === id) ?? own ?? profiles[0]!;
 
   const select = (next: string) => {
-    setChosen(next);
+    setChosen({ accountId, profileId: next });
     setParams(
       (prev) => {
         const copy = new URLSearchParams(prev);

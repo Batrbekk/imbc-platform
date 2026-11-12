@@ -8,12 +8,12 @@ import {
   RefreshCwIcon,
   TrendingUpIcon,
 } from "lucide-react";
-import { Navigate } from "react-router";
 
 import { translate } from "../i18n";
 import { type CabinetModule, protoPath } from "../registry";
 import { ForecastPage } from "./forecast-page";
 import { NotificationsPage } from "./notifications-page";
+import { IndexRedirect } from "./page";
 import { ProfilePage } from "./profile-page";
 import { RequestsPage } from "./requests-page";
 import { SectionPage } from "./section-page";
@@ -40,7 +40,7 @@ export const cabinet: CabinetModule = {
     { ...item("notifications", "menuNotifications"), icon: BellIcon },
   ],
   routes: [
-    { index: true, element: <Navigate to="profile" replace /> },
+    { index: true, element: <IndexRedirect /> },
     { path: "profile", element: <ProfilePage /> },
     { path: "profile/:section", element: <SectionPage /> },
     { path: "update-status", element: <UpdateStatusPage /> },

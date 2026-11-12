@@ -20,7 +20,9 @@ import { useManufacturerActions } from "./actions";
 import { ManufacturerPage } from "./page";
 import { MissingList, SectionStateBadge } from "./parts";
 import {
+  changedPendingSections,
   currentSections,
+  decisionsVisible,
   isLocked,
   mandatoryTypes,
   sectionHref,
@@ -28,6 +30,7 @@ import {
   profileCompleteness,
   SECTIONS,
   sectionState,
+  visibleRejection,
 } from "./model";
 import { texts, useDocumentLabel } from "./texts";
 import { useViewedProfile, useWithViewAs } from "./view-as";
@@ -103,7 +106,6 @@ export function ProfilePage() {
             <TableBody>
               {SECTIONS.map((s) => {
                 const c = completeness.bySection[s];
-                const review = profile.review[s];
                 return (
                   <TableRow key={s}>
                     <TableCell>
@@ -118,7 +120,7 @@ export function ProfilePage() {
                       {c.percent === null ? t("optional") : t("percent", { percent: format.number(c.percent) })}
                     </TableCell>
                     <TableCell className="max-w-sm text-sm whitespace-normal">
-                      {review.decision === "rejected" && review.comment ? review.comment : common("none")}
+                      {visibleRejection(profile, s) || common("none")}
                     </TableCell>
                   </TableRow>
                 );
@@ -149,6 +151,7 @@ function StatusPanel({ profile, percent }: { profile: ProtoProfile; percent: num
   const actions = useManufacturerActions(profile);
   const [accurate, setAccurate] = useState(false);
   const pending = pendingSections(profile);
+  const changed = changedPendingSections(profile);
   const verified = profile.status === "verified";
 
   const hint =
@@ -212,7 +215,7 @@ function StatusPanel({ profile, percent }: { profile: ProtoProfile; percent: num
               title={t("sendChangesTitle")}
               description={t("sendChangesDescription")}
               confirmLabel={t("sendChanges")}
-              disabled={pending.length === 0 || percent < 100}
+              disabled={changed.length === 0 || percent < 100}
               confirmDisabled={!accurate}
               onConfirm={() => {
                 actions.sendChanges();
@@ -221,7 +224,11 @@ function StatusPanel({ profile, percent }: { profile: ProtoProfile; percent: num
             >
               {accuracy}
             </ConfirmAction>
-            {pending.length === 0 && <span className="text-sm text-muted-foreground">{t("noPending")}</span>}
+            {changed.length === 0 && (
+              <span className="text-sm text-muted-foreground">
+                {pending.length === 0 ? t("noPending") : t("sendChangesNeedEdit")}
+              </span>
+            )}
           </>
         )}
         {isLocked(profile) && (
@@ -245,6 +252,8 @@ function DocumentsCard({ profile }: { profile: ProtoProfile }) {
   const state = useProto();
   const documentLabel = useDocumentLabel();
   const values = currentSections(profile);
+  // Комментарии SME к документам — только когда проверка закрыта (REV-07, MAN-44).
+  const shown = decisionsVisible(profile);
   const certTypes = mandatoryTypes(state, "certificate_types");
   const missingCerts = certTypes.filter((type) => !values.certificates.some((c) => c.type === type && c.file));
   const docTypes = mandatoryTypes(state, "document_types");
@@ -281,7 +290,7 @@ function DocumentsCard({ profile }: { profile: ProtoProfile }) {
               <span className="flex flex-col">
                 <span className="font-medium">{r.label}</span>
                 {r.note && <span className="text-muted-foreground">{r.note}</span>}
-                {r.comment && <span className="text-destructive">{r.comment}</span>}
+                {shown && r.comment && <span className="text-destructive">{r.comment}</span>}
               </span>
               <DocumentStatusBadge status={r.status} />
             </li>
