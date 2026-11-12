@@ -1,5 +1,5 @@
 // Подписки на выгрузку (Release 2): сохранённый поиск, формат, период; пауза, возобновление, удаление,
-// файлы за 90 дней. OPR-15, OPR-16, OPR-17, OPR-18, NOT-35, GEN-12.
+// файлы за 90 дней. OPR-15, OPR-16, OPR-17, OPR-18, NOT-35, AUD-01, GEN-12.
 import { useState } from "react";
 import { useSearchParams } from "react-router";
 
@@ -157,6 +157,15 @@ function SubscriptionCard({ subscription: s }: { subscription: ExportSubscriptio
     );
   const download = () => {
     const file = build(s.filters, ALL_COLUMNS, s.format);
+    // Скачивание файла — событие журнала (AUD-01).
+    update(
+      {
+        action: "subscription.download",
+        subject: { type: "subscription", id: s.id, label: s.name },
+        summary: localized(texts, "auditDownload", { name: file.name }),
+      },
+      () => {},
+    );
     downloadFile(file.name, file.content, file.format);
   };
 

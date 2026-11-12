@@ -6,7 +6,7 @@ export const texts = defineDictionary({
     menuManufacturers: "My manufacturers",
     menuRequests: "Requests",
     menuExport: "Export",
-    menuSubscriptions: "Export subscriptions",
+    menuSubscriptions: "Subscriptions",
     menuApi: "Pull API",
 
     mfTitle: "My manufacturers",
@@ -226,6 +226,7 @@ export const texts = defineDictionary({
     auditSubPause: "Operator paused an export subscription",
     auditSubResume: "Operator resumed an export subscription",
     auditSubDelete: "Operator deleted an export subscription",
+    auditDownload: "Operator downloaded the file {name}",
 
     apiTitle: "Pull API",
     apiHint:
@@ -247,7 +248,7 @@ export const texts = defineDictionary({
     menuManufacturers: "Мои производители",
     menuRequests: "Запросы",
     menuExport: "Выгрузка",
-    menuSubscriptions: "Подписки на выгрузку",
+    menuSubscriptions: "Подписки",
     menuApi: "Pull API",
 
     mfTitle: "Мои производители",
@@ -468,6 +469,7 @@ export const texts = defineDictionary({
     auditSubPause: "Оператор приостановил подписку на выгрузку",
     auditSubResume: "Оператор возобновил подписку на выгрузку",
     auditSubDelete: "Оператор удалил подписку на выгрузку",
+    auditDownload: "Оператор скачал файл {name}",
 
     apiTitle: "Pull API",
     apiHint:
@@ -489,7 +491,7 @@ export const texts = defineDictionary({
     menuManufacturers: "Менің өндірушілерім",
     menuRequests: "Сұраулар",
     menuExport: "Экспорт",
-    menuSubscriptions: "Экспортқа жазылым",
+    menuSubscriptions: "Жазылымдар",
     menuApi: "Pull API",
 
     mfTitle: "Менің өндірушілерім",
@@ -709,6 +711,7 @@ export const texts = defineDictionary({
     auditSubPause: "Оператор экспорт жазылымын кідіртті",
     auditSubResume: "Оператор экспорт жазылымын жалғастырды",
     auditSubDelete: "Оператор экспорт жазылымын жойды",
+    auditDownload: "Оператор {name} файлын жүктеп алды",
 
     apiTitle: "Pull API",
     apiHint:

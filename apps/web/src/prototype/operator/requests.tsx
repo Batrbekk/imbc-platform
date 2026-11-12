@@ -73,9 +73,13 @@ function useCompanyItems(noneLabel?: string) {
 }
 
 /** Подпись под именем автора: IMBC или организация оператора; производителю этот экран не виден. */
-function authorMeta(state: ProtoState, accountId: string): string | undefined {
-  const orgId = state.accounts.find((a) => a.id === accountId)?.organizationId;
-  return orgId === ORG.imbc ? "IMBC" : orgId ? organizationName(state, orgId) : undefined;
+function authorOrg(state: ProtoState, accountId: string): string | undefined {
+  return state.accounts.find((a) => a.id === accountId)?.organizationId;
+}
+
+function authorMeta(state: ProtoState, accountId: string, imbcLabel: string): string | undefined {
+  const orgId = authorOrg(state, accountId);
+  return orgId === ORG.imbc ? imbcLabel : orgId ? organizationName(state, orgId) : undefined;
 }
 
 function ImbcRequests({ preset }: { preset: string | null }) {
@@ -97,7 +101,7 @@ function ImbcRequests({ preset }: { preset: string | null }) {
     const profileId = linked === NONE ? null : linked;
     update(
       {
-        action: "imbc_request.create",
+        action: "imbc_request.send",
         subject: { type: "imbc_request", id, label: subject.trim() },
         summary: localized(texts, "auditImbcCreate"),
       },
@@ -165,11 +169,11 @@ function ImbcRequests({ preset }: { preset: string | null }) {
           const entries: ThreadEntry[] = r.messages.map((m) => ({
             id: m.id,
             author: accountName(state, m.authorId),
-            meta: authorMeta(state, m.authorId),
+            meta: authorMeta(state, m.authorId, t("imbcMeta")),
             at: m.at,
             text: m.text,
           }));
-          const imbcAnswered = r.messages.some((m) => authorMeta(state, m.authorId) === "IMBC");
+          const imbcAnswered = r.messages.some((m) => authorOrg(state, m.authorId) === ORG.imbc);
           const company = r.profileId ? profileById(state, r.profileId)?.nameRu : null;
           return (
             <Card key={r.id}>
@@ -226,7 +230,7 @@ function OperatorRequests({ preset }: { preset: string | null }) {
     const id = newId("or");
     update(
       {
-        action: "operator_request.create",
+        action: "operator_request.send",
         subject: { type: "operator_request", id, label: target.nameRu },
         summary: localized(texts, "auditOpCreate"),
       },
