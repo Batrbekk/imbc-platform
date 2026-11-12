@@ -39,7 +39,11 @@ export class IdentityProvisioningService {
       if (error instanceof KeycloakRequestError && error.status === 409) {
         throw new ProblemException(409, 'email_exists', 'Этот email уже используется');
       }
-      throw new ProblemException(503, 'identity_unavailable', 'Регистрация временно недоступна. Попробуйте снова.');
+      throw new ProblemException(
+        503,
+        'identity_unavailable',
+        'Сервис учётных записей временно недоступен. Попробуйте позже.',
+      );
     }
     try {
       return await withQueueTransaction(this.pool, async (tx, queueDb) => {

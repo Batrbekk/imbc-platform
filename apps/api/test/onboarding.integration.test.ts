@@ -510,10 +510,12 @@ describe.skipIf(!databaseUrl)('регистрация v1.3 и профиль п�
     await poll(batch).run();
     await poll(batch).run();
     await Promise.all([poll(batch).run(), signIn(account)]);
-    // Месяц спустя — сброс пароля.
+    const [before] = await profilesOf(organization.id);
+    // Месяц спустя — сброс пароля: момент появления профиля не сдвигается.
     await poll([passwordEvent(account.idpSubject!, new Date(Date.now() + 1000), 'RESET_PASSWORD')]).run();
 
     expect(await profilesOf(organization.id)).toHaveLength(1);
+    expect((await profilesOf(organization.id))[0]!.registeredAt).toEqual(before!.registeredAt);
     expect(await acceptancesOf(organization.id)).toHaveLength(1);
     expect((await attemptsOf(organization.id)).filter((a) => a.trigger === 'profile_created')).toHaveLength(1);
     expect(await jobs(QUEUES.adataPrefill)).toHaveLength(1);
@@ -521,6 +523,63 @@ describe.skipIf(!databaseUrl)('регистрация v1.3 и профиль п�
     expect(await auditOf(organization.id, 'nda.accepted')).toHaveLength(1);
     expect(await auditOf(organization.id, 'adata.read_requested')).toHaveLength(1);
     await boss.deleteAllJobs(QUEUES.sendPasswordEmail);
+  });
+
+  it('в пакете событий два времени установки пароля одного субъекта — registered_at берётся самое раннее (MAN-03)', async () => {
+    const { account, organization } = await register();
+    const T1 = new Date(Date.now() - 2000);
+    const T2 = new Date(Date.now() - 1000);
+    // Keycloak может вернуть события не по времени.
+    await poll([
+      passwordEvent(account.idpSubject!, T2, 'UPDATE_PASSWORD'),
+      passwordEvent(account.idpSubject!, T1, 'RESET_PASSWORD'),
+    ]).run();
+    const [profile, ...more] = await profilesOf(organization.id);
+    expect(more).toEqual([]);
+    expect(profile!.registeredAt.getTime()).toBe(T1.getTime());
+    await boss.deleteAllJobs(QUEUES.sendPasswordEmail);
+  });
+
+  it('текст текущей NDA пуст или из пробелов — terms и регистрация 503 nda_unavailable, Keycloak не вызван (MAN-01, FC-02)', async () => {
+    try {
+      for (const blank of ['', '   \n\t']) {
+        await db.update(schema.ndaVersion).set({ body: blank }).where(eq(schema.ndaVersion.id, nda.id));
+        await expect(controller().terms({ ip: '203.0.113.40' } as never)).rejects.toMatchObject({
+          status: 503,
+          code: 'nda_unavailable',
+        });
+        const keycloak = keycloakStub();
+        await expect(controller(keycloak).register(body(), { ip: '203.0.113.41' } as never)).rejects.toMatchObject({
+          status: 503,
+          code: 'nda_unavailable',
+        });
+        expect(keycloak.createUser).not.toHaveBeenCalled();
+      }
+    } finally {
+      await db.update(schema.ndaVersion).set({ body: 'NDA версии 1 (тест)' }).where(eq(schema.ndaVersion.id, nda.id));
+    }
+  });
+
+  it('строка текущей версии NDA занята чужой транзакцией — регистрация 503 identity_unavailable быстрее 4 с, пользователь Keycloak удалён (FC-02)', async () => {
+    const holder = await pool.connect();
+    const input = body();
+    const keycloak = keycloakStub();
+    try {
+      await holder.query('begin');
+      await holder.query('select id from nda_version where is_current for update');
+      const started = Date.now();
+      await expect(controller(keycloak).register(input, { ip: '203.0.113.42' } as never)).rejects.toMatchObject({
+        status: 503,
+        code: 'identity_unavailable',
+      });
+      expect(Date.now() - started).toBeLessThan(4000);
+    } finally {
+      await holder.query('rollback');
+      holder.release();
+    }
+    expect(keycloak.createUser).toHaveBeenCalledTimes(1);
+    expect(keycloak.deleteUser).toHaveBeenCalledTimes(1);
+    expect(await db.query.organizations.findFirst({ where: eq(schema.organizations.bin, input.bin) })).toBeUndefined();
   });
 
   it('оператор, заблокированный производитель, организация без БИН — skipped, профиля нет', async () => {

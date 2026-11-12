@@ -5,7 +5,7 @@ import { AuditService } from '../../common/audit.service.js';
 import { PG_POOL } from '../../database/database.module.js';
 import { manufacturerProfiles, ndaVersion, organizations, userAccounts } from '../../database/schema/index.js';
 import { withQueueTransaction } from '../../database/transaction.js';
-import { AdataScheduler, boundLockWaits, sqlState, type AdataReadOrigin } from '../adata/adata.scheduler.js';
+import { AdataScheduler, boundLockWaits, type AdataReadOrigin } from '../adata/adata.scheduler.js';
 import { ProfilesService } from '../profiles/profiles.service.js';
 
 export type OnboardingResult = {
@@ -46,83 +46,79 @@ export class ManufacturerOnboardingService {
   ) {}
 
   async onPasswordSet(accountId: string, origin: AdataReadOrigin, at: Date): Promise<OnboardingResult> {
-    try {
-      return await withQueueTransaction(this.pool, async (tx, queueDb) => {
-        await boundLockWaits(tx);
-        const [account] = await tx
-          .select({
-            organizationId: userAccounts.organizationId,
-            role: userAccounts.role,
-            state: userAccounts.state,
-            bin: organizations.bin,
-            heardAboutUs: userAccounts.registrationHeardAboutUs,
-            ndaVersionId: userAccounts.registrationNdaVersionId,
-            ndaVersionNumber: ndaVersion.versionNumber,
-          })
-          .from(userAccounts)
-          .innerJoin(organizations, eq(organizations.id, userAccounts.organizationId))
-          .leftJoin(ndaVersion, eq(ndaVersion.id, userAccounts.registrationNdaVersionId))
-          .where(eq(userAccounts.id, accountId))
-          .for('update', { of: userAccounts });
-        // Заблокированный IMBC аккаунт не получает ни профиля, ни квоты Adata: их создаст вход после разблокировки.
-        if (!account || account.role !== 'manufacturer' || !account.bin || account.state === 'blocked') return SKIPPED;
+    // Ошибка, включая 23505, откатывает всё и уходит вызывающему: он пишет warn без данных, следующий
+    // вход или опрос событий повторит. Гонку исключает блокировка аккаунта, а не перехват.
+    return withQueueTransaction(this.pool, async (tx, queueDb) => {
+      await boundLockWaits(tx);
+      const [account] = await tx
+        .select({
+          organizationId: userAccounts.organizationId,
+          role: userAccounts.role,
+          state: userAccounts.state,
+          bin: organizations.bin,
+          heardAboutUs: userAccounts.registrationHeardAboutUs,
+          ndaVersionId: userAccounts.registrationNdaVersionId,
+          ndaVersionNumber: ndaVersion.versionNumber,
+        })
+        .from(userAccounts)
+        .innerJoin(organizations, eq(organizations.id, userAccounts.organizationId))
+        .leftJoin(ndaVersion, eq(ndaVersion.id, userAccounts.registrationNdaVersionId))
+        .where(eq(userAccounts.id, accountId))
+        .for('update', { of: userAccounts });
+      // Заблокированный IMBC аккаунт не получает ни профиля, ни квоты Adata: их создаст вход после разблокировки.
+      if (!account || account.role !== 'manufacturer' || !account.bin || account.state === 'blocked') return SKIPPED;
 
-        const [existing] = await tx
-          .select({ id: manufacturerProfiles.id })
-          .from(manufacturerProfiles)
-          .where(eq(manufacturerProfiles.organizationId, account.organizationId));
-        let profile: OnboardingResult['profile'] = 'existing';
-        if (!existing) {
-          const profileId = await this.profiles.ensureDraft(account.organizationId, accountId, {
-            heardAboutUs: account.heardAboutUs,
-            registeredAt: at,
-            outer: tx,
-          });
-          await this.audit.record(
-            {
-              userId: accountId,
-              organizationId: account.organizationId,
-              action: 'profile.created',
-              objectType: 'manufacturer_profile',
-              objectId: profileId,
-              diff: { origin },
-            },
-            tx,
-          );
-          if (account.ndaVersionId) {
-            const { rows } = await tx.execute<{ id: string }>(ndaAcceptanceInsert(profileId, accountId));
-            if (rows[0])
-              await this.audit.record(
-                {
-                  userId: accountId,
-                  organizationId: account.organizationId,
-                  action: 'nda.accepted',
-                  objectType: 'nda_acceptance',
-                  objectId: rows[0].id,
-                  diff: { version: account.ndaVersionNumber },
-                },
-                tx,
-              );
-          }
-          await tx
-            .update(userAccounts)
-            .set({
-              registrationNdaVersionId: null,
-              registrationNdaAcceptedAt: null,
-              registrationIp: null,
-              registrationHeardAboutUs: null,
-            })
-            .where(eq(userAccounts.id, accountId));
-          profile = 'created';
+      const [existing] = await tx
+        .select({ id: manufacturerProfiles.id })
+        .from(manufacturerProfiles)
+        .where(eq(manufacturerProfiles.organizationId, account.organizationId));
+      let profile: OnboardingResult['profile'] = 'existing';
+      if (!existing) {
+        const profileId = await this.profiles.ensureDraft(account.organizationId, accountId, {
+          heardAboutUs: account.heardAboutUs,
+          registeredAt: at,
+          outer: tx,
+        });
+        await this.audit.record(
+          {
+            userId: accountId,
+            organizationId: account.organizationId,
+            action: 'profile.created',
+            objectType: 'manufacturer_profile',
+            objectId: profileId,
+            diff: { origin },
+          },
+          tx,
+        );
+        if (account.ndaVersionId) {
+          const { rows } = await tx.execute<{ id: string }>(ndaAcceptanceInsert(profileId, accountId));
+          if (rows[0])
+            await this.audit.record(
+              {
+                userId: accountId,
+                organizationId: account.organizationId,
+                action: 'nda.accepted',
+                objectType: 'nda_acceptance',
+                objectId: rows[0].id,
+                diff: { version: account.ndaVersionNumber },
+              },
+              tx,
+            );
         }
-        // Регистрации до этапа 1 уже имеют Draft: им — только чтение, принятия NDA у них нет.
-        const adata = await this.adata.requestInTransaction(tx, queueDb, accountId, origin);
-        return { profile, adata };
-      });
-    } catch (error) {
-      // Запасная граница — частичный уникальный индекс попытки profile_created: гонка — не сбой входа.
-      if (sqlState(error) === '23505') return { profile: 'existing', adata: 'skipped' };
-      throw error;
-    }
+        await tx
+          .update(userAccounts)
+          .set({
+            registrationNdaVersionId: null,
+            registrationNdaAcceptedAt: null,
+            registrationIp: null,
+            registrationHeardAboutUs: null,
+          })
+          .where(eq(userAccounts.id, accountId));
+        profile = 'created';
+      }
+      // Регистрации до этапа 1 уже имеют Draft: им — только чтение, принятия NDA у них нет.
+      const adata = await this.adata.requestInTransaction(tx, queueDb, accountId, origin);
+      return { profile, adata };
+    });
   }
 }

@@ -19,12 +19,31 @@ import { DB, type Database } from '../../database/database.module.js';
 import { ndaVersion, organizations, userAccounts } from '../../database/schema/index.js';
 import { QUEUE } from '../../infra/infra.module.js';
 import { QUEUES } from '../../jobs/queues.js';
+import { boundLockWaits, sqlState } from '../adata/adata.scheduler.js';
 import { Public } from '../auth/guards.js';
 import { IdentityProvisioningService, provisioningConflict } from '../auth/identity-provisioning.service.js';
 import { AuthRateLimitService } from '../auth/rate-limit.service.js';
 
 const ndaUnavailable = () =>
   new ProblemException(503, 'nda_unavailable', 'Регистрация временно недоступна. Попробуйте позже.');
+const registrationUnavailable = () =>
+  new ProblemException(503, 'identity_unavailable', 'Регистрация временно недоступна. Попробуйте снова.');
+
+/** Ожидание блокировки или оператора сверх `boundLockWaits` (lock_not_available, query_canceled). */
+const LOCK_WAIT_EXCEEDED = new Set(['55P03', '57014']);
+
+/**
+ * Текущая версия NDA для формы и для регистрации — одно условие: нет текущей или её текст пуст
+ * (одни пробелы) — принимать нечего, `503 nda_unavailable` (MAN-01, FC-02).
+ */
+async function currentNda(db: Database): Promise<{ version: number; body: string }> {
+  const [current] = await db
+    .select({ version: ndaVersion.versionNumber, body: ndaVersion.body })
+    .from(ndaVersion)
+    .where(eq(ndaVersion.isCurrent, true));
+  if (!current || !current.body.trim()) throw ndaUnavailable();
+  return current;
+}
 const ndaVersionChanged = () =>
   new ProblemException(409, 'nda_version_changed', 'Текст NDA обновлён', 'Прочитайте новую версию и примите её снова');
 
@@ -58,12 +77,7 @@ export class RegistrationController {
   @Get('terms')
   async terms(@Req() req: Request): Promise<RegistrationTerms> {
     await this.rates.enforce('registration-terms-ip', req.ip ?? 'unknown', 120, 3600);
-    const [current] = await this.db
-      .select({ version: ndaVersion.versionNumber, body: ndaVersion.body })
-      .from(ndaVersion)
-      .where(eq(ndaVersion.isCurrent, true));
-    if (!current) throw ndaUnavailable();
-    return parseResponse(registrationTermsSchema, { nda: current }, 'условия регистрации');
+    return parseResponse(registrationTermsSchema, { nda: await currentNda(this.db) }, 'условия регистрации');
   }
 
   @Public()
@@ -82,16 +96,10 @@ export class RegistrationController {
       );
     }
     const ip = requestIp(req);
-    if (!ip)
-      throw new ProblemException(503, 'identity_unavailable', 'Регистрация временно недоступна. Попробуйте снова.');
+    if (!ip) throw registrationUnavailable();
 
     // Форма показала одну версию NDA, а текущей стала другая: отказ до Keycloak (FC-02).
-    const [current] = await this.db
-      .select({ versionNumber: ndaVersion.versionNumber })
-      .from(ndaVersion)
-      .where(eq(ndaVersion.isCurrent, true));
-    if (!current) throw ndaUnavailable();
-    if (current.versionNumber !== input.ndaVersion) throw ndaVersionChanged();
+    if ((await currentNda(this.db)).version !== input.ndaVersion) throw ndaVersionChanged();
 
     const [binTaken, emailTaken] = await Promise.all([
       this.db.query.organizations.findFirst({ where: sql`${organizations.bin} = ${bin.bin}` }),
@@ -106,6 +114,8 @@ export class RegistrationController {
       await this.provisioning.provision(
         { email: input.email, firstName: null, locale: input.locale },
         async (tx, subject) => {
+          // Чужая транзакция на строке версии не держит регистрацию: отказ — 503 после удаления пользователя IdP.
+          await boundLockWaits(tx);
           // Версия сверяется ещё раз под блокировкой: смена текущей версии ждёт фиксации регистрации.
           // Пусто под блокировкой — версию сменили, пока ждали (текущая была проверена до Keycloak).
           const [accepted] = await tx
@@ -152,6 +162,7 @@ export class RegistrationController {
         },
       );
     } catch (error) {
+      if (LOCK_WAIT_EXCEEDED.has(sqlState(error) as string)) throw registrationUnavailable();
       const conflict = provisioningConflict(error);
       if (conflict === 'email_exists') throw new ProblemException(409, conflict, 'Этот email уже используется');
       if (conflict === 'bin_exists')

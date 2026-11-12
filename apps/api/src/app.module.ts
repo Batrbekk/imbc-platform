@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 import { AuditModule } from './common/audit.service.js';
+import { httpLoggerOptions } from './common/logging.js';
 import { ProblemDetailsFilter } from './common/problem.js';
 import { ConfigModule } from './config/config.module.js';
 import { ENV, type Env } from './config/env.js';
@@ -33,15 +34,7 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     ConfigModule,
     LoggerModule.forRootAsync({
       inject: [ENV],
-      useFactory: (env: Env) => ({
-        pinoHttp: {
-          level: env.LOG_LEVEL,
-          // Секреты и персональные данные не попадают в логи (NFR-32).
-          redact: ['req.headers.cookie', 'req.headers.authorization', 'res.headers["set-cookie"]'],
-          autoLogging: { ignore: (req) => req.url?.startsWith('/api/health') ?? false },
-          transport: env.NODE_ENV === 'development' ? { target: 'pino-pretty' } : undefined,
-        },
-      }),
+      useFactory: (env: Env) => ({ pinoHttp: httpLoggerOptions(env) }),
     }),
     DatabaseModule,
     InfraModule,
