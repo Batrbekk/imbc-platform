@@ -4,6 +4,14 @@ import type { KcContext } from "./login/KcContext";
 import KcPage from "./login/KcPage";
 import "./styles.css";
 
+// The tab icon is served by the web app on the same origin. It is set here because the theme build
+// rewrites root-absolute links in index.html to the theme's own resource path.
+const icon = document.createElement("link");
+icon.rel = "icon";
+icon.type = "image/png";
+icon.href = "/favicon.png";
+document.head.append(icon);
+
 async function start() {
   let kcContext = (window as unknown as { kcContext?: KcContext }).kcContext;
   if (!kcContext && import.meta.env.DEV) {
