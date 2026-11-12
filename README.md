@@ -169,7 +169,7 @@ imbc-platform/
 | Update Status | Квартальный цикл active → outdated → unresponsive; профиль в любом статусе остаётся видимым, unresponsive сортируется ниже (UPD-04) | поля профиля, `update_confirmations` | UPD-01–06 | статусы v1.3 в БД, API и UI; расписание 09:00, обработчик — заглушка |
 | Catalog and Dashboard | Поиск, фильтры, страница компании, дашборд | `catalog_visible` | OPR-01–13, OPR-31–35 | **поиск, тир, страница компании (только чтение) и дашборд работают** на данных seed |
 | Exchange | Выгрузки XLSX/CSV, подписки, pull API | `export_files`, `export_subscriptions`, `api_access` | OPR-20–24, OPR-80–82 | очистка файлов старше 90 дней |
-| Demand and NDA | NDA, версии прогноза (R2) | `nda_*`, `forecast_*`, `tech_spec_files` | FC-01–10 | схема |
+| Demand and NDA | NDA, версии прогноза (R2) | `nda_version`, `nda_acceptance`, `forecast_*`, `tech_spec_files` | FC-01–10 | схема |
 | Notifications | Письма с дедупликацией | `notifications_sent` | NOT-01–42 | отправка с дедупликацией |
 | Audit and Snapshots | Журнал, снимки активности | `audit_entries`, `activity_snapshots` | AUD-01–04 | запись событий входа и отказов |
 | Reference Data | Справочники и переводы | `dictionaries`, `dictionary_entries` | ADM-10/11 | схема |

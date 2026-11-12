@@ -319,7 +319,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('migration to specification v1.3
         await expect(migrateThrough(pool)).rejects.toMatchObject(
           contractRefusal(/^spec v1\.3 contract: 1 rows still hold spectator or inactive$/),
         );
-        // Вся пачка миграций откатилась: типы и журнал — как у базы 0005.
+        // После отказа типы и журнал — как у базы 0005: 0006 не записан и ничего не изменил
+        // (проверка — первый оператор миграции; транзакцию пачки даёт мигратор).
         expect(await enumRange('role')).toContain('spectator');
         expect(await enumRange('update_status')).toContain('inactive');
         const journal = await pool.query('select count(*)::int as n from drizzle.__drizzle_migrations');
