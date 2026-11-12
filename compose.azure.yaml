@@ -54,6 +54,11 @@ services:
     ports: !override
       - "127.0.0.1:9001:9001"
 
+  # Публичный стенд не расходует квоту заказчика: не больше 25 чтений Adata за период.
+  worker:
+    environment:
+      ADATA_MONTHLY_LIMIT: ${ADATA_MONTHLY_LIMIT:-25}
+
 volumes:
   caddy-data:
   caddy-config:

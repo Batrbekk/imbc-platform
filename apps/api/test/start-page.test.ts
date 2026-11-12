@@ -27,7 +27,15 @@ function auth(role: Role): AuthContext {
 
 describe('стартовая страница на сервере (OPR-31, GEN-08)', () => {
   it.each(ROLES)('ответ сеанса %s несёт homePath = roleHome', (role) => {
-    const controller = new AuthController({} as never, {} as never, {} as never, {} as never, {} as never, env);
+    const controller = new AuthController(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      env,
+      {} as never,
+    );
     expect(controller.me(auth(role)).homePath).toBe(roleHome(role));
   });
 

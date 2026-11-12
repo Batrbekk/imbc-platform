@@ -1,3 +1,5 @@
+import type { QueueOptions } from 'pg-boss';
+
 /**
  * Очереди pg-boss (ADR-06). Ставит задания API, выполняет worker.
  * Время расписаний — Asia/Almaty (GEN-30): в коде нигде не используется часовой пояс сервера.
@@ -18,6 +20,7 @@ export const QUEUES = {
   activitySnapshotWeekly: 'activity-snapshot-weekly',
   activitySnapshotMonthly: 'activity-snapshot-monthly',
   runSubscriptions: 'run-subscriptions',
+  adataPrefill: 'adata-prefill',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -64,3 +67,16 @@ export interface IdentityJob {
 export interface RefreshCatalogJob {
   profileId: string;
 }
+
+/** Одно чтение Adata для попытки (IMBC-07). Ни БИН, ни токена в задании: строка задания хранится в pg-boss. */
+export interface AdataPrefillJob {
+  attemptId: string;
+}
+
+/** Срок задания больше срока опроса (120 с + запрос): живое задание не повторяется параллельно. */
+export const ADATA_QUEUE_OPTIONS = {
+  retryLimit: 3,
+  retryDelay: 30,
+  retryBackoff: true,
+  expireInSeconds: 300,
+} satisfies QueueOptions;

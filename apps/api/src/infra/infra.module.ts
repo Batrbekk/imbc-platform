@@ -4,7 +4,7 @@ import { Redis } from 'ioredis';
 import nodemailer, { type Transporter } from 'nodemailer';
 import { PgBoss } from 'pg-boss';
 import { ENV, type Env } from '../config/env.js';
-import { QUEUES } from '../jobs/queues.js';
+import { ADATA_QUEUE_OPTIONS, QUEUES } from '../jobs/queues.js';
 
 export const VALKEY = Symbol('VALKEY');
 export const S3 = Symbol('S3');
@@ -79,6 +79,8 @@ export class InfraModule implements OnModuleInit, OnApplicationShutdown {
     for (const name of [QUEUES.sendPasswordEmail, QUEUES.cleanupIdentity]) {
       await this.queue.createQueue(name, { retryLimit: 10, retryDelay: 30, retryBackoff: true });
     }
+    // Чтение Adata ставит и API (первый вход), и worker (событие пароля) — до старта обработчиков.
+    await this.queue.createQueue(QUEUES.adataPrefill, ADATA_QUEUE_OPTIONS);
     await this.valkey.connect().catch((error: unknown) => this.logger.warn(`Valkey недоступен: ${String(error)}`));
   }
 

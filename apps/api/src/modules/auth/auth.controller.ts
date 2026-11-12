@@ -7,6 +7,7 @@ import { AuditService } from '../../common/audit.service.js';
 import { parseOrThrow, ProblemException } from '../../common/problem.js';
 import { ENV, type Env } from '../../config/env.js';
 import { MailService } from '../../mail/mail.service.js';
+import { AdataScheduler } from '../adata/adata.scheduler.js';
 import type { AuthContext } from './auth.types.js';
 import { sign, unsign } from './crypto.js';
 import { otpDeliveryFor } from './development-otp.js';
@@ -42,6 +43,7 @@ export class AuthController {
     private readonly mail: MailService,
     private readonly rates: AuthRateLimitService,
     @Inject(ENV) private readonly env: Env,
+    private readonly adata: AdataScheduler,
   ) {}
 
   @Public()
@@ -163,6 +165,12 @@ export class AuthController {
       isAccountEvent: true,
       ip: req.ip ?? null,
     });
+    // Пароль задан — профиль есть (MAN-03); если событие Keycloak ещё не пришло, чтение Adata ставит вход
+    // (IMBC-07). Вход от результата не зависит.
+    if (current.role === 'manufacturer')
+      await this.adata
+        .requestOnProfileCreated(current.id, 'sign_in')
+        .catch(() => this.logger.warn('adata: чтение при входе не поставлено'));
 
     res.cookie(this.env.SESSION_COOKIE_NAME, session.token, {
       ...this.sessions.cookieBase,

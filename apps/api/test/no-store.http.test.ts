@@ -8,6 +8,7 @@ import { configureHttp } from '../src/common/http.js';
 import { ProblemDetailsFilter } from '../src/common/problem.js';
 import { ENV } from '../src/config/env.js';
 import { MailService } from '../src/mail/mail.service.js';
+import { AdataScheduler } from '../src/modules/adata/adata.scheduler.js';
 import { AuthController } from '../src/modules/auth/auth.controller.js';
 import type { AuthContext } from '../src/modules/auth/auth.types.js';
 import { SessionGuard } from '../src/modules/auth/guards.js';
@@ -44,6 +45,7 @@ const resolve = vi.fn(async (token: string | undefined) => (token === 'valid' ? 
     { provide: AuditService, useValue: { record: vi.fn() } },
     { provide: MailService, useValue: {} },
     { provide: AuthRateLimitService, useValue: {} },
+    { provide: AdataScheduler, useValue: {} },
     { provide: OidcService, useValue: { passwordResetUrl: () => new URL('https://id.example.test/reset') } },
     { provide: ENV, useValue: { SESSION_COOKIE_NAME: COOKIE, PUBLIC_URL: 'https://imbc.example.test' } },
     { provide: APP_GUARD, useClass: SessionGuard },

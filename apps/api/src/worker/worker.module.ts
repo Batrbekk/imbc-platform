@@ -7,9 +7,12 @@ import { ENV, type Env } from '../config/env.js';
 import { DatabaseModule } from '../database/database.module.js';
 import { InfraModule, QUEUE } from '../infra/infra.module.js';
 import { MailService } from '../mail/mail.service.js';
+import { ADATA_DEFAULT_TIMING } from '../modules/adata/adata.client.js';
+import { AdataScheduler } from '../modules/adata/adata.scheduler.js';
 import { KeycloakAdminService } from '../modules/auth/keycloak-admin.service.js';
 import { SessionService } from '../modules/auth/session.service.js';
-import { PLATFORM_TZ, QUEUES, type QueueName, SCHEDULES } from '../jobs/queues.js';
+import { ADATA_QUEUE_OPTIONS, PLATFORM_TZ, QUEUES, type QueueName, SCHEDULES } from '../jobs/queues.js';
+import { ADATA_CLIENT_FACTORY, ADATA_TIMING, AdataPrefillJob, defaultAdataClientFactory } from './adata-prefill.job.js';
 import { JobHandlers } from './handlers.service.js';
 
 @Module({
@@ -28,7 +31,16 @@ import { JobHandlers } from './handlers.service.js';
     InfraModule,
     AuditModule,
   ],
-  providers: [JobHandlers, MailService, KeycloakAdminService, SessionService],
+  providers: [
+    JobHandlers,
+    MailService,
+    KeycloakAdminService,
+    SessionService,
+    AdataScheduler,
+    AdataPrefillJob,
+    { provide: ADATA_CLIENT_FACTORY, useValue: defaultAdataClientFactory },
+    { provide: ADATA_TIMING, useValue: ADATA_DEFAULT_TIMING },
+  ],
 })
 export class WorkerModule implements OnApplicationBootstrap {
   private readonly logger = new Logger('Worker');
@@ -36,6 +48,7 @@ export class WorkerModule implements OnApplicationBootstrap {
   constructor(
     @Inject(QUEUE) private readonly boss: PgBoss,
     private readonly handlers: JobHandlers,
+    private readonly adataPrefill: AdataPrefillJob,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -56,14 +69,20 @@ export class WorkerModule implements OnApplicationBootstrap {
       [QUEUES.activitySnapshotWeekly]: () => h.todo(QUEUES.activitySnapshotWeekly),
       [QUEUES.activitySnapshotMonthly]: () => h.todo(QUEUES.activitySnapshotMonthly),
       [QUEUES.runSubscriptions]: () => h.todo(QUEUES.runSubscriptions),
+      [QUEUES.adataPrefill]: (d) => this.adataPrefill.run(d),
     };
 
     for (const [queue, run] of Object.entries(routes) as [QueueName, (data: never) => Promise<void>][]) {
-      await this.boss.createQueue(queue, {
-        retryLimit: queue === QUEUES.sendPasswordEmail || queue === QUEUES.cleanupIdentity ? 10 : 5,
-        retryBackoff: true,
-        retryDelay: 30,
-      });
+      await this.boss.createQueue(
+        queue,
+        queue === QUEUES.adataPrefill
+          ? ADATA_QUEUE_OPTIONS
+          : {
+              retryLimit: queue === QUEUES.sendPasswordEmail || queue === QUEUES.cleanupIdentity ? 10 : 5,
+              retryBackoff: true,
+              retryDelay: 30,
+            },
+      );
       await this.boss.work(queue, async (jobs) => {
         for (const job of jobs) await run(job.data as never);
       });

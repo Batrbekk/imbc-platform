@@ -28,11 +28,23 @@ import {
 import { S3 } from '../infra/infra.module.js';
 import { MailService } from '../mail/mail.service.js';
 import { renderMail } from '../mail/templates.js';
+import { AdataScheduler } from '../modules/adata/adata.scheduler.js';
 import { KeycloakAdminService } from '../modules/auth/keycloak-admin.service.js';
 import { SessionService } from '../modules/auth/session.service.js';
 import { sha256 } from '../modules/auth/crypto.js';
 import type { IdentityJob, ScanFileJob, SendNotificationJob } from '../jobs/queues.js';
 import { scanStream } from './clamd.js';
+
+type SecurityEvent = Awaited<ReturnType<KeycloakAdminService['securityEvents']>>[number];
+
+/** Пароль установлен или сменён: письмо установки пароля, сброс или новый пароль в профиле Keycloak. */
+export function isPasswordEvent(event: SecurityEvent): boolean {
+  return (
+    event.type === 'UPDATE_PASSWORD' ||
+    event.type === 'RESET_PASSWORD' ||
+    (event.type === 'UPDATE_CREDENTIAL' && event.details?.credential_type === 'password')
+  );
+}
 
 /**
  * Обработчики заданий. Каждый идемпотентен: pg-boss может повторить задание
@@ -50,6 +62,7 @@ export class JobHandlers {
     private readonly audit: AuditService,
     private readonly keycloak: KeycloakAdminService,
     private readonly sessions: SessionService,
+    private readonly adata: AdataScheduler,
   ) {}
 
   /** Файл из карантина проверяется ClamAV и только чистым переносится в рабочий бакет (FILE-03). */
@@ -171,16 +184,13 @@ export class JobHandlers {
     // Revocations must finish even when an unrelated lockout notification cannot be mailed.
     for (const event of ordered) {
       if (!event.userId || event.error || !Number.isFinite(event.time)) continue;
-      if (
-        event.type === 'UPDATE_PASSWORD' ||
-        event.type === 'RESET_PASSWORD' ||
-        (event.type === 'UPDATE_CREDENTIAL' && event.details?.credential_type === 'password')
-      ) {
+      if (isPasswordEvent(event)) {
         await this.sessions.revokeForPasswordChange(
           event.userId,
           new Date(event.time),
           `password:${sha256(event.id ?? `${event.type}:${event.userId}:${event.time}`)}`,
         );
+        await this.requestAdataRead(event.userId);
       }
     }
     for (const event of ordered) {
@@ -218,6 +228,22 @@ export class JobHandlers {
       .insert(authSyncState)
       .values({ name: 'keycloak-events', checkedAt: started })
       .onConflictDoUpdate({ target: authSyncState.name, set: { checkedAt: started } });
+  }
+
+  /**
+   * Установка пароля создаёт профиль (MAN-03, NOT-23) — с ней ставится одно чтение Adata (IMBC-07).
+   * Сбой не мешает отзыву сеансов и письмам NOT-03; повтор события в окне опроса даёт skipped.
+   */
+  private async requestAdataRead(subject: string): Promise<void> {
+    try {
+      const [account] = await this.db
+        .select({ id: userAccounts.id })
+        .from(userAccounts)
+        .where(eq(userAccounts.idpSubject, subject));
+      if (account) await this.adata.requestOnProfileCreated(account.id, 'password_set');
+    } catch {
+      this.logger.warn('adata: чтение после установки пароля не поставлено');
+    }
   }
 
   /** Заглушки этапа 0: контракты заданий и расписание уже на месте, логика — в своих модулях. */
