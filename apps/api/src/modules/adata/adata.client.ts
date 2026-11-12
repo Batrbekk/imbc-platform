@@ -83,7 +83,8 @@ async function readLimited(res: Response): Promise<string | null> {
     }
     chunks.push(value);
   }
-  return Buffer.concat(chunks).toString('utf8');
+  // Как res.text(): BOM отбрасывается, неверные байты заменяются U+FFFD.
+  return new TextDecoder().decode(Buffer.concat(chunks));
 }
 const NOT_JSON = Symbol('not json');
 
@@ -110,7 +111,8 @@ export class AdataClient {
     // Адрес проверяется без токена: ошибка разбора URL с токеном в пути несла бы его в `input`.
     this.#base = new URL(opts.baseUrl);
     // Тесты не обращаются к настоящему сервису и не тратят квоту заказчика (IMBC-07).
-    const host = this.#base.hostname;
+    // Хост с точкой в конце — тот же хост в DNS.
+    const host = this.#base.hostname.replace(/\.$/, '');
     if (process.env.VITEST && (host === 'adata.kz' || host.endsWith('.adata.kz')))
       throw new Error('Adata base URL is not allowed under the test runner: use the stub');
     this.#token = opts.token;
@@ -170,7 +172,8 @@ export class AdataClient {
     } catch (error) {
       throw new AdataCallError(isTimeout(error) ? 'timeout' : 'network', null);
     }
-    if (text === null) throw new AdataCallError('malformed', status);
+    // Большое тело 5xx — всё равно сбой сервера (на проверке временный); тело не хранится.
+    if (text === null) throw new AdataCallError(status >= 500 ? 'http_5xx' : 'malformed', status);
     try {
       return { status, body: JSON.parse(text) as unknown };
     } catch {

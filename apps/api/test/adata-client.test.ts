@@ -182,7 +182,14 @@ describe('AdataClient: два шага с опросом (EXT-02, IMBC-07)', () 
   });
 
   it('под тестовым раннером адрес api.adata.kz не принимается', () => {
-    for (const baseUrl of ['https://api.adata.kz', 'https://adata.kz/', 'https://x.api.ADATA.kz:443']) {
+    for (const baseUrl of [
+      'https://api.adata.kz',
+      'https://adata.kz/',
+      'https://x.api.ADATA.kz:443',
+      // Точка в конце — тот же хост в DNS.
+      'https://api.adata.kz.',
+      'https://adata.kz.',
+    ]) {
       let error: unknown;
       try {
         new AdataClient({ baseUrl, token: TOKEN, requestTimeoutMs: 50 });
@@ -228,6 +235,39 @@ describe('AdataClient: два шага с опросом (EXT-02, IMBC-07)', () 
     const exact: typeof fetch = async () => new Response(head + ' '.repeat(MB5 - head.length), { status: 200 });
     const c = new AdataClient({ baseUrl: stub.baseUrl, token: TOKEN, requestTimeoutMs: 1_000, fetch: exact });
     expect(await c.startCompanyInfo(nextBin())).toEqual({ pollToken: '0000020991' });
+  });
+
+  it('тело с BOM разбирается на Get Request и на проверке', async () => {
+    const bom = (text: string) => new Uint8Array([0xef, 0xbb, 0xbf, ...Buffer.from(text, 'utf8')]);
+    const withBom: typeof fetch = async (input) =>
+      String(input).includes('/check/')
+        ? new Response(bom(JSON.stringify(ADATA_FIXTURE)), { status: 200 })
+        : new Response(bom('{"success":true,"token":"1"}'), { status: 200 });
+    const c = new AdataClient({ baseUrl: stub.baseUrl, token: TOKEN, requestTimeoutMs: 1_000, fetch: withBom });
+    expect(await c.startCompanyInfo(nextBin())).toEqual({ pollToken: '1' });
+    expect(await c.checkCompanyInfo('1')).toEqual({ ready: true, data: ADATA_FIXTURE.data });
+  });
+
+  it('тело больше 5 МБ на 5xx — http_5xx: на проверке временный сбой, опрос доходит до ready', async () => {
+    let checks = 0;
+    const big: typeof fetch = async (input) => {
+      if (!String(input).includes('/check/')) return new Response(' '.repeat(6 * 1024 * 1024), { status: 503 });
+      checks += 1;
+      return checks === 1
+        ? new Response(' '.repeat(6 * 1024 * 1024), { status: 503 })
+        : new Response(JSON.stringify(ADATA_FIXTURE), { status: 200 });
+    };
+    const c = new AdataClient({ baseUrl: stub.baseUrl, token: TOKEN, requestTimeoutMs: 1_000, fetch: big });
+    const start = await caught(() => c.startCompanyInfo(nextBin()));
+    expect([start.failure, start.httpStatus]).toEqual(['http_5xx', 503]);
+    expectLeakFree(start, stub.baseUrl);
+    const result = await pollCompanyInfo(c, '0000020991', {
+      deadlineAt: Date.now() + 1_000,
+      timing: TIMING,
+      sleep: async () => {},
+    });
+    expect(result).toEqual({ ready: true, data: ADATA_FIXTURE.data });
+    expect(checks).toBe(2);
   });
 
   it('429: на проверке — временный сбой, опрос идёт до срока; на Get Request — http_4xx', async () => {
