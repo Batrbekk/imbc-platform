@@ -9,8 +9,13 @@ import { z } from 'zod';
 /** Предел тела `PUT /api/v1/prototype/state` (только этот маршрут; у остальных — общий предел). */
 export const PROTOTYPE_STATE_MAX_BYTES = 2 * 1024 * 1024;
 
-/** Документ: объект с числовой версией схемы данных прототипа (`SCHEMA_VERSION` web в поле `version`). */
-export const prototypeDocumentSchema = z.looseObject({ version: z.number() });
+/** Допустимые версии схемы документа: целое в разумных пределах, иначе 400. */
+export const PROTOTYPE_SCHEMA_VERSION_MAX = 1000;
+
+/** Документ: объект с версией схемы данных прототипа (`SCHEMA_VERSION` web в поле `version`). */
+export const prototypeDocumentSchema = z.looseObject({
+  version: z.number().int().min(1).max(PROTOTYPE_SCHEMA_VERSION_MAX),
+});
 export type PrototypeDocument = z.infer<typeof prototypeDocumentSchema>;
 
 /** Версия документа для оптимистичной блокировки: 0 — документа ещё нет. */

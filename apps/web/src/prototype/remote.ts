@@ -1,3 +1,4 @@
+import { PROTOTYPE_STATE_MAX_BYTES } from "@imbc/contracts";
 import { useSyncExternalStore } from "react";
 
 /**
@@ -11,7 +12,10 @@ import { useSyncExternalStore } from "react";
  * неподтверждённых; очередь уходит одним `PUT` с версией сервера. 409 — состояние сервера, очередь
  * применяется к нему заново (до трёх повторов); правка, которая к нему не применяется, отбрасывается.
  * Чужие правки приходят опросом раз в `POLL_MS` и при возврате на вкладку — только когда своих
- * неподтверждённых правок нет и запись не в пути.
+ * неподтверждённых правок нет и запись не в пути. Сервер отклонил запись (4xx, кроме 401 и 409) —
+ * правки отбрасываются с сообщением, берётся состояние сервера; 401 — синхронизация тихо
+ * останавливается (сеанс обрабатывает приложение). «Сбросить демо-данные» доходит до сервера всегда,
+ * в том числе поверх документа более новой схемы.
  */
 export const PROTOTYPE_STATE_URL = "/api/v1/prototype/state";
 export const POLL_MS = 5000;
@@ -23,16 +27,23 @@ export interface SyncStatus {
   mode: SyncMode;
   /** Последний запрос к серверу не прошёл: правки целы в браузере, повтор по опросу. */
   offline: boolean;
-  /** На сервере документ более новой схемы: эта вкладка устарела и ничего не пишет. */
+  /** На сервере документ более новой схемы: вкладка пишет только сброс демо-данных. */
   outdated: boolean;
-  /** Правка не применена: запись, которую она меняла, исчезла (`dropped`) или повторы кончились. */
-  notice: "dropped" | "conflict" | null;
+  /**
+   * Правка не применена: запись, которую она меняла, исчезла (`dropped`), повторы кончились
+   * (`conflict`) или сервер отклонил запись (`rejected`).
+   */
+  notice: "dropped" | "conflict" | "rejected" | null;
 }
 
-/** Неподтверждённая правка: из состояния-основы — новое. `seed` — исходные данные на пустой сервер. */
+/**
+ * Неподтверждённая правка: из состояния-основы — новое. `seed` — исходные данные на пустой сервер;
+ * `force` — сброс демо-данных: пишется поверх любого документа сервера, даже более новой схемы.
+ */
 export interface Change<S> {
   apply: (base: S) => S;
   seed?: boolean;
+  force?: boolean;
 }
 
 /** Что синхронизации нужно от хранилища (`store.ts`). */
@@ -82,6 +93,10 @@ export class StateSync<S> {
   private timer: ReturnType<typeof setInterval> | undefined;
   /** Растёт при `reset`: ответы и таймеры прежней синхронизации ничего не меняют. */
   private generation = 0;
+  /** Сеанс истёк (401): запросов больше нет, локальная копия остаётся. */
+  private stopped = false;
+  /** После отказа сервера: следующий опрос берёт документ сервера, даже если версия та же. */
+  private adopt = false;
 
   constructor(private readonly host: SyncHost<S>) {}
 
@@ -123,6 +138,7 @@ export class StateSync<S> {
     try {
       const res = await request();
       if (generation !== this.generation) return;
+      if (res.status === 401) return this.stop();
       if (res.status === 404) {
         // Сервер без общего состояния: локальный режим до перезагрузки, больше запросов нет.
         this.pending = [];
@@ -153,29 +169,55 @@ export class StateSync<S> {
     if (document.visibilityState === "visible") this.tick();
   };
 
-  /** Раз в `POLL_MS`: есть неподтверждённые правки — повтор записи, иначе — опрос. */
+  /** Есть что отправить: неподтверждённые правки, а у устаревшей вкладки — только сброс. */
+  private sendable(): boolean {
+    return this.status.outdated ? this.pending.some((change) => change.force) : this.pending.length > 0;
+  }
+
+  /** Раз в `POLL_MS`: есть что отправить — повтор записи, иначе — опрос. */
   private tick = () => {
-    if (this.pending.length > 0) void this.flush();
+    if (this.sendable()) void this.flush();
     else void this.poll();
   };
+
+  /** Сеанс истёк: без повторов и без стирания локальной копии; дальше — обработка сеанса приложения. */
+  private stop(): void {
+    this.stopped = true;
+    clearInterval(this.timer);
+    this.timer = undefined;
+    document.removeEventListener("visibilitychange", this.onVisible);
+    this.set({ offline: false });
+  }
+
+  /** Сервер отклонил запись: правки отбрасываются, следующий опрос берёт его документ. */
+  private rejected(): void {
+    this.pending = [];
+    this.conflicts = 0;
+    this.adopt = true;
+    this.set({ notice: "rejected", offline: false });
+    void this.poll();
+  }
 
   /**
    * Новая основа — документ сервера; неподтверждённые правки применяются к нему заново. Правка,
    * которая бросила (запись исчезла), отбрасывается с сообщением. Непригодный документ (пусто, старая
-   * схема, повреждён) заменяется исходными данными этой сборки; более новый — не трогается.
+   * схема, повреждён) заменяется исходными данными этой сборки; более новый — не трогается, пока в
+   * очереди нет сброса демо-данных.
    */
   private rebase(version: number, doc: unknown): void {
     this.version = version;
+    this.adopt = false;
     const kind = this.host.classify(doc);
-    this.set({ outdated: kind === "newer" });
-    if (kind === "newer") return;
+    const forced = this.pending.some((change) => change.force);
+    this.set({ outdated: kind === "newer" && !forced });
+    if (kind === "newer" && !forced) return;
     let base: S;
     if (kind === "usable") {
       base = doc as S;
       this.pending = this.pending.filter((change) => !change.seed);
     } else {
       base = this.host.initial();
-      if (!this.pending.some((change) => change.seed)) {
+      if (!forced && !this.pending.some((change) => change.seed)) {
         this.pending.unshift({ apply: () => this.host.initial(), seed: true });
       }
     }
@@ -193,16 +235,18 @@ export class StateSync<S> {
   }
 
   private async flush(): Promise<void> {
-    if (this.status.mode !== "shared" || this.status.outdated || this.writing || this.pending.length === 0) return;
+    if (this.status.mode !== "shared" || this.stopped || this.writing || !this.sendable()) return;
+    const sent = this.pending.length;
+    const payload = JSON.stringify({ baseVersion: this.version, state: this.host.current() });
+    // Сервер такое тело не примет: отказ сразу, без запроса.
+    if (new TextEncoder().encode(payload).length > PROTOTYPE_STATE_MAX_BYTES) return this.rejected();
     const generation = this.generation;
     this.writing = true;
     this.epoch += 1;
-    const sent = this.pending.length;
-    const state = this.host.current();
     let res: Response;
     let body: Record<string, unknown> | null;
     try {
-      res = await request({ method: "PUT", body: JSON.stringify({ baseVersion: this.version, state }) });
+      res = await request({ method: "PUT", body: payload });
       body = await readJson(res);
     } catch {
       if (generation !== this.generation) return;
@@ -216,10 +260,12 @@ export class StateSync<S> {
       this.version = body.version;
       this.pending.splice(0, sent);
       this.conflicts = 0;
-      this.set({ offline: false });
+      // Записанный документ — этой схемы (сброс поверх более новой — тоже).
+      this.set({ offline: false, outdated: false });
       void this.flush();
       return;
     }
+    if (res.status === 401) return this.stop();
     if (res.status === 409 && body && isVersion(body.version)) {
       this.set({ offline: false });
       if (this.conflicts >= MAX_CONFLICT_RETRIES) {
@@ -234,31 +280,35 @@ export class StateSync<S> {
       void this.flush();
       return;
     }
+    if (res.status >= 400 && res.status < 500) return this.rejected();
     this.set({ offline: true });
   }
 
   private async poll(): Promise<void> {
-    if (this.status.mode !== "shared" || this.writing || this.polling || this.pending.length > 0) return;
+    if (this.status.mode !== "shared" || this.stopped || this.writing || this.polling || this.sendable()) return;
     this.polling = true;
     const generation = this.generation;
     const epoch = this.epoch;
     let body: Record<string, unknown> | null = null;
+    let status = 0;
     try {
       const res = await request();
+      status = res.status;
       if (res.ok) body = await readJson(res);
     } catch {
       // Нет связи — ниже.
     }
     if (generation !== this.generation) return;
     this.polling = false;
+    if (status === 401) return this.stop();
     if (!body || !isVersion(body.version)) {
       this.set({ offline: true });
       return;
     }
     // За время опроса вкладка начала запись или правку: ответ устарел, основу даст запись.
-    if (epoch !== this.epoch || this.writing || this.pending.length > 0) return;
+    if (epoch !== this.epoch || this.writing || this.sendable()) return;
     this.set({ offline: false });
-    if (body.version === this.version && !this.status.outdated) return;
+    if (body.version === this.version && !this.status.outdated && !this.adopt) return;
     this.rebase(body.version, body.state);
     void this.flush();
   }
@@ -274,6 +324,8 @@ export class StateSync<S> {
     this.writing = false;
     this.polling = false;
     this.conflicts = 0;
+    this.stopped = false;
+    this.adopt = false;
     this.generation += 1;
     this.status = IDLE;
     for (const listener of this.listeners) listener();

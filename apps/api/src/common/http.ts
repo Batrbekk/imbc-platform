@@ -1,7 +1,7 @@
 import { PROTOTYPE_STATE_MAX_BYTES } from '@imbc/contracts';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
-import type { NextFunction, Request, Response } from 'express';
+import type { Express, NextFunction, Request, Response } from 'express';
 import helmet from 'helmet';
 import type { Env } from '../config/env.js';
 
@@ -26,69 +26,106 @@ function sendProblem(req: Request, res: Response, status: number, body: { type: 
 /** Адрес общего состояния прототипа кабинетов (`modules/prototype`). */
 const PROTOTYPE_STATE_PATH = '/api/v1/prototype/state';
 
+/** После отказа: сколько ещё байт тела и сколько времени соединение ждёт, прежде чем оборваться. */
+const LINGER_BYTES = PROTOTYPE_STATE_MAX_BYTES;
+const LINGER_MS = 2000;
+
 /**
- * Тело `PUT /api/v1/prototype/state` — до 2 МБ, только на этом адресе: общий парсер Nest (100 КБ) его
- * пропускает, потому что поток уже прочитан. Предел проверяется до разбора и проверки формы; больше
- * предела, не JSON или неверный JSON — 400 problem+json.
+ * Отказ до чтения или посреди тела. Ответ уходит сразу; остаток тела отбрасывается не дольше
+ * `LINGER_BYTES`/`LINGER_MS` (чтобы клиент успел прочитать ответ, а не получил обрыв), затем
+ * соединение закрывается — сервер не дочитывает тело сколь угодно большого запроса.
  */
-function prototypeStateBody(req: Request, res: Response, next: NextFunction): void {
-  if (req.method === 'GET' || req.method === 'HEAD') return next();
-  const reject = (code: string, title: string) =>
-    sendProblem(req, res, 400, { type: `https://imbc.kz/problems/${code}`, title, code });
-  if (!req.is('application/json')) return reject('validation', 'Ожидается тело application/json');
-  if (Number(req.get('content-length') ?? 0) > PROTOTYPE_STATE_MAX_BYTES) {
-    return reject('body_too_large', 'Тело больше 2 МБ');
-  }
-  const chunks: Buffer[] = [];
-  let size = 0;
-  let done = false;
-  req.on('data', (chunk: Buffer) => {
-    if (done) return;
-    size += chunk.length;
-    if (size <= PROTOTYPE_STATE_MAX_BYTES) return void chunks.push(chunk);
-    done = true;
-    reject('body_too_large', 'Тело больше 2 МБ');
-  });
-  req.on('error', (error) => {
-    if (done) return;
-    done = true;
-    next(error);
-  });
-  req.on('end', () => {
-    if (done) return;
-    done = true;
-    try {
-      req.body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
-    } catch {
-      return reject('validation', 'Тело — неверный JSON');
-    }
-    next();
-  });
+function refuse(req: Request, send: () => void): void {
+  const socket = req.socket;
+  let extra = 0;
+  const count = (chunk: Buffer) => {
+    extra += chunk.length;
+    if (extra > LINGER_BYTES) socket.destroy();
+  };
+  const timer = setTimeout(() => socket.destroy(), LINGER_MS);
+  timer.unref();
+  const done = () => {
+    socket.off('data', count);
+    clearTimeout(timer);
+  };
+  socket.on('data', count);
+  req.once('end', done);
+  socket.once('close', done);
+  send();
+  req.resume();
 }
 
 /**
- * Флаг `PROTOTYPE_CABINETS` выключен — адреса прототипа нет: тот же 404, что у неизвестного маршрута
- * (`Cannot <METHOD> <url>`), до проверки сеанса и разбора тела.
+ * Тело `PUT /api/v1/prototype/state` — до 2 МБ, только этот метод на этом адресе: общий парсер Nest
+ * (100 КБ) его пропускает, потому что поток уже прочитан. Запрос без cookie сеанса получает 401, как
+ * от guard, и тело не читается. Предел проверяется до разбора и проверки формы; больше предела, не
+ * JSON или неверный JSON — 400 problem+json. Тело сверх предела не дочитывается (`refuse`).
  */
-function prototypeAbsent(req: Request, res: Response): void {
-  sendProblem(req, res, 404, {
-    type: 'about:blank',
-    title: `Cannot ${req.method} ${req.originalUrl}`,
-    code: 'http_404',
-  });
+function prototypeStateBody(cookieName: string) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!req.cookies?.[cookieName]) {
+      return refuse(req, () =>
+        sendProblem(req, res, 401, {
+          type: 'https://imbc.kz/problems/unauthenticated',
+          title: 'Требуется вход',
+          code: 'unauthenticated',
+        }),
+      );
+    }
+    const reject = (code: string, title: string) =>
+      sendProblem(req, res, 400, { type: `https://imbc.kz/problems/${code}`, title, code });
+    const tooLarge = () => refuse(req, () => reject('body_too_large', 'Тело больше 2 МБ'));
+    if (!req.is('application/json')) return refuse(req, () => reject('validation', 'Ожидается тело application/json'));
+    if (Number(req.get('content-length') ?? 0) > PROTOTYPE_STATE_MAX_BYTES) return tooLarge();
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let done = false;
+    const onData = (chunk: Buffer) => {
+      size += chunk.length;
+      if (size <= PROTOTYPE_STATE_MAX_BYTES) return void chunks.push(chunk);
+      done = true;
+      req.off('data', onData);
+      tooLarge();
+    };
+    req.on('data', onData);
+    req.on('error', (error) => {
+      if (done) return;
+      done = true;
+      next(error);
+    });
+    req.on('end', () => {
+      if (done) return;
+      done = true;
+      try {
+        req.body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+      } catch {
+        return reject('validation', 'Тело — неверный JSON');
+      }
+      next();
+    });
+  };
 }
 
 /**
  * Настройка HTTP, общая для приложения (main.ts) и тестов на границе HTTP:
- * прокси, заголовки безопасности, запрет кеширования, cookie, префикс /api. Без `env` (или с
- * `PROTOTYPE_CABINETS=false`) адреса общего состояния прототипа нет.
+ * прокси, заголовки безопасности, запрет кеширования, cookie, префикс /api. Предел тела общего
+ * состояния прототипа — только при `env.PROTOTYPE_CABINETS` (модуль прототипа — `AppModule.register`).
  */
-export function configureHttp(app: NestExpressApplication, env?: Pick<Env, 'PROTOTYPE_CABINETS'>): void {
+export function configureHttp(
+  app: NestExpressApplication,
+  env?: Pick<Env, 'PROTOTYPE_CABINETS' | 'SESSION_COOKIE_NAME'>,
+): void {
   app.set('trust proxy', 1); // за ingress/nginx: IP клиента из X-Forwarded-For (NDA, аудит)
   app.use(helmet());
   app.use(noStore);
   app.use(cookieParser());
   // До общих парсеров тела Nest (они подключаются при init): иначе предел 100 КБ сработал бы раньше.
-  app.use(PROTOTYPE_STATE_PATH, env?.PROTOTYPE_CABINETS ? prototypeStateBody : prototypeAbsent);
+  // Маршрут Express с тем же сравнением путей, что у маршрутов Nest; без флага адреса нет вовсе.
+  if (env?.PROTOTYPE_CABINETS) {
+    (app.getHttpAdapter().getInstance() as Express).put(
+      PROTOTYPE_STATE_PATH,
+      prototypeStateBody(env.SESSION_COOKIE_NAME),
+    );
+  }
   app.setGlobalPrefix('api');
 }

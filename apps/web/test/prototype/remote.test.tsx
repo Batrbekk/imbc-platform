@@ -1,6 +1,8 @@
 // Общее состояние прототипа на сервере стенда: режим, запись с версией, повтор после 409, опрос, сброс.
-import { act, cleanup, screen } from "@testing-library/react";
+import { act, cleanup, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { PROTOTYPE_STATE_MAX_BYTES } from "@imbc/contracts";
 
 import { createInitialState, type ProtoState, SCHEMA_VERSION } from "@/prototype/data";
 import { getSyncStatus, POLL_MS, PROTOTYPE_STATE_URL, resetSyncForTests } from "@/prototype/remote";
@@ -53,6 +55,9 @@ function fakeServer(start: { version: number; state: unknown }) {
     puts: [] as { baseVersion: number; state: ProtoState }[],
     gets: 0,
     down: null as null | "network" | 500,
+    /** Ответ на PUT вместо записи: 400 (отказ), 401 (сеанс истёк) и т. п. */
+    putStatus: null as null | number,
+    getStatus: null as null | number,
     holdGet: null as Deferred | null,
     holdPut: null as Deferred | null,
     beforePut: null as null | (() => void),
@@ -62,6 +67,7 @@ function fakeServer(start: { version: number; state: unknown }) {
       if (server.down === "network") throw new TypeError("Failed to fetch");
       if (server.down) return reply(500, { status: 500, code: "internal" });
       server.gets += 1;
+      if (server.getStatus) return reply(server.getStatus, { status: server.getStatus, code: "x" });
       const snapshot = { version: server.version, state: structuredClone(server.state) };
       await server.holdGet?.promise;
       return reply(200, snapshot);
@@ -73,6 +79,7 @@ function fakeServer(start: { version: number; state: unknown }) {
       server.beforePut?.();
       const body = JSON.parse(String(init?.body)) as { baseVersion: number; state: ProtoState };
       server.puts.push(body);
+      if (server.putStatus) return reply(server.putStatus, { status: server.putStatus, code: "x" });
       if (body.baseVersion !== server.version) {
         return reply(409, { status: 409, code: "version_conflict", version: server.version, state: server.state });
       }
@@ -140,11 +147,25 @@ describe("режим хранилища", () => {
     expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY)!).profiles[0].status).toBe("draft");
   });
 
-  it("проверка режима не считается запросом экрана к /api/v1", () => {
+  it("проверка режима (первый GET состояния) не считается запросом экрана к /api/v1, остальные — считаются", () => {
     const api = stubApi({});
     void fetch(PROTOTYPE_STATE_URL, { cache: "no-store" });
     void fetch("/api/v1/catalog/search");
     expect(apiV1Calls(api)).toEqual(["/api/v1/catalog/search"]);
+    void fetch(PROTOTYPE_STATE_URL, { cache: "no-store" });
+    void fetch(PROTOTYPE_STATE_URL, { method: "PUT", body: "{}" });
+    expect(apiV1Calls(api)).toEqual(["/api/v1/catalog/search", PROTOTYPE_STATE_URL, PROTOTYPE_STATE_URL]);
+  });
+
+  it("проверка режима ответила 401 — без повторов, локальная копия цела", async () => {
+    const api = stubApi({ [`GET ${PROTOTYPE_STATE_URL}`]: { status: 401, body: { code: "unauthenticated" } } });
+    setProtoState(withStatus("draft"));
+    startProtoSync();
+    await settle();
+    await tick(POLL_MS * 5);
+    expect(api.mock.calls).toHaveLength(1);
+    expect(getProtoState().profiles[0]!.status).toBe("draft");
+    expect(getSyncStatus().offline).toBe(false);
   });
 });
 
@@ -372,6 +393,96 @@ describe("общий режим", () => {
     expect(server.state).toEqual(newer);
   });
 
+  it("документ более новой схемы: опрос продолжается и при неотправленных правках", async () => {
+    const newer = { ...createInitialState(), version: 999 };
+    const server = await open({ version: 7, state: newer });
+    commit(actor, audit, (draft) => {
+      draft.profiles[0]!.status = "draft";
+    });
+    const gets = server.gets;
+    await tick(POLL_MS * 2);
+    expect(server.gets).toBe(gets + 2);
+    expect(server.puts).toEqual([]);
+    expect(getSyncStatus().outdated).toBe(true);
+  });
+
+  it("«Сбросить демо-данные» при документе более новой схемы записывает исходные данные этой сборки", async () => {
+    const server = await open({ version: 7, state: { ...createInitialState(), version: 999 } });
+    expect(getSyncStatus().outdated).toBe(true);
+    // Пока вкладка ждала, документ ещё раз сменился: запись идёт поверх свежей версии блокировки.
+    server.version = 8;
+    resetProto();
+    await settle();
+    expect(server.puts.map((p) => p.baseVersion)).toEqual([7, 8]);
+    expect(server.state).toEqual(createInitialState());
+    expect(server.version).toBe(9);
+    expect(getSyncStatus().outdated).toBe(false);
+    expect(getProtoState()).toEqual(createInitialState());
+
+    commit(actor, audit, (draft) => {
+      draft.profiles[0]!.status = "draft";
+    });
+    await settle();
+    expect(server.puts.map((p) => p.baseVersion)).toEqual([7, 8, 9]);
+    expect(server.state).toEqual(getProtoState());
+  });
+
+  it("сервер отклонил запись (4xx): правка отброшена с сообщением, состояние сервера, опрос идёт", async () => {
+    const server = await open({ version: 1, state: createInitialState() });
+    server.putStatus = 400;
+    commit(actor, audit, (draft) => {
+      draft.profiles[0]!.status = "draft";
+    });
+    await settle();
+    expect(server.puts).toHaveLength(1);
+    expect(getSyncStatus()).toMatchObject({ notice: "rejected", offline: false });
+    expect(getProtoState()).toEqual(createInitialState());
+
+    server.putStatus = null;
+    server.state = withStatus("returned");
+    server.version = 2;
+    await tick(POLL_MS * 3);
+    expect(server.puts).toHaveLength(1);
+    expect(getProtoState().profiles[0]!.status).toBe("returned");
+  });
+
+  it("документ больше предела сервера не отправляется: отказ с сообщением", async () => {
+    const server = await open({ version: 1, state: createInitialState() });
+    commit(actor, audit, (draft) => {
+      draft.profiles[0]!.nameRu = "x".repeat(PROTOTYPE_STATE_MAX_BYTES);
+    });
+    await settle();
+    expect(server.puts).toEqual([]);
+    expect(getSyncStatus().notice).toBe("rejected");
+    expect(getProtoState()).toEqual(createInitialState());
+  });
+
+  it("запись получила 401: синхронизация тихо останавливается, локальная копия цела", async () => {
+    const server = await open({ version: 1, state: createInitialState() });
+    server.putStatus = 401;
+    commit(actor, audit, (draft) => {
+      draft.profiles[0]!.status = "draft";
+    });
+    await settle();
+    const gets = server.gets;
+    await tick(POLL_MS * 5);
+    expect(server.puts).toHaveLength(1);
+    expect(server.gets).toBe(gets);
+    expect(getProtoState().profiles[0]!.status).toBe("draft");
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY)!).profiles[0].status).toBe("draft");
+    expect(getSyncStatus()).toMatchObject({ offline: false, notice: null });
+  });
+
+  it("опрос получил 401: синхронизация тихо останавливается", async () => {
+    const server = await open({ version: 1, state: createInitialState() });
+    server.getStatus = 401;
+    await tick();
+    const gets = server.gets;
+    await tick(POLL_MS * 5);
+    expect(server.gets).toBe(gets);
+    expect(getSyncStatus().offline).toBe(false);
+  });
+
   it("правка до ответа о режиме уходит на сервер поверх его состояния", async () => {
     const server = fakeServer({ version: 2, state: withStatus("returned", 1) });
     server.holdGet = deferred();
@@ -446,5 +557,50 @@ describe("кабинет в общем режиме", () => {
     expect(server.gets).toBeGreaterThanOrEqual(1);
     expect(server.puts).toEqual([]);
     expect(server.version).toBe(3);
+  });
+
+  it("документ далёкой будущей схемы: баннер, сброс из баннера для всех, кабинет снова работает", async () => {
+    vi.useRealTimers();
+    const server = fakeServer({ version: 4, state: { ...createInitialState(), version: 999 } });
+    const { user } = renderCabinet("/proto/operator/notes", {
+      role: "operator",
+      keepState: true,
+      api: server.handlers,
+    });
+    const banner = await screen.findByText(/newer version of the platform/);
+    expect(banner).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Reset demo data for everyone" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toContain("All users of the stand return to the initial demo data.");
+    await user.click(within(dialog).getByRole("button", { name: "Reset demo data" }));
+    await act(settle);
+
+    expect(server.puts.map((p) => p.baseVersion)).toEqual([4]);
+    expect(server.state).toEqual(createInitialState());
+    expect(screen.queryByText(/newer version of the platform/)).toBeNull();
+
+    await user.type(await screen.findByRole("textbox", { name: "Add note" }), "Заметка после сброса");
+    await user.click(screen.getByRole("button", { name: "Add note" }));
+    await act(settle);
+    expect(server.puts.map((p) => p.baseVersion)).toEqual([4, 5]);
+    expect(JSON.stringify(server.state)).toContain("Заметка после сброса");
+  });
+
+  it("обычная кнопка сброса на странице при документе более новой схемы — то же", async () => {
+    vi.useRealTimers();
+    const server = fakeServer({ version: 4, state: { ...createInitialState(), version: 999 } });
+    const { user } = renderCabinet("/proto/operator/notes", {
+      role: "operator",
+      keepState: true,
+      api: server.handlers,
+    });
+    await screen.findByText(/newer version of the platform/);
+    await user.click(screen.getByRole("button", { name: "Reset demo data" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Reset demo data" }));
+    await act(settle);
+    expect(server.state).toEqual(createInitialState());
+    expect(screen.queryByText(/newer version of the platform/)).toBeNull();
   });
 });
