@@ -1,9 +1,12 @@
 // Словари прототипа: одни и те же ключи на трёх языках (LANG-01, LANG-02).
-import { LOCALES } from "@imbc/contracts";
+import { LOCALES, PROFILE_STATUSES, PROFILE_TIERS, UPDATE_STATUSES } from "@imbc/contracts";
 import { describe, expect, it } from "vitest";
 
 import { defineDictionary, localized, translate } from "@/prototype/i18n";
 import { commonTexts } from "@/prototype/labels";
+
+import kk from "../../messages/kk.json";
+import ru from "../../messages/ru.json";
 
 const texts = defineDictionary({
   en: { hello: "Hello, {name}", plain: "Plain" },
@@ -46,6 +49,35 @@ describe("словарь модуля", () => {
       expect(Object.keys(commonTexts[locale]).sort(), locale).toEqual(keys);
       for (const key of keys)
         expect(commonTexts[locale][key as keyof typeof commonTexts.en].trim(), `${locale}.${key}`).not.toBe("");
+    }
+  });
+
+  it("статусы профиля, актуальности и тиры по-русски и по-казахски — как в готовых страницах", () => {
+    for (const [locale, messages] of [
+      ["ru", ru],
+      ["kk", kk],
+    ] as const) {
+      const labels = commonTexts[locale];
+      for (const status of PROFILE_STATUSES)
+        expect(labels[`profileStatus.${status}`], `${locale} ${status}`).toBe(messages.profile.statusValue[status]);
+      for (const status of UPDATE_STATUSES)
+        expect(labels[`updateStatus.${status}`], `${locale} ${status}`).toBe(messages.catalog.status[status]);
+      for (const tier of PROFILE_TIERS)
+        expect(labels[`tier.${tier}`], `${locale} ${tier}`).toBe(messages.catalog.tierShort[tier]);
+    }
+    // Tier 3 — по тому же образцу.
+    expect(commonTexts.ru["tier.tier_3"]).toBe("Тир 3");
+    expect(commonTexts.kk["tier.tier_3"]).toBe("3-тир");
+  });
+
+  it("по-русски и по-казахски нет английских подписей, кроме терминов глоссария", () => {
+    const KEPT = /^(SME|STR|KTRE|AGAR|CDP|NDA|Release 2|—)$/;
+    for (const locale of ["ru", "kk"] as const) {
+      for (const [key, value] of Object.entries(commonTexts[locale])) {
+        if (KEPT.test(value)) continue;
+        expect(value === commonTexts.en[key as keyof typeof commonTexts.en], `${locale}.${key}: ${value}`).toBe(false);
+        expect(/^[A-Za-z0-9 .,]+$/.test(value), `${locale}.${key}: ${value}`).toBe(false);
+      }
     }
   });
 });

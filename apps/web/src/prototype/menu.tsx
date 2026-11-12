@@ -49,13 +49,18 @@ function MenuGroup({ role }: { role: Role }) {
           const label = item.label(locale);
           return (
             <SidebarMenuItem key={item.href}>
+              {/* Бейдж ui/sidebar стоит абсолютно справа и места себе не оставляет: кнопка с бейджем
+                  держит правый отступ шире «Release 2» (свёрнутый сайдбар бейдж прячет и отступ
+                  перекрывает своим p-2!), а подпись — последний span — обрезается многоточием
+                  (`[&>span:last-child]:truncate` кнопки) и хранит полный текст в title. */}
               <SidebarMenuButton
                 render={<Link to={item.href} />}
                 isActive={pathname === item.href || pathname.startsWith(`${item.href}/`)}
                 tooltip={label}
+                className={item.badge ? "pr-20" : undefined}
               >
                 <item.icon />
-                <span>{label}</span>
+                <span title={label}>{label}</span>
               </SidebarMenuButton>
               {item.badge === "release2" && <SidebarMenuBadge>{t("release2")}</SidebarMenuBadge>}
             </SidebarMenuItem>
