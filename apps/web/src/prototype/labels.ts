@@ -13,6 +13,9 @@ export const commonTexts = defineDictionary({
     release2: "Release 2",
     reset: "Reset demo data",
     screenError: "This prototype screen failed",
+    chunkError: "This prototype screen could not be loaded",
+    chunkErrorHint:
+      "The platform may have been updated or is being updated. Try reloading the page later; the demo data in this browser is kept.",
     screenErrorHint: "The demo data in this browser may be damaged. Reset demo data and open the screen again.",
     resetTitle: "Reset demo data?",
     resetDescription: "Every role in this browser returns to the initial demo data. Changes made in the demo are lost.",
@@ -101,6 +104,9 @@ export const commonTexts = defineDictionary({
     release2: "Release 2",
     reset: "Сбросить демо-данные",
     screenError: "Экран прототипа не открылся",
+    chunkError: "Экран прототипа не загрузился",
+    chunkErrorHint:
+      "Платформа могла обновиться или обновляется сейчас. Попробуйте перезагрузить страницу позже; демо-данные в этом браузере сохранены.",
     screenErrorHint: "Демо-данные в этом браузере могли повредиться. Сбросьте демо-данные и откройте экран снова.",
     resetTitle: "Сбросить демо-данные?",
     resetDescription:
@@ -190,6 +196,9 @@ export const commonTexts = defineDictionary({
     release2: "Release 2",
     reset: "Демо-деректерді қалпына келтіру",
     screenError: "Прототип экраны ашылмады",
+    chunkError: "Прототип экраны жүктелмеді",
+    chunkErrorHint:
+      "Платформа жаңартылған немесе қазір жаңартылып жатқан болуы мүмкін. Бетті кейінірек қайта жүктеп көріңіз; осы браузердегі демо-деректер сақталады.",
     screenErrorHint:
       "Осы браузердегі демо-деректер бүлінген болуы мүмкін. Демо-деректерді қалпына келтіріп, экранды қайта ашыңыз.",
     resetTitle: "Демо-деректерді қалпына келтіру керек пе?",

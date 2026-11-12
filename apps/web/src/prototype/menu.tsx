@@ -25,7 +25,7 @@ import { loadCabinet } from "./registry";
  */
 export function PrototypeMenu({ role }: { role: Role }) {
   return (
-    <ProtoBoundary key={role} chunkError="reload" fallback={() => null}>
+    <ProtoBoundary key={role} fallback={() => null}>
       <Suspense fallback={null}>
         <MenuGroup role={role} />
       </Suspense>

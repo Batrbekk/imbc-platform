@@ -40,6 +40,14 @@ describe("модуль роли в каркасе прототипа", () => {
     await waitFor(() => expect(window.sessionStorage.getItem(PROTOTYPE_RELOAD)).toBeNull());
   });
 
+  it("загруженный экран кабинета снимает флаг перезагрузки, готовые пункты меню на месте", async () => {
+    window.sessionStorage.setItem(PROTOTYPE_RELOAD, "1");
+    renderCabinet("/proto/operator/notes", { role: "operator" });
+    expect(await screen.findByRole("heading", { name: TITLE })).toBeTruthy();
+    await waitFor(() => expect(window.sessionStorage.getItem(PROTOTYPE_RELOAD)).toBeNull());
+    expect(screen.getByRole("link", { name: en.nav.dashboard })).toBeTruthy();
+  });
+
   it("оператор видит заметки только своей организации (GEN-12)", async () => {
     renderCabinet("/proto/operator/notes", { role: "operator" });
     expect(await screen.findByText(/Поставляли модульные конструкции/)).toBeTruthy();

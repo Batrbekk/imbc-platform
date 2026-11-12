@@ -1,5 +1,5 @@
 import { ROLES, type Role } from "@imbc/contracts";
-import { Suspense, use } from "react";
+import { Suspense, use, useEffect } from "react";
 import { Link, Navigate, type RouteObject, useLocation, useParams, useRoutes } from "react-router";
 import { useTranslations } from "use-intl";
 
@@ -7,9 +7,11 @@ import { PageTitle } from "@/components/app/page-title";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
+import { reloadApp } from "@/lib/leave-app";
+import { clearReloadFlag } from "@/lib/reload-guard";
 import { authDestination, useMe } from "@/lib/session";
 
-import { ProtoBoundary } from "./boundary";
+import { PROTOTYPE_RELOAD, ProtoBoundary } from "./boundary";
 import { useCommonTexts } from "./labels";
 import { loadCabinet } from "./registry";
 import { resetProto } from "./store";
@@ -31,8 +33,12 @@ export function PrototypeGate() {
   if (role !== me.user.role) return <Navigate to={authDestination(me)} replace />;
   return (
     // Новый адрес снимает сбой экрана, но не перемонтирует дерево: layout-маршруты модуля сохраняют
-    // своё состояние. Устаревший чанк уходит к RouteError — одна перезагрузка, как у страниц.
-    <ProtoBoundary resetKey={pathname} chunkError="rethrow" fallback={(retry) => <ProtoScreenError retry={retry} />}>
+    // своё состояние. Чанк модуля не загрузился — одна перезагрузка, затем сообщение (boundary.tsx).
+    <ProtoBoundary
+      resetKey={pathname}
+      fallback={(retry) => <ProtoScreenError retry={retry} />}
+      chunkFallback={<ProtoChunkError />}
+    >
       <Suspense fallback={<Skeleton className="h-40 w-full" />}>
         <CabinetRoutes role={role} />
       </Suspense>
@@ -49,7 +55,32 @@ function caseSensitive(route: RouteObject): RouteObject {
 /** Маршруты модуля относительно `/proto/<role>/`; неизвестный экран — «не найдено». */
 function CabinetRoutes({ role }: { role: Role }) {
   const cabinet = use(loadCabinet(role));
+  // Модуль загрузился: следующий недоступный чанк снова может перезагрузить страницу один раз.
+  useEffect(() => clearReloadFlag(PROTOTYPE_RELOAD), []);
   return useRoutes([...cabinet.routes.map(caseSensitive), { path: "*", element: <ProtoNotFound /> }]);
+}
+
+/**
+ * Чанк кабинета не загрузился и после перезагрузки: сообщение без сброса демо-данных (данные целы,
+ * сброс не помог бы) и кнопка перезагрузки вручную. Оболочка и готовые страницы на месте.
+ */
+function ProtoChunkError() {
+  const t = useCommonTexts();
+  const routeError = useTranslations("routeError");
+  return (
+    <Empty>
+      <PageTitle title={t("chunkError")} />
+      <EmptyHeader>
+        <EmptyTitle>
+          <h1 className="text-xl">{t("chunkError")}</h1>
+        </EmptyTitle>
+        <EmptyDescription>{t("chunkErrorHint")}</EmptyDescription>
+      </EmptyHeader>
+      <Button variant="outline" onClick={() => reloadApp()}>
+        {routeError("reload")}
+      </Button>
+    </Empty>
+  );
 }
 
 /** Экран прототипа упал: сообщение на языке интерфейса и сброс демо-данных с новой отрисовкой. */

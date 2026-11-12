@@ -54,7 +54,7 @@
 
 ## Browser storage
 
-- `sessionStorage` holds only: the reload flags `imbc:startup-reload` and `imbc:lazy-reload` and the trial key `imbc:storage-probe` (`src/lib/reload-guard.ts`), and the scroll positions of React Router's `ScrollRestoration` (`react-router-scroll-positions`). The application stores nothing else there and nothing in `localStorage`: data of a signed-in user must not outlive the session in the browser. The language is the `NEXT_LOCALE` cookie. The one exception is the role-cabinet prototype below, only in a build with the prototype flag: its fictional demo state lives in `localStorage["imbc-prototype-v1"]` (nothing of the live session is written there), and its menu keeps a one-time reload flag `imbc:prototype-reload` in `sessionStorage` for a stale chunk after a deployment.
+- `sessionStorage` holds only: the reload flags `imbc:startup-reload` and `imbc:lazy-reload` and the trial key `imbc:storage-probe` (`src/lib/reload-guard.ts`), and the scroll positions of React Router's `ScrollRestoration` (`react-router-scroll-positions`). The application stores nothing else there and nothing in `localStorage`: data of a signed-in user must not outlive the session in the browser. The language is the `NEXT_LOCALE` cookie. The one exception is the role-cabinet prototype below, only in a build with the prototype flag: its fictional demo state lives in `localStorage["imbc-prototype-v1"]` (nothing of the live session is written there), and its menu and cabinet screens keep a one-time reload flag `imbc:prototype-reload` in `sessionStorage` for a cabinet chunk that cannot be loaded (cleared once the module has loaded; a second failure shows a message instead of reloading again).
 
 ## Role-cabinet prototype (`src/prototype`)
 

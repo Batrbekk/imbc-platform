@@ -59,11 +59,34 @@ describe("устаревший чанк модуля роли", () => {
     expect(screen.getByRole("heading", { level: 1, name: en.reviews.title })).toBeTruthy();
   });
 
-  it("экран: не «сбросьте демо-данные», а обработка маршрута — перезагрузка", async () => {
+  it("экран: первая неудача — одна перезагрузка по флагу прототипа; оболочка цела, сброса нет", async () => {
     renderCabinet("/proto/operator/x", { role: "operator" });
     await waitFor(() => expect(reloadApp).toHaveBeenCalled());
     await settle("operator");
+    // Меню и шлюз ждут один и тот же модуль: перезагрузка одна на обоих.
+    expect(reloadApp).toHaveBeenCalledOnce();
+    expect(window.sessionStorage.getItem(PROTOTYPE_RELOAD)).toBe("1");
+    expect(screen.getByRole("link", { name: en.nav.dashboard })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "This prototype screen failed" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Reset demo data" })).toBeNull();
+  });
+
+  it("экран: перезагрузка уже была — сообщение без новой перезагрузки и без сброса данных", async () => {
+    // Root снимает imbc:lazy-reload при первом рендере, поэтому прежний путь через RouteError
+    // перезагружал бы без конца; флаг прототипа он не трогает.
+    window.sessionStorage.setItem(PROTOTYPE_RELOAD, "1");
+    renderCabinet("/proto/operator/x", { role: "operator" });
+    expect(await screen.findByRole("heading", { name: "This prototype screen could not be loaded" })).toBeTruthy();
+    await settle("operator");
+    expect(reloadApp).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Reset demo data" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: en.routeError.title })).toBeNull();
+    expect(screen.getByRole("link", { name: en.nav.dashboard })).toBeTruthy();
+  });
+
+  it("экран: сообщение переведено", async () => {
+    window.sessionStorage.setItem(PROTOTYPE_RELOAD, "1");
+    renderCabinet("/proto/operator/x", { role: "operator", locale: "ru" });
+    expect(await screen.findByRole("heading", { name: "Экран прототипа не загрузился" })).toBeTruthy();
   });
 });
