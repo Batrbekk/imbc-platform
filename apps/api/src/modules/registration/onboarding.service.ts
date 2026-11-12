@@ -3,9 +3,10 @@ import { eq, sql } from 'drizzle-orm';
 import type pg from 'pg';
 import { AuditService } from '../../common/audit.service.js';
 import { PG_POOL } from '../../database/database.module.js';
+import { boundLockWaits } from '../../database/lock-waits.js';
 import { manufacturerProfiles, ndaVersion, organizations, userAccounts } from '../../database/schema/index.js';
 import { withQueueTransaction } from '../../database/transaction.js';
-import { AdataScheduler, boundLockWaits, type AdataReadOrigin } from '../adata/adata.scheduler.js';
+import { AdataScheduler, type AdataReadOrigin } from '../adata/adata.scheduler.js';
 import { ProfilesService } from '../profiles/profiles.service.js';
 
 export type OnboardingResult = {

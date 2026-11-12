@@ -9,7 +9,11 @@ import {
   companyCardDataSchema,
   companyPageSchema,
   computeBinCheckDigit,
+  createOrganizationSchema,
   dashboardSchema,
+  imbcMailboxSchema,
+  INVITABLE_ROLES,
+  inviteAccountSchema,
   loginEmailSchema,
   registrationRequestSchema,
   registrationTermsReadSchema,
@@ -112,6 +116,53 @@ describe('регистрация производителя (MAN-01, FC-02, GEN-
     });
     for (const body of [{}, { nda: { body: 'Текст' } }, { nda: { version: 0, body: 'Текст' } }, { nda: { version: 1, body: '' } }])
       expect(registrationTermsReadSchema.safeParse(body).success, JSON.stringify(body)).toBe(false);
+  });
+});
+
+describe('организации и приглашения администратора (ADM-01, ADM-03, GEN-05)', () => {
+  it('INVITABLE_ROLES: производителя нет, у IMBC три роли (раздел 3.1)', () => {
+    expect(Object.keys(INVITABLE_ROLES).sort()).toEqual(['imbc', 'observer', 'operator']);
+    expect(INVITABLE_ROLES.imbc).toEqual(['expert', 'administrator', 'director']);
+    expect(INVITABLE_ROLES.operator).toEqual(['operator']);
+    expect(INVITABLE_ROLES.observer).toEqual(['observer']);
+    expect(Object.values(INVITABLE_ROLES).flat()).not.toContain('manufacturer');
+  });
+
+  it('наблюдатель с отметкой major — отклоняется (GEN-05)', () => {
+    expect(createOrganizationSchema.parse({ name: '  Оператор  ', type: 'operator', isMajorOperator: true })).toEqual({
+      name: 'Оператор',
+      type: 'operator',
+      isMajorOperator: true,
+    });
+    expect(createOrganizationSchema.parse({ name: 'Наблюдатель', type: 'observer' }).isMajorOperator).toBe(false);
+    const major = createOrganizationSchema.safeParse({ name: 'Наблюдатель', type: 'observer', isMajorOperator: true });
+    expect(major.success).toBe(false);
+    expect(major.error?.issues.map((i) => i.path.join('.'))).toEqual(['isMajorOperator']);
+    for (const type of ['manufacturer', 'imbc'])
+      expect(createOrganizationSchema.safeParse({ name: 'Организация', type }).success, type).toBe(false);
+    expect(
+      createOrganizationSchema.safeParse({ name: 'Организация', type: 'operator', bin: '980540000381' }).success,
+    ).toBe(false);
+  });
+
+  it('приглашение и ящик IMBC: почта в нижнем регистре, лишний ключ — отказ (ADM-01, раздел 8.2)', () => {
+    const invite = {
+      email: ' New@Operator.Local ',
+      fullName: ' Имя Фамилия ',
+      organizationId: '00000000-0000-4000-8000-000000000001',
+      role: 'operator',
+    };
+    expect(inviteAccountSchema.parse(invite)).toEqual({
+      ...invite,
+      email: 'new@operator.local',
+      fullName: 'Имя Фамилия',
+    });
+    expect(inviteAccountSchema.safeParse({ ...invite, locale: 'ru' }).success).toBe(false);
+    expect(inviteAccountSchema.safeParse({ ...invite, organizationId: 'x' }).success).toBe(false);
+    expect(imbcMailboxSchema.parse({ email: ' Mail@IMBC.Local ' })).toEqual({ email: 'mail@imbc.local' });
+    expect(imbcMailboxSchema.parse({ email: null })).toEqual({ email: null });
+    expect(imbcMailboxSchema.safeParse({ email: 'not-an-email' }).success).toBe(false);
+    expect(imbcMailboxSchema.safeParse({}).success).toBe(false);
   });
 });
 

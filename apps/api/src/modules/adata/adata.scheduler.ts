@@ -4,6 +4,7 @@ import type pg from 'pg';
 import type { PgBoss } from 'pg-boss';
 import { AuditService } from '../../common/audit.service.js';
 import { PG_POOL, type Database } from '../../database/database.module.js';
+import { boundLockWaits, sqlState } from '../../database/lock-waits.js';
 import {
   externalCheck,
   externalCheckAttempt,
@@ -22,21 +23,6 @@ export type QueueDb = { executeSql(text: string, values?: unknown[]): Promise<{ 
 
 /** Конечные состояния, в которых запроса к Adata не было: попытку можно поставить снова. */
 const NOT_SENT = ['not_configured', 'quota_exhausted'] as const;
-
-/** Код SQLSTATE из ошибки pg или из её обёртки Drizzle. */
-export function sqlState(error: unknown): unknown {
-  const e = error as { code?: unknown; cause?: { code?: unknown } } | null;
-  return e?.code ?? e?.cause?.code;
-}
-
-/**
- * Вход и опрос событий не ждут чужую открытую транзакцию на строках аккаунта и профиля: отказ — warn
- * у вызывающего. Первые операторы транзакции, в которой ставится чтение.
- */
-export async function boundLockWaits(tx: Database): Promise<void> {
-  await tx.execute(sql`set local lock_timeout = '2s'`);
-  await tx.execute(sql`set local statement_timeout = '5s'`);
-}
 
 /**
  * Одно чтение Adata, когда профиль производителя появился: пароль установлен (MAN-03, NOT-23) или,

@@ -11,6 +11,9 @@ import { InfraModule } from './infra/infra.module.js';
 import { MailService } from './mail/mail.service.js';
 import { AccountsController } from './modules/admin/accounts.controller.js';
 import { AccountsService } from './modules/admin/accounts.service.js';
+import { InvitationsService } from './modules/admin/invitations.service.js';
+import { OrganizationsController } from './modules/admin/organizations.controller.js';
+import { OrganizationsService } from './modules/admin/organizations.service.js';
 import { AdataScheduler } from './modules/adata/adata.scheduler.js';
 import { AuthController } from './modules/auth/auth.controller.js';
 import { SessionGuard } from './modules/auth/guards.js';
@@ -48,6 +51,7 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     ProfilesController,
     ReviewsController,
     AccountsController,
+    OrganizationsController,
   ],
   providers: [
     OidcService,
@@ -58,6 +62,8 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     CatalogService,
     ReviewsService,
     AccountsService,
+    OrganizationsService,
+    InvitationsService,
     MailService,
     AdataScheduler,
     IdentityProvisioningService,

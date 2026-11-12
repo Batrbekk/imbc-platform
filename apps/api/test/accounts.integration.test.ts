@@ -100,7 +100,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('организации и ак�
   it('в ответе нет ключей профиля: status, bin, updateStatus, tier, completenessPct (ADM-06)', async () => {
     const result = await accounts.list();
     expect(() => adminAccountsSchema.strict().parse(result)).not.toThrow();
-    expect(Object.keys(result)).toEqual(['organizations']);
+    expect(Object.keys(result)).toEqual(['organizations', 'imbcMailbox']);
+    // Ящик IMBC seed не задаёт (раздел 8.2).
+    expect(result.imbcMailbox).toBeNull();
 
     const profileKeys = ['status', 'bin', 'updateStatus', 'tier', 'completenessPct'];
     for (const organization of result.organizations) {
