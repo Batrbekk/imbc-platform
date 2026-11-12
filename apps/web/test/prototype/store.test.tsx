@@ -143,17 +143,89 @@ describe("хранилище прототипа", () => {
     expect(getProtoState().ext.expert).toBeUndefined();
   });
 
-  it("сеанс вне демо-аккаунтов — организация по роли", () => {
-    const state = createInitialState();
-    expect(actorFor(state, { email: "other@operator.local", fullName: "Другой", role: "operator" })).toEqual({
-      accountId: null,
-      email: "other@operator.local",
-      name: "Другой",
+  it("сеанс вне демо-аккаунтов — демо-персона роли; почта и имя сеанса не сохраняются (NFR-11)", () => {
+    setProtoState(createInitialState());
+    const session = { email: "real.person@company.example", fullName: "Реальный Человек", role: "operator" as const };
+    const persona = actorFor(getProtoState(), session);
+    expect(persona).toEqual({
+      accountId: "acc-operator",
+      email: "operator@operator.local",
+      name: "Специалист оператора",
       role: "operator",
       organizationId: "org-operator-demo",
     });
-    expect(actorFor(state, { email: "EXPERT@imbc.local", fullName: null, role: "expert" }).accountId).toBe(
-      "acc-expert",
+    commit(persona, audit, (draft) => {
+      draft.operatorNotes[0]!.text = "Правка";
+    });
+    const stored = window.localStorage.getItem(STORAGE_KEY)!;
+    expect(stored).toContain("Правка");
+    for (const leak of ["real.person", "company.example", "Реальный Человек"]) {
+      expect(stored).not.toContain(leak);
+      expect(JSON.stringify(getProtoState())).not.toContain(leak);
+    }
+  });
+
+  it.each([
+    ["manufacturer", "acc-manufacturer", "org-m01"],
+    ["expert", "acc-expert", "org-imbc"],
+    ["administrator", "acc-admin", "org-imbc"],
+    ["director", "acc-director", "org-imbc"],
+    ["operator", "acc-operator", "org-operator-demo"],
+    ["observer", "acc-observer", "org-observer-demo"],
+  ] as const)("персона роли %s — демо-аккаунт seed", (role, accountId, organizationId) => {
+    const actor = actorFor(createInitialState(), { email: "someone@else.example", fullName: "X", role });
+    expect(actor).toMatchObject({ accountId, role, organizationId });
+    expect(actor.email).not.toContain("else.example");
+    expect(actor.name).not.toBe("X");
+  });
+
+  it("сеанс демо-аккаунта — этот аккаунт; адрес той же роли без учёта регистра", () => {
+    const state = createInitialState();
+    expect(
+      actorFor(state, { email: "Arman.Bekov@operator.demo.local", fullName: "Чужое имя", role: "operator" }),
+    ).toEqual({
+      accountId: "acc-operator-2",
+      email: "arman.bekov@operator.demo.local",
+      name: "Арман Беков",
+      role: "operator",
+      organizationId: "org-operator-demo",
+    });
+    // Адрес демо-аккаунта другой роли — персона своей роли.
+    expect(actorFor(state, { email: "expert@imbc.local", fullName: null, role: "director" }).accountId).toBe(
+      "acc-director",
     );
+  });
+
+  it.each([
+    ["JSON null", "null"],
+    ["число", "42"],
+    ["элемент набора — null", JSON.stringify({ ...createInitialState(), profiles: [null] })],
+    ["элемент набора без id", JSON.stringify({ ...createInitialState(), profiles: [{ nameRu: "X" }] })],
+    ["id не строка", JSON.stringify({ ...createInitialState(), accounts: [{ id: 1 }] })],
+    ["запись due diligence без profileId", JSON.stringify({ ...createInitialState(), dueDiligence: [{}] })],
+  ])("%s в localStorage — исходные данные", async (_, raw) => {
+    window.localStorage.setItem(STORAGE_KEY, raw);
+    const store = await freshStore();
+    expect(store.getProtoState()).toEqual(createInitialState());
+  });
+
+  it("localStorage бросает при чтении — исходные данные; при записи — правка живёт в памяти", async () => {
+    const getItem = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("denied");
+    });
+    const store = await freshStore();
+    expect(store.getProtoState()).toEqual(createInitialState());
+    getItem.mockRestore();
+
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("quota");
+    });
+    expect(() =>
+      store.commit(actor, audit, (draft) => {
+        draft.profiles[0]!.status = "draft";
+      }),
+    ).not.toThrow();
+    expect(store.getProtoState().profiles[0]!.status).toBe("draft");
+    setItem.mockRestore();
   });
 });

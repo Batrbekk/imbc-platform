@@ -33,7 +33,9 @@ export function ddResult(state: ProtoState, profileId: string) {
  * актуальности. Только такие профили видят оператор и наблюдатель (OPR-01, GEN-13).
  */
 export function isVisible(state: ProtoState, profile: ProtoProfile): boolean {
-  return profile.status === "verified" && ddResult(state, profile.id) !== "red";
+  const result = ddResult(state, profile.id);
+  // Без записи due diligence профиль не видим.
+  return profile.status === "verified" && (result === "green" || result === "amber");
 }
 
 /** Профили для оператора и наблюдателя: видимые, unresponsive — ниже остальных (UPD-04). */

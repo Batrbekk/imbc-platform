@@ -28,13 +28,16 @@ const HOME: Record<Role, string> = {
   observer: "/dashboard",
 };
 
-/** Сеанс роли с пройденными шлюзами входа; `email` — другой пользователь той же роли. */
-export function sessionFor(role: Role, email = SESSION_EMAIL[role]): Me {
+/**
+ * Сеанс роли с пройденными шлюзами входа; `email` и `fullName` — другой пользователь той же роли
+ * (например, настоящий человек на стенде: в хранилище прототипа его данные попадать не должны).
+ */
+export function sessionFor(role: Role, email = SESSION_EMAIL[role], fullName: string | null = null): Me {
   return {
     user: {
       id: "00000000-0000-4000-8000-000000000001",
       email,
-      fullName: null,
+      fullName,
       role,
       organizationId: "00000000-0000-4000-8000-000000000002",
       organizationType:
@@ -69,6 +72,7 @@ export function renderCabinet(
   options: {
     role: Role;
     email?: string;
+    fullName?: string;
     locale?: Locale;
     prepare?: (draft: ProtoState) => void;
     keepState?: boolean;
@@ -80,7 +84,10 @@ export function renderCabinet(
     options.prepare?.(state);
     setProtoState(state);
   }
-  const api = stubApi({ "GET /api/auth/me": { body: sessionFor(options.role, options.email) }, ...options.api });
+  const api = stubApi({
+    "GET /api/auth/me": { body: sessionFor(options.role, options.email, options.fullName) },
+    ...options.api,
+  });
   const rendered = renderRoute(entry, { locale: options.locale ?? "en" });
   return { ...rendered, api, state: getProtoState };
 }

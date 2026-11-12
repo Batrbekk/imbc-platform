@@ -4,7 +4,7 @@ import { useSyncExternalStore } from "react";
 import { useMe } from "@/lib/session";
 
 import { type AuditEvent, createInitialState, type ProtoState, SCHEMA_VERSION } from "./data";
-import { ORG } from "./data/organizations";
+import { ACCOUNT, accounts as seedAccounts } from "./data/accounts";
 import { DEMO_PROFILE_ID } from "./data/profiles";
 
 /**
@@ -42,12 +42,23 @@ function isState(value: unknown): value is ProtoState {
   const initial = createInitialState() as unknown as Record<string, unknown>;
   return Object.entries(initial).every(([key, sample]) => {
     const stored = record[key];
-    if (Array.isArray(sample)) return Array.isArray(stored);
+    if (Array.isArray(sample)) return Array.isArray(stored) && stored.every((item) => isRecordLike(item, sample[0]));
     if (typeof sample === "object" && sample !== null) {
       return typeof stored === "object" && stored !== null && !Array.isArray(stored);
     }
     return typeof stored === typeof sample;
   });
+}
+
+/**
+ * Элемент набора — объект со строковым ключом, как в образце: `id`, а у записей due diligence,
+ * где `id` нет, — `profileId`.
+ */
+function isRecordLike(item: unknown, sample: unknown): boolean {
+  if (typeof item !== "object" || item === null || Array.isArray(item)) return false;
+  if (typeof sample !== "object" || sample === null) return true;
+  const key = "id" in sample ? "id" : "profileId" in sample ? "profileId" : null;
+  return key === null || typeof (item as Record<string, unknown>)[key] === "string";
 }
 
 function save(next: ProtoState) {
@@ -105,34 +116,47 @@ export function useProto<T>(selector?: (state: ProtoState) => T): T | ProtoState
   return selector ? selector(current) : current;
 }
 
-/** Кто действует: аккаунт демо-данных по email сеанса, иначе организация по роли. */
+/**
+ * Кто действует — всегда демо-аккаунт: аккаунт демо-данных с адресом сеанса и той же ролью, иначе
+ * демо-персона роли (аккаунт seed). Из сеанса берётся только роль: адрес и имя настоящего
+ * пользователя стенда не попадают ни в действующего, ни в журнал, ни в localStorage (NFR-11).
+ */
 export type ProtoActor = AuditEvent["actor"] & { organizationId: string };
 
-/** Организация демо-данных для сеанса, которого нет среди аккаунтов (`data/accounts.ts`). */
-const ORGANIZATION_BY_ROLE: Record<Role, string> = {
-  manufacturer: "org-m01",
-  expert: ORG.imbc,
-  administrator: ORG.imbc,
-  director: ORG.imbc,
-  operator: ORG.operatorDemo,
-  observer: ORG.observerDemo,
+/** Демо-персона роли: аккаунт seed (`data/accounts.ts`). */
+const PERSONA_BY_ROLE: Record<Role, string> = {
+  manufacturer: ACCOUNT.manufacturer,
+  expert: ACCOUNT.expert,
+  administrator: ACCOUNT.administrator,
+  director: ACCOUNT.director,
+  operator: ACCOUNT.operator,
+  observer: ACCOUNT.observer,
 };
 
+/**
+ * Действующий для сеанса. `user.email` и `user.fullName` только сравниваются с демо-аккаунтами и
+ * никуда не возвращаются; `accountId` — всегда ключ существующего демо-аккаунта.
+ */
 export function actorFor(state: ProtoState, user: { email: string; fullName: string | null; role: Role }): ProtoActor {
   const email = user.email.toLowerCase();
-  const account = state.accounts.find((a) => a.email.toLowerCase() === email && a.role === user.role);
+  const persona = PERSONA_BY_ROLE[user.role];
+  const account =
+    state.accounts.find((a) => a.role === user.role && a.email.toLowerCase() === email) ??
+    state.accounts.find((a) => a.id === persona) ??
+    // Персона удалена из состояния — исходная запись того же аккаунта.
+    seedAccounts.find((a) => a.id === persona)!;
   return {
-    accountId: account?.id ?? null,
-    email: user.email,
-    name: account?.fullName ?? user.fullName ?? user.email,
+    accountId: account.id,
+    email: account.email,
+    name: account.fullName,
     role: user.role,
-    organizationId: account?.organizationId ?? ORGANIZATION_BY_ROLE[user.role],
+    organizationId: account.organizationId,
   };
 }
 
 /**
- * Пользователь сеанса в демо-данных. Роль и язык берутся из сеанса (`useMe`); оболочка открывает
- * страницу только после загрузки сеанса, поэтому данные уже есть.
+ * Пользователь сеанса в демо-данных (см. `actorFor`). Из сеанса (`useMe`) берётся роль; оболочка
+ * открывает страницу только после загрузки сеанса, поэтому данные уже есть.
  */
 export function useActor(): ProtoActor {
   const me = useMe().data;

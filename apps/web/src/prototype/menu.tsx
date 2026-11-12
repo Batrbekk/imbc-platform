@@ -1,5 +1,5 @@
 import type { Role } from "@imbc/contracts";
-import { use } from "react";
+import { Suspense, use } from "react";
 import { Link, useLocation } from "react-router";
 
 import {
@@ -11,15 +11,27 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 
+import { ProtoBoundary } from "./boundary";
 import { useProtoLocale } from "./i18n";
 import { useCommonTexts } from "./labels";
 import { loadCabinet } from "./registry";
 
 /**
  * Группа «Прототип» под готовыми пунктами меню: пункты модуля роли сеанса. Модуль без пунктов
- * (наблюдатель) группы не показывает.
+ * (наблюдатель) группы не показывает. Модуль не загрузился или подпись бросила — группы нет,
+ * готовые пункты меню и страница роли не задеты.
  */
 export function PrototypeMenu({ role }: { role: Role }) {
+  return (
+    <ProtoBoundary key={role} fallback={() => null}>
+      <Suspense fallback={null}>
+        <MenuGroup role={role} />
+      </Suspense>
+    </ProtoBoundary>
+  );
+}
+
+function MenuGroup({ role }: { role: Role }) {
   const cabinet = use(loadCabinet(role));
   const { pathname } = useLocation();
   const locale = useProtoLocale();

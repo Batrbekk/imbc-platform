@@ -62,6 +62,26 @@ describe("модуль роли в каркасе прототипа", () => {
     expect(await screen.findByText(/Новая заметка/)).toBeTruthy();
   });
 
+  it("сеанс не демо-аккаунта: в браузере не остаётся ни почты, ни имени (NFR-11)", async () => {
+    const { user } = renderCabinet("/proto/operator/notes", {
+      role: "operator",
+      email: "real.person@company.example",
+      fullName: "Реальный Человек",
+    });
+    await user.type(await screen.findByRole("textbox", { name: "Add note" }), "Заметка со стенда");
+    await user.click(screen.getByRole("button", { name: "Add note" }));
+    // Автор — демо-персона роли оператора.
+    expect(await screen.findByText(/Заметка со стенда — Специалист оператора/)).toBeTruthy();
+    const stored = window.localStorage.getItem(STORAGE_KEY)!;
+    expect(stored).toContain("Заметка со стенда");
+    for (const leak of ["real.person", "company.example", "Реальный Человек"]) expect(stored).not.toContain(leak);
+  });
+
+  it("экраны модуля сравниваются с учётом регистра", async () => {
+    renderCabinet("/proto/operator/NOTES", { role: "operator" });
+    expect(await screen.findByRole("heading", { name: en.notFound.title })).toBeTruthy();
+  });
+
   it("«Сбросить демо-данные» возвращает исходное состояние", async () => {
     const { user } = renderCabinet("/proto/operator/notes", {
       role: "operator",

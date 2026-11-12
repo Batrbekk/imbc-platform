@@ -1,4 +1,4 @@
-import { can } from "@imbc/contracts";
+import { can, type Role } from "@imbc/contracts";
 import {
   BuildingIcon,
   ClipboardListIcon,
@@ -8,7 +8,7 @@ import {
   UserRoundIcon,
   UsersIcon,
 } from "lucide-react";
-import { lazy, Suspense, useEffect } from "react";
+import { type ComponentType, lazy, Suspense, useEffect } from "react";
 import { Link, Outlet, useLocation, useMatches, useNavigate } from "react-router";
 import { useTranslations } from "use-intl";
 
@@ -40,7 +40,10 @@ import { authDestination, useLogout, useMe } from "@/lib/session";
  */
 const PrototypeMenu =
   import.meta.env.VITE_PROTOTYPE_CABINETS === "true"
-    ? lazy(() => import("@/prototype/menu").then((m) => ({ default: m.PrototypeMenu })))
+    ? // Не загрузился чанк меню — группы нет, а не экран ошибки на каждой готовой странице.
+      lazy<ComponentType<{ role: Role }>>(() =>
+        import("@/prototype/menu").then((m) => ({ default: m.PrototypeMenu })).catch(() => ({ default: () => null })),
+      )
     : null;
 
 /** `handle` рабочего маршрута: ключ заголовка вкладки, пока страница ещё не показана. */

@@ -4,7 +4,14 @@ import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { Textarea } from "@/components/ui/textarea";
-import { ConfirmAction, DueDiligenceBadge, FileRow, ProfileStatusBadge, RequestThread } from "@/prototype/components";
+import {
+  ConfirmAction,
+  DueDiligenceBadge,
+  FileRow,
+  ProfileStatusBadge,
+  ProtoPage,
+  RequestThread,
+} from "@/prototype/components";
 import type { FileRef } from "@/prototype/data";
 
 import { renderRoute } from "../support/render";
@@ -74,6 +81,18 @@ describe("общие компоненты прототипа", () => {
     await user.type(screen.getByRole("textbox", { name: "Ваше сообщение" }), "  Ответ  ");
     await user.click(send);
     expect(onReply).toHaveBeenCalledWith("Ответ");
+  });
+
+  it("ProtoPage: кнопка сброса по умолчанию есть, hideReset её убирает (директор ничего не меняет)", () => {
+    show(
+      <>
+        <ProtoPage title="A">a</ProtoPage>
+        <ProtoPage title="B" hideReset>
+          b
+        </ProtoPage>
+      </>,
+    );
+    expect(screen.getAllByRole("button", { name: "Reset demo data" })).toHaveLength(1);
   });
 
   it("бейджи переведены", () => {

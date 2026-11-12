@@ -37,7 +37,8 @@ export function NotesScreen() {
         draft.operatorNotes.push({
           id,
           operatorOrgId: actor.organizationId,
-          authorId: actor.accountId ?? actor.email,
+          // Ключ демо-аккаунта: у действующего он есть всегда; почту сеанса не хранить (NFR-11).
+          authorId: actor.accountId!,
           profileId: PROFILE,
           text,
           createdAt: nowIso(),

@@ -10,18 +10,21 @@ import { ConfirmAction } from "./confirm-action";
 /**
  * Каркас страницы прототипа: один `PageTitle`, заголовок, бейдж «Прототип» с пояснением,
  * бейдж «Release 2» по флагу, свои действия и «Сбросить демо-данные». Каждый экран модуля — в нём.
+ * `hideReset` убирает кнопку сброса — для кабинета, который ничего не меняет (директор, GEN-04).
  */
 export function ProtoPage({
   title,
   description,
   actions,
   release2 = false,
+  hideReset = false,
   children,
 }: {
   title: string;
   description?: ReactNode;
   actions?: ReactNode;
   release2?: boolean;
+  hideReset?: boolean;
   children: ReactNode;
 }) {
   const t = useCommonTexts();
@@ -40,14 +43,16 @@ export function ProtoPage({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {actions}
-          <ConfirmAction
-            variant="outline"
-            label={t("reset")}
-            title={t("resetTitle")}
-            description={t("resetDescription")}
-            confirmLabel={t("reset")}
-            onConfirm={resetProto}
-          />
+          {!hideReset && (
+            <ConfirmAction
+              variant="outline"
+              label={t("reset")}
+              title={t("resetTitle")}
+              description={t("resetDescription")}
+              confirmLabel={t("reset")}
+              onConfirm={resetProto}
+            />
+          )}
         </div>
       </div>
       {children}

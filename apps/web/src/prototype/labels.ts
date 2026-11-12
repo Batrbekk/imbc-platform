@@ -12,6 +12,8 @@ export const commonTexts = defineDictionary({
     menuGroup: "Prototype",
     release2: "Release 2",
     reset: "Reset demo data",
+    screenError: "This prototype screen failed",
+    screenErrorHint: "The demo data in this browser may be damaged. Reset demo data and open the screen again.",
     resetTitle: "Reset demo data?",
     resetDescription: "Every role in this browser returns to the initial demo data. Changes made in the demo are lost.",
     cancel: "Cancel",
@@ -98,6 +100,8 @@ export const commonTexts = defineDictionary({
     menuGroup: "Прототип",
     release2: "Release 2",
     reset: "Сбросить демо-данные",
+    screenError: "Экран прототипа не открылся",
+    screenErrorHint: "Демо-данные в этом браузере могли повредиться. Сбросьте демо-данные и откройте экран снова.",
     resetTitle: "Сбросить демо-данные?",
     resetDescription:
       "Все роли в этом браузере вернутся к исходным демо-данным. Изменения, сделанные на показе, пропадут.",
@@ -185,6 +189,9 @@ export const commonTexts = defineDictionary({
     menuGroup: "Прототип",
     release2: "Release 2",
     reset: "Демо-деректерді қалпына келтіру",
+    screenError: "Прототип экраны ашылмады",
+    screenErrorHint:
+      "Осы браузердегі демо-деректер бүлінген болуы мүмкін. Демо-деректерді қалпына келтіріп, экранды қайта ашыңыз.",
     resetTitle: "Демо-деректерді қалпына келтіру керек пе?",
     resetDescription:
       "Осы браузердегі барлық рөлдер бастапқы демо-деректерге оралады. Көрсетілімдегі өзгерістер жойылады.",

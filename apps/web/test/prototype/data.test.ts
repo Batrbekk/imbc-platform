@@ -48,6 +48,10 @@ describe("демо-данные прототипа", () => {
         state.profiles.find((p) => p.id === "p11")!,
       ),
     ).toBe(false);
+    // Без записи due diligence профиль не видим: правило — verified И green или amber.
+    const withoutDd = { ...state, dueDiligence: state.dueDiligence.filter((d) => d.profileId !== "p01") };
+    expect(isVisible(withoutDd, state.profiles[0]!)).toBe(false);
+    expect(isVisible(state, state.profiles[0]!)).toBe(true);
   });
 
   it("ссылки между наборами указывают на существующие записи", () => {
