@@ -263,6 +263,9 @@ services:
       <<: *backend-env
       PROCESS_ROLE: worker
       WORKER_HEALTH_PORT: 3002
+      # Adata (EXT-02, IMBC-07): токен только у worker, API его не получает. Пусто — чтение выключено.
+      ADATA_API_TOKEN: ${ADATA_API_TOKEN:-}
+      ADATA_MONTHLY_LIMIT: ${ADATA_MONTHLY_LIMIT:-3000}
     depends_on:
       migrate: { condition: service_completed_successfully }
       buckets: { condition: service_completed_successfully }

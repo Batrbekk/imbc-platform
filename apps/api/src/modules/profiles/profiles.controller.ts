@@ -18,4 +18,15 @@ export class ProfilesController {
   own(@Auth() auth: AuthContext) {
     return this.profiles.own(auth.user.organizationId);
   }
+
+  /**
+   * Чтение Adata своего профиля: состояние и предзаполненные значения с источником (MAN-06, MAN-07).
+   * Только для чтения: Adata не вызывается, попытка не создаётся. Id из запроса не принимается — в ответе
+   * ФИО руководителя и учредители, их видит только производитель (GEN-11, ADM-06).
+   */
+  @Get('own/adata')
+  @Can('profile.read')
+  ownAdata(@Auth() auth: AuthContext) {
+    return this.profiles.ownAdata(auth.user.organizationId);
+  }
 }

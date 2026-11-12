@@ -125,7 +125,15 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
     const configured = listedDevelopmentEnv(user.id, role);
     const service = new SessionService(db, configured);
     const mail = { send: vi.fn() };
-    const controller = new AuthController({} as never, service, new AuditService(db), mail as never, rates, configured);
+    const controller = new AuthController(
+      {} as never,
+      service,
+      new AuditService(db),
+      mail as never,
+      rates,
+      configured,
+      {} as never,
+    );
     const auth = (await service.resolve(entry.token))!;
     expect(controller.me(auth).otpDelivery).toBe('development_code');
     expect(await service.verifyOtp(entry.id, user.id, '000000')).toBe('expired');
@@ -190,7 +198,15 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
     const configured = developmentEnv(user.id);
     const service = new SessionService(db, configured);
     const mail = { send: vi.fn() };
-    const controller = new AuthController({} as never, service, new AuditService(db), mail as never, rates, configured);
+    const controller = new AuthController(
+      {} as never,
+      service,
+      new AuditService(db),
+      mail as never,
+      rates,
+      configured,
+      {} as never,
+    );
     const auth = (await service.resolve(entry.token))!;
     expect(controller.me(auth).otpDelivery).toBe('development_code');
     expect(await service.verifyOtp(entry.id, user.id, '000000')).toBe('expired');
@@ -334,6 +350,7 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
       { send: vi.fn().mockRejectedValue(new Error('SMTP unavailable')) } as never,
       rates,
       env,
+      {} as never,
     );
     await expect(controller.sendOtp(auth, { ip: '127.0.0.2' } as never)).rejects.toMatchObject({
       code: 'mail_unavailable',
@@ -479,6 +496,7 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
         ],
       } as never,
       sessions,
+      { requestOnProfileCreated: vi.fn().mockResolvedValue('skipped') } as never,
     );
     await expect(worker.keycloakEvents()).rejects.toThrow('SMTP unavailable');
     expect(await sessions.resolve(old.token)).toBeNull();
@@ -489,7 +507,15 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
     const entry = await session(user);
     const auth = (await sessions.resolve(entry.token))!;
     const oidc = { logout: vi.fn().mockRejectedValueOnce(new Error('IdP unavailable')).mockResolvedValue(undefined) };
-    const controller = new AuthController(oidc as never, sessions, new AuditService(db), {} as never, rates, env);
+    const controller = new AuthController(
+      oidc as never,
+      sessions,
+      new AuditService(db),
+      {} as never,
+      rates,
+      env,
+      {} as never,
+    );
     const response = { clearCookie: vi.fn() };
     await expect(controller.logout(auth, {} as never, response as never)).rejects.toMatchObject({
       code: 'logout_unavailable',
@@ -562,6 +588,7 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
       new AuditService(db),
       keycloak as never,
       sessions,
+      {} as never,
     );
     const reader = new PgBoss({
       connectionString: databaseUrl,

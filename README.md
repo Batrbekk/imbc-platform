@@ -154,16 +154,16 @@ imbc-platform/
 
 ## 4. Предметные модули
 
-Модули и их таблицы — по §6 архитектуры. Граница модуля: публичный вход `index.ts`, запись в чужие таблицы только через метод владельца. Каталог, страница компании, выгрузки, pull API и дашборд читают только проекцию видимых профилей `catalog_visible`. Экраны только для чтения производителя, SME и администратора читают рабочие таблицы в пределах своих прав: `ProfilesService.own` — `manufacturer_profiles` и `organizations` своей организации (плюс тир из её строки проекции), `ReviewsService` — `manufacturer_profiles`, `organizations` и `user_accounts`, сервис аккаунтов администратора — `organizations` и `user_accounts`.
+Модули и их таблицы — по §6 архитектуры. Граница модуля: публичный вход `index.ts`, запись в чужие таблицы только через метод владельца. Каталог, страница компании, выгрузки, pull API и дашборд читают только проекцию видимых профилей `catalog_visible`. Экраны только для чтения производителя, SME и администратора читают рабочие таблицы в пределах своих прав: `ProfilesService.own` — `manufacturer_profiles` и `organizations` своей организации (плюс тир из её строки проекции), `ProfilesService.ownAdata` — `external_check`, `external_check_attempt` и `prefilled_value` своей организации, `ReviewsService` — `manufacturer_profiles`, `organizations` и `user_accounts`, сервис аккаунтов администратора — `organizations` и `user_accounts`.
 
 | Модуль | Отвечает за | Таблицы | Требования | В каркасе |
 |---|---|---|---|---|
 | Organizations | Типы организаций, БИН с контрольным разрядом | `organizations` | GEN-01–06 | схема, проверка БИН |
 | Identity and Access | Вход, сеансы BFF, email-код, доверенные устройства, ответственность, PolicyMatrix | `user_accounts`, `sessions`, `otp_codes`, `trusted_devices`, `responsibility_acceptances`, `auth_rate_limits`, `auth_security_events`, `auth_sync_state`, `revoked_idp_sessions`, `api_access` | AUTH-01–10, GEN-10–15 | общий auth-срез реализован; список организаций и аккаунтов для администратора только для чтения (`GET /api/v1/admin/accounts`, ADM-06); действия с аккаунтами и автоматическая неактивность AUTH-07 впереди |
-| Profiles | Профиль из восьми секций, редакции, полнота | `manufacturer_profiles`, `profile_sections`, `section_revisions`, `contacts`, `shareholders`, `product_lines`, `equipment_*` | MAN-01–96 | черновик при регистрации; свой профиль только для чтения (`GET /api/v1/profiles/own`, GEN-11) |
+| Profiles | Профиль из восьми секций, редакции, полнота | `manufacturer_profiles`, `profile_sections`, `section_revisions`, `contacts`, `shareholders`, `product_lines`, `equipment_*` | MAN-01–96 | черновик при регистрации; свой профиль только для чтения (`GET /api/v1/profiles/own`, GEN-11); данные Adata своего профиля только для чтения (`GET /api/v1/profiles/own/adata`) |
 | Review | Назначение, решения по секциям и документам | `review_assignments`, `review_decisions` | REV-01–20 | схема; очередь SME только для чтения (`GET /api/v1/reviews/queue`, REV-04) |
 | Documents | Карантин, скан, версии, сертификаты и документы | `file_objects`, `file_versions`, `certificates`, `documents` | MAN-70–83, DATA-05–07 | скан ClamAV, истечение сертификатов |
-| IMBC Records | Обследования, due diligence, заметки IMBC | `site_survey_records`, `due_diligence_records`, `imbc_notes`, `external_checks` | IMBC-01–32 | схема |
+| IMBC Records | Обследования, due diligence, заметки IMBC | `site_survey_records`, `due_diligence_records`, `imbc_notes`, `external_checks`, `external_check`, `external_check_attempt`, `prefilled_value`, `adata_allowance` | IMBC-01–32 | схема |
 | Operator Records | Works with, визиты, заметки оператора | `works_with_marks`, `operator_visit_marks`, `operator_notes` | OPR-30–52 | схема |
 | Requests | Запросы к IMBC и к производителю | `imbc_requests`, `operator_requests` | OPR-60–65 | схема |
 | Update Status | Квартальный цикл active → outdated → unresponsive; профиль в любом статусе остаётся видимым, unresponsive сортируется ниже (UPD-04) | поля профиля, `update_confirmations` | UPD-01–06 | статусы v1.3 в БД, API и UI; расписание 09:00, обработчик — заглушка |
@@ -201,7 +201,8 @@ imbc-platform/
 - **PostgreSQL 18**, идентификаторы — `uuidv7()` на стороне БД (упорядочены по времени, без отдельной последовательности).
 - **Схема** — `apps/api/src/database/schema/*.ts` (Drizzle), разбита по модулям: `access`, `profiles`, `records`, `exchange`, `platform`. Перечисления генерируются из `@imbc/contracts`, поэтому значения в БД, API и UI совпадают.
 - **Миграции** — `pnpm --filter @imbc/api db:generate` создаёт SQL в `apps/api/drizzle/`; применяет их сервис `migrate` (`src/database/migrate.ts`), затем при `SEED_DEMO=true` — `seed.ts`. Правило — expand → перенос данных → contract (NFR-06): каждая миграция совместима с предыдущей версией приложения, значения перечислений удаляются только релизом после переноса данных.
-- **Переход на v1.3 (текущее переходное состояние).** Миграция `0003_spec_v13_expand` добавила в типы PostgreSQL значения `observer` (`role`, `organization_type`) и `unresponsive` (`update_status`); прежние `spectator` и `inactive` в типах остаются. После фиксации миграций `migrate.ts` вызывает `backfillSpecV13()` (`src/database/backfill.ts`): идемпотентные `UPDATE` переносят данные в `organizations`, `user_accounts`, `manufacturer_profiles` и `catalog_visible` и печатают число строк («Перенос v1.3: …»). `0004_catalog_tier` добавила вычисляемую колонку `catalog_visible.tier`. Схема Drizzle и снимок `drizzle/meta` знают только новые значения, поэтому `db:generate` прежние не удалит: это сделает миграция contract `0005` следующего релиза, написанная вручную. Порядок выката, проверки и откат — в [runbook](docs/deployment/azure-dev.md#переход-на-спецификацию-v13); состав релиза contract — `docs/handoff/2026-11-11-context.md`, §8.
+- **Переход на v1.3 (текущее переходное состояние).** Миграция `0003_spec_v13_expand` добавила в типы PostgreSQL значения `observer` (`role`, `organization_type`) и `unresponsive` (`update_status`); прежние `spectator` и `inactive` в типах остаются. После фиксации миграций `migrate.ts` вызывает `backfillSpecV13()` (`src/database/backfill.ts`): идемпотентные `UPDATE` переносят данные в `organizations`, `user_accounts`, `manufacturer_profiles` и `catalog_visible` и печатают число строк («Перенос v1.3: …»). `0004_catalog_tier` добавила вычисляемую колонку `catalog_visible.tier`. Схема Drizzle и снимок `drizzle/meta` знают только новые значения, поэтому `db:generate` прежние не удалит: это сделает миграция contract `0006` следующего релиза, написанная вручную. Порядок выката, проверки и откат — в [runbook](docs/deployment/azure-dev.md#переход-на-спецификацию-v13); состав релиза contract — `docs/handoff/2026-11-11-context.md`, §8.
+- `0005_adata_prefill` — таблицы чтения Adata (expand).
 - **Редакции секций.** У каждой секции профиля три указателя: верифицированная, ожидающая проверки и рабочая редакция. Операторы видят только верифицированную — так «изменения на проверке» (pending changes) не попадают в каталог.
 - **Проекция `catalog_visible`** — одна строка на видимый профиль: Verified и due diligence green/amber при любом статусе актуальности (раздел 4 спецификации, IMBC-11); unresponsive остаётся в выдаче и сортируется ниже active и outdated (UPD-04). Собирается только из верифицированных редакций; `tier` вычисляется из `site_surveyed` (`tier_1` или `tier_2`, IMBC-19, IMBC-20) и не записывается. Пока проекцию заполняет только seed: пересборки по событиям и результата due diligence в схеме ещё нет (этап 5). Контакты страницы компании — в jsonb `card`. GIN-индексы: триграммы по нормализованному названию, массивы групп, типов, сертификатов, ОКЭД.
 - **Нормализация названий** (`normalizeCompanyName`): казахские буквы сводятся к базовым (ә→а, қ→к, ң→н, ө→о, ұ/ү→у, і→и…), кавычки и одна организационно-правовая форма по краям убираются. «ТОО «Қазақ Металл»» и «казак металл» находят одну компанию.
@@ -244,13 +245,15 @@ sequenceDiagram
 
 `POST /api/v1/registrations` → проверка БИН (формат и контрольный разряд, в браузере и на сервере) → пользователь в Keycloak через Admin API → в одной транзакции организация, учётная запись, черновик профиля из восьми секций и задание `send-password-email` на письмо подтверждения email и установки пароля со сроком 72 часа. Ответ `202 password_email_queued` означает постановку в очередь. Worker повторяет доставку при ошибке SMTP; `POST /api/v1/registrations/resend` возвращает нейтральный ответ независимо от наличия и состояния аккаунта. Если транзакция не прошла, пользователь в Keycloak удаляется; неудачная компенсация ставится в `cleanup-identity`. Повтор БИН — `409 bin_exists` с текстом «обратитесь в IMBC».
 
+Чтение Adata (IMBC-07, MAN-03, NOT-23) привязано к установке пароля, а не к регистрации: БИН регистрации, не ставшей профилем, не запрашивается. Планировщик ставит одну попытку `profile_created` и задание `adata-prefill` по событию пароля из `keycloak-events` или, если события ещё не было, при первом входе производителя; оба входа сериализуются блокировкой строки профиля, повтор даёт `skipped`. Seed-профиль не в Draft и мигрированный профиль (`source = migration`) не читаются. Worker резервирует единицу квоты периода, делает один Get Request и опрашивает Check Request до 120 секунд; повтор задания продолжает опрос по сохранённому токену проверки и Get Request не повторяет. Состояния попытки: `queued` → `polling` → `received` | `unavailable (<сбой>)`, без запроса — `not_configured` (нет `ADATA_API_TOKEN`) и `quota_exhausted`; из двух последних следующий вход ставит попытку снова. В логе worker одна строка на исход: `adata attempt <id>: <состояние>[ (<сбой>)]` — без БИН, значений и адреса.
+
 ### Файл (DATA-05…07)
 
 Для задания `scan-file` worker читает объект из `imbc-quarantine` и передаёт поток в clamd (INSTREAM): чистый файл копируется в `imbc-files`, заражённый помечается `infected` и пишется в аудит; карантинная копия удаляется в обоих случаях. Пользовательские загрузка и скачивание через авторизованный API ещё входят в план разработки профиля.
 
 ### Задания и расписания (ADR-06)
 
-API ставит задания, выполняет их worker. Для `send-password-email` и `cleanup-identity` настроено до 10 повторов, для остальных очередей — до 5; начальная пауза 30 секунд увеличивается при ошибках. Уведомления имеют отдельную дедупликацию; доставка письма установки пароля при повторе задания может повториться.
+API ставит задания, выполняет их worker. Для `send-password-email` и `cleanup-identity` настроено до 10 повторов, для `adata-prefill` — до 3 (срок задания 300 секунд), для остальных очередей — до 5; начальная пауза 30 секунд увеличивается при ошибках. Уведомления имеют отдельную дедупликацию; доставка письма установки пароля при повторе задания может повториться.
 
 | Очередь | Когда (Asia/Almaty) | Что делает | Состояние |
 |---|---|---|---|
@@ -265,6 +268,7 @@ API ставит задания, выполняет их worker. Для `send-pa
 | `run-subscriptions` | 06:00 ежедневно | Подписки на выгрузки (OPR-20) | заглушка |
 | `update-status` | 09:00 ежедневно | Квартальный цикл актуализации (UPD-01…05) | заглушка |
 | `keycloak-events` | каждую минуту | Смена пароля → отзыв доступа; блокировка → аудит и письмо (AUTH-04) | работает |
+| `adata-prefill` | установка пароля или первый вход производителя | одно чтение «Полной информации» Adata, квота периода | работает |
 | `activity-snapshot-*` | пн 03:00 / 1-е число 03:00 | Снимки активности (OPR-74) | заглушка |
 | `refresh-catalog`, `build-export` | по событию | Пересборка проекции, файл выгрузки | заглушка |
 
@@ -464,6 +468,10 @@ Vite проксирует `/api` на `API_PROXY_URL` (`localhost:3001`) и `/kc
 | `MAILPIT_RELAY_CONFIG`, `MAILPIT_RELAY_ALL` | Конфигурация и автоматическая пересылка Mailpit в Azure-overlay; SMTP-секрет хранится отдельно на VM |
 | `CLAMAV_HOST`, `CLAMAV_PORT` | clamd |
 | `SEED_DEMO` | Демо-данные при миграции (только dev) |
+| `ADATA_API_TOKEN` | Токен Adata (EXT-02, NFR-10): только сервис `worker`, только серверная `.env`; в Git, логи и вывод не попадает. Без значения чтение выключено — попытка `not_configured` |
+| `ADATA_MONTHLY_LIMIT` | Наша граница квоты Adata за период (IMBC-07): по умолчанию 3000, на Azure-стенде 1 (больше — строкой в серверной `.env`, см. `docs/deployment/azure-dev.md`, «Чтение Adata»); `0` — не запрашивать; больше 3000 — ошибка конфигурации, пустое значение — 3000 |
+
+На `worker` никогда не включайте отладку запросов Node (`NODE_DEBUG=fetch`, `NODE_DEBUG=undici` или подписчик diagnostics-channel, например трассировку исходящих HTTP-запросов): она печатает в stderr адрес Adata вместе с токеном (EXT-02, NFR-10).
 
 ## 14. Качество и проверки
 

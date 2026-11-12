@@ -1,7 +1,35 @@
-import { boolean, date, index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import {
+  type AnyPgColumn,
+  boolean,
+  check,
+  date,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  smallint,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 import { createdAt, id } from './_shared.js';
 import { organizations, userAccounts } from './access.js';
-import { checkStatus, ddResult, decision, markState, profileSection, requestState, valueSource } from './enums.js';
+import {
+  checkStatus,
+  connectorCode,
+  ddResult,
+  decision,
+  externalCheckState,
+  externalCheckTrigger,
+  markState,
+  prefillField,
+  prefillSource,
+  profileSection,
+  requestState,
+  valueSource,
+} from './enums.js';
 import { fileObjects, manufacturerProfiles } from './profiles.js';
 
 /** Обследование площадки (IMBC-01…05). Site surveyed вычисляется, не хранится. */
@@ -56,6 +84,109 @@ export const externalChecks = pgTable(
     checkedAt: timestamp('checked_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('external_checks_profile_idx').on(t.profileId, t.connector)],
+);
+// externalChecks — пустой каркас, удаляет релиз contract. Чтение Adata пишет в таблицы DBML ниже.
+
+/*
+ * Внешняя проверка и её попытки — по DBML (external_check, external_check_attempt), с расхождениями:
+ * - external_check_attempt.value — jsonb, а не text: ответ нужен этапу 4а для IMBC-10 без второго запроса;
+ * - status text и unavailable boolean заменены одним state;
+ * - составные FK (profile_id, organization_id) не делаются: у manufacturer_profiles нет уникальности
+ *   (id, organization_id).
+ * Колонки подтверждения значения (MAN-07) добавит этап 4б тем же expand.
+ */
+
+/** Внешняя проверка профиля одним коннектором (EXT-01). Класс C: каталог, выгрузки и pull API её не читают. */
+export const externalCheck = pgTable(
+  'external_check',
+  {
+    id: id(),
+    profileId: uuid('profile_id')
+      .notNull()
+      .references(() => manufacturerProfiles.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id),
+    connector: connectorCode('connector').notNull(),
+    isMock: boolean('is_mock').notNull().default(false),
+    latestAttemptId: uuid('latest_attempt_id').references((): AnyPgColumn => externalCheckAttempt.id),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('external_check_profile_connector_uq').on(t.profileId, t.connector)],
+);
+
+/**
+ * Попытка проверки: один БИН — один запрос (IMBC-07). Попытка profile_created у проверки одна.
+ * Для Adata is_test_data всегда false (EXT-02).
+ */
+export const externalCheckAttempt = pgTable(
+  'external_check_attempt',
+  {
+    id: id(),
+    externalCheckId: uuid('external_check_id')
+      .notNull()
+      .references((): AnyPgColumn => externalCheck.id, { onDelete: 'cascade' }),
+    trigger: externalCheckTrigger('trigger').notNull(),
+    state: externalCheckState('state').notNull().default('queued'),
+    /** Текст, ведущие нули не теряются (DATA-03). */
+    bin: text('bin').notNull(),
+    requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+    /** Get Request отправлен, единица квоты израсходована. */
+    requestSentAt: timestamp('request_sent_at', { withTimezone: true }),
+    allowancePeriod: date('allowance_period'),
+    /** Токен проверки Adata (цифры) для продолжения опроса после рестарта. */
+    pollToken: text('poll_token'),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    failure: text('failure'),
+    /** data готового ответа, без токена. */
+    value: jsonb('value'),
+    source: text('source'),
+    isTestData: boolean('is_test_data').notNull().default(false),
+  },
+  (t) => [
+    uniqueIndex('external_check_attempt_created_uq')
+      .on(t.externalCheckId)
+      .where(sql`${t.trigger} = 'profile_created'`),
+  ],
+);
+
+/** Предзаполненное значение с источником и временем чтения (MAN-06, MAN-07); строки поля — по position. */
+export const prefilledValue = pgTable(
+  'prefilled_value',
+  {
+    id: id(),
+    profileId: uuid('profile_id')
+      .notNull()
+      .references(() => manufacturerProfiles.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id),
+    attemptId: uuid('attempt_id')
+      .notNull()
+      .references(() => externalCheckAttempt.id, { onDelete: 'cascade' }),
+    source: prefillSource('source').notNull(),
+    field: prefillField('field').notNull(),
+    position: smallint('position').notNull(),
+    value: text('value').notNull(),
+    /** Название ОКЭД. */
+    label: text('label'),
+    readAt: timestamp('read_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex('prefilled_value_uq').on(t.attemptId, t.field, t.position),
+    index('prefilled_value_profile_idx').on(t.profileId, t.source),
+  ],
+);
+
+/** Израсходованная квота Adata за период (IMBC-07: 3 000 БИН в месяц). */
+export const adataAllowance = pgTable(
+  'adata_allowance',
+  {
+    periodStart: date('period_start').primaryKey(),
+    used: integer('used').notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [check('adata_allowance_used_check', sql`${t.used} >= 0`)],
 );
 
 /** Заметки IMBC и legacy-поля из Excel (IMBC-20, MIG-09). Видят эксперт и директор. */

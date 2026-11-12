@@ -10,6 +10,7 @@ import { InfraModule } from './infra/infra.module.js';
 import { MailService } from './mail/mail.service.js';
 import { AccountsController } from './modules/admin/accounts.controller.js';
 import { AccountsService } from './modules/admin/accounts.service.js';
+import { AdataScheduler } from './modules/adata/adata.scheduler.js';
 import { AuthController } from './modules/auth/auth.controller.js';
 import { SessionGuard } from './modules/auth/guards.js';
 import { KeycloakAdminService } from './modules/auth/keycloak-admin.service.js';
@@ -64,6 +65,7 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     ReviewsService,
     AccountsService,
     MailService,
+    AdataScheduler,
     { provide: APP_GUARD, useClass: SessionGuard },
     { provide: APP_FILTER, useClass: ProblemDetailsFilter },
   ],

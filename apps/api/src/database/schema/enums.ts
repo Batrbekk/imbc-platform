@@ -7,6 +7,8 @@ import {
   LOCALES,
   MARK_STATES,
   ORGANIZATION_TYPES,
+  PREFILL_FIELDS,
+  PREFILL_SOURCES,
   PROFILE_SECTIONS,
   PROFILE_STATUSES,
   PROFILE_TIERS,
@@ -40,3 +42,23 @@ export const subscriptionPeriod = pgEnum('subscription_period', ['daily', 'weekl
 export const runResult = pgEnum('run_result', ['success', 'failure']);
 export const snapshotPeriod = pgEnum('snapshot_period', ['week', 'month']);
 export const valueSource = pgEnum('value_source', ['manual', 'migration', 'e_ondiris']);
+
+// Чтение Adata (EXT-01, IMBC-07, MAN-07). Коды коннекторов — из DBML.
+export const connectorCode = pgEnum('connector_code', ['adata', 'e_ondiris', 'accounting', 'legal_entity_registry']);
+/** Повод попытки (IMBC-07, IMBC-13); в срезе пишется только profile_created. */
+export const externalCheckTrigger = pgEnum('external_check_trigger', [
+  'profile_created',
+  'quarterly',
+  'sme_rerun',
+  'import',
+]);
+export const externalCheckState = pgEnum('external_check_state', [
+  'queued',
+  'polling',
+  'received',
+  'unavailable',
+  'not_configured',
+  'quota_exhausted',
+]);
+export const prefillSource = pgEnum('prefill_source', PREFILL_SOURCES);
+export const prefillField = pgEnum('prefill_field', PREFILL_FIELDS);

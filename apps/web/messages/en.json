@@ -258,7 +258,32 @@
     "verifiedAt": "Verified on",
     "readOnlyHint": "Editing the profile will be available in a later release.",
     "loadError": "Could not load the profile.",
-    "accountHint": "Your account details and sign-in security are available on your account page."
+    "accountHint": "Your account details and sign-in security are available on your account page.",
+    "adata": {
+      "title": "Data from Adata",
+      "waiting": "Requesting company data from Adata. This usually takes up to two minutes.",
+      "received": "Received from Adata on {date}",
+      "unavailable": "Adata did not answer the request. The fields below are not prefilled.",
+      "notConfigured": "The connection to Adata is not set up on this platform yet.",
+      "quotaExhausted": "The monthly Adata request limit has been reached. The data will be requested at your next sign-in after the limit resets.",
+      "notRequested": "Adata was not queried for this profile.",
+      "sourceAdata": "Adata",
+      "notReturned": "Adata returned nothing",
+      "shareholdersNamesOnly": "Adata returns names only; shares and citizenship are entered by the company.",
+      "confirmLater": "Confirming and correcting these values will be available in a later release.",
+      "loadError": "Could not load the data from Adata.",
+      "field": {
+        "legal_name": "Company legal name",
+        "activity": "Kind of activity (OKED)",
+        "company_phone": "Company phone",
+        "company_email": "Company contact email",
+        "legal_address": "Legal address",
+        "director_full_name": "Director's full name",
+        "state_registered_on": "Date of state registration",
+        "legal_form": "Legal form",
+        "shareholders": "Shareholders"
+      }
+    }
   },
   "reviews": {
     "title": "Profile review queue",

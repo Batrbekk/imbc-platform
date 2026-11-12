@@ -205,7 +205,7 @@ az vm run-command invoke -g imbc-dev-rg -n imbc-dev --command-id RunShellScript 
 
 ## Переход на спецификацию v1.3
 
-Спецификация v1.3 (раздел 3.1, UPD-06) переименовала роль и тип организации `spectator` в `observer` и статус актуальности профиля `inactive` в `unresponsive`; профиль unresponsive остаётся видимым и сортируется ниже (UPD-04). Демо-наблюдатель `spectator@spectator.local` стал `observer@observer.local`. Переход идёт по правилу expand → перенос данных → contract (NFR-06): этот релиз добавляет новые значения и переносит данные, прежние значения удаляет следующий релиз contract (миграция `0005`, состав — `docs/handoff/2026-11-11-context.md`, §8). На dev-стенде переход выполнен 12.11.2026 первым выкатом ветки `feat/spec-v1.3-contracts` (`851660b`): в журнале `migrate` — строка формата «Перенос v1.3: organizations N, user_accounts N, manufacturer_profiles N, catalog_visible N» с organizations 1, user_accounts 1, manufacturer_profiles 0, catalog_visible 0.
+Спецификация v1.3 (раздел 3.1, UPD-06) переименовала роль и тип организации `spectator` в `observer` и статус актуальности профиля `inactive` в `unresponsive`; профиль unresponsive остаётся видимым и сортируется ниже (UPD-04). Демо-наблюдатель `spectator@spectator.local` стал `observer@observer.local`. Переход идёт по правилу expand → перенос данных → contract (NFR-06): этот релиз добавляет новые значения и переносит данные, прежние значения удаляет следующий релиз contract (миграция `0006`, состав — `docs/handoff/2026-11-11-context.md`, §8). На dev-стенде переход выполнен 12.11.2026 первым выкатом ветки `feat/spec-v1.3-contracts` (`851660b`): в журнале `migrate` — строка формата «Перенос v1.3: organizations N, user_accounts N, manufacturer_profiles N, catalog_visible N» с organizations 1, user_accounts 1, manufacturer_profiles 0, catalog_visible 0.
 
 ### Что делает выкат
 
@@ -319,11 +319,112 @@ df -h /
 
 Для всех операций на этом сервере указывайте оба файла Compose. Обычные команды `make up` и `docker compose up` используют базовую конфигурацию без Azure HTTPS-overlay и не заменяют приведённые команды.
 
+Не включайте на `worker` отладку запросов Node (`NODE_DEBUG=fetch`/`undici`, подписчик diagnostics-channel или трассировку исходящих HTTP-запросов): она выводит в журнал контейнера адрес Adata вместе с токеном (EXT-02, NFR-10).
+
 Проверка публичного API из любой сети:
 
 ```bash
 curl --fail --show-error https://imbc-dev-e1cde8dd.polandcentral.cloudapp.azure.com/api/health/ready
 ```
+
+## Чтение Adata (IMBC-07, EXT-02)
+
+Каждое чтение — настоящий платный запрос: одна единица квоты заказчика (3 000 БИН в месяц). Предел стенда по умолчанию — **1** запрос за период (`ADATA_MONTHLY_LIMIT` в `compose.azure.yaml`). Токен `ADATA_API_TOKEN` получает только сервис `worker`, из серверной `.env`; без него попытки заканчиваются `not_configured`.
+
+### Что запускает чтение
+
+Аккаунт с ролью `manufacturer`, у организации есть БИН, профиль `source = 'manual'`, `status = 'draft'`, попытки `profile_created` ещё нет. Чтение ставится при любом входе такого аккаунта и по событию пароля, которое увидел `keycloak-events`. Первый запуск `keycloak-events` после старта читает события с `auth_sync_state.checked_at` минус пять минут; если строки курсора нет — за 30 дней назад. Регистрация и повтор письма чтение не запускают.
+
+### Перед первым выкатом с токеном
+
+```bash
+./infrastructure/azure/deploy.sh ssh
+cd /home/imbc/imbc-platform
+sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
+  select checked_at from auth_sync_state where name = 'keycloak-events';"
+sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
+  select count(*) from user_accounts a
+  join organizations o on o.id = a.organization_id
+  join manufacturer_profiles p on p.organization_id = o.id
+  where a.role = 'manufacturer' and o.bin is not null and p.source = 'manual' and p.status = 'draft'
+    and not exists (
+      select 1 from external_check c
+      join external_check_attempt t on t.external_check_id = c.id
+      where c.profile_id = p.id and c.connector = 'adata' and t.trigger = 'profile_created');"
+```
+
+Первый запрос показывает, с какого момента будут прочитаны события пароля (нет строки — 30 дней). Второй — сколько производителей запустят чтение при входе или по событию. При пределе 1 запрос сделает первый из них; остальные получат `quota_exhausted`. До выката этой версии таблиц `external_check` и `external_check_attempt` ещё нет, и второй запрос падает с «relation does not exist»: выполните его без части `and not exists (…)` — попыток ещё нет ни у одного профиля. Полный запрос — для последующих выкатов.
+
+### Токен не печатать
+
+Не выполняйте `docker compose config` без `-q`, `docker inspect` контейнера `worker`, `docker compose exec worker env` и `printenv`: все они выводят значение токена.
+
+### Во время чтения
+
+Чтение длится до 2,5 минуты (Get Request, опрос до 120 секунд, последняя проверка). В это время не перезапускайте `worker` и не выкатывайте: рестарт во время первого запроса закрывает попытку как `unavailable` (`interrupted`), единица квоты уже израсходована, а `unavailable` для этого профиля окончательно.
+
+### После чтения
+
+```bash
+sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
+  select period_start, used from adata_allowance;"
+sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
+  select id, state, failure, requested_at, request_sent_at, completed_at
+  from external_check_attempt where request_sent_at is not null;"
+sudo docker compose -f compose.yaml -f compose.azure.yaml logs worker | grep 'adata attempt'
+```
+
+Ожидается: `used = 1`, одна попытка с `request_sent_at` и `state = received`, в журнале worker строка `adata attempt <id>: received`. БИН, значения ответа и адрес Adata в журнал не пишутся.
+
+Предел действует на период: 4-го числа (Asia/Almaty) предел по умолчанию 1 снова доступен, и его израсходует первый вошедший производитель с Draft-профилем, у которого попытка в `quota_exhausted` или `not_configured` (или новый зарегистрированный). Чтобы чтения не было без решения владельца, добавьте в серверную `.env` строку `ADATA_MONTHLY_LIMIT=0` и выполните `sudo docker compose -f compose.yaml -f compose.azure.yaml up -d worker`: при пределе 0 попытки заканчиваются `quota_exhausted` без запроса.
+
+### Поднять предел
+
+Добавьте в серверную `.env` строку `ADATA_MONTHLY_LIMIT=<n>` (не больше 3000) и перезапустите worker:
+
+```bash
+sudo docker compose -f compose.yaml -f compose.azure.yaml up -d worker
+```
+
+Период сбрасывается 4-го числа (Asia/Almaty). Попытки в `quota_exhausted` и `not_configured` ставятся снова при следующем входе производителя, поэтому поднятый предел расходуют следующие вошедшие производители с Draft-профилем.
+
+### Ручное восстановление попытки
+
+Если pg-boss исчерпал повторы задания `adata-prefill` (четыре сбоя собственной БД подряд), попытка может остаться в `queued` или `polling`, и задания для неё больше нет; вход и событие пароля такую попытку не трогают. Найти:
+
+```sql
+SELECT id, state, request_sent_at, poll_token IS NOT NULL AS has_poll_token, requested_at
+FROM external_check_attempt
+WHERE trigger = 'profile_created' AND state IN ('queued', 'polling')
+  AND requested_at < now() - interval '15 minutes';
+```
+
+- `queued`, `request_sent_at IS NULL` — запроса не было; следующий вход поставит попытку снова:
+
+  ```sql
+  UPDATE external_check_attempt SET state = 'not_configured', completed_at = now()
+  WHERE id = '<id>' AND state = 'queued' AND request_sent_at IS NULL;
+  ```
+
+- `polling` без `poll_token` — ответа нет, единица израсходована:
+
+  ```sql
+  UPDATE external_check_attempt SET state = 'unavailable', failure = 'interrupted', completed_at = now()
+  WHERE id = '<id>' AND state = 'polling' AND poll_token IS NULL;
+  ```
+
+- `polling` с `poll_token` — поставить задание заново: одна проверка по сохранённому токену, без Get Request. Команда печатает только id задания:
+
+  ```bash
+  sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T worker node --input-type=module -e "
+  import { PgBoss } from 'pg-boss';
+  const boss = new PgBoss({ connectionString: process.env.DATABASE_URL, schema: process.env.PGBOSS_SCHEMA ?? 'pgboss', supervise: false, schedule: false });
+  await boss.start();
+  console.log(await boss.send('adata-prefill', { attemptId: '<id>' }));
+  await boss.stop();"
+  ```
+
+SQL выполняется через `sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -v ON_ERROR_STOP=1`.
 
 ## Временная остановка и стоимость
 
