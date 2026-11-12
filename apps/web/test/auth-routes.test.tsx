@@ -5,9 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { leaveApp } from "@/lib/leave-app";
 import type { Me } from "@/lib/session";
 
+import en from "../messages/en.json";
 import kk from "../messages/kk.json";
 import ru from "../messages/ru.json";
-import { problem, stubApi } from "./support/api";
+import { type ApiReply, problem, stubApi } from "./support/api";
 import { renderRoute } from "./support/render";
 
 vi.mock("@/lib/leave-app", () => ({ leaveApp: vi.fn(), reloadApp: vi.fn() }));
@@ -81,14 +82,11 @@ describe("вход (ADR-04, AUTH-01)", () => {
       "/api/auth/password-reset?returnTo=%2F&locale=kk",
     );
     expect(document.title).toBe(`${kk.login.title} · ${kk.common.appName}`);
-    // Логотип IMBC (NFR-15) в шапке и в левой колонке декоративный: имя ссылки в шапке — название
-    // платформы на языке интерфейса при любой ширине, в колонке название идёт текстом рядом.
+    // Логотип IMBC (NFR-15) один и декоративный: имя ссылки — название платформы на языке интерфейса.
     const home = screen.getByRole("link", { name: kk.common.appName });
     expect(home.getAttribute("href")).toBe("/login");
     expect(home.querySelector("img")?.getAttribute("alt")).toBe("");
-    const logos = [...document.querySelectorAll<HTMLImageElement>('img[src*="imbc-logo"]')];
-    expect(logos).toHaveLength(2);
-    for (const logo of logos) expect(logo.getAttribute("alt")).toBe("");
+    expect(document.querySelectorAll('img[src*="imbc-logo"]')).toHaveLength(1);
     expect(screen.queryByRole("img", { name: kk.common.logoAlt })).toBeNull();
 
     await user.click(screen.getByRole("link", { name: kk.common.register }));
@@ -107,6 +105,77 @@ describe("вход (ADR-04, AUTH-01)", () => {
       "/api/auth/login?returnTo=%2Fdashboard&locale=ru&prompt=login",
     );
     expect(leaveApp).not.toHaveBeenCalled();
+  });
+});
+
+describe("рамка экранов входа: две колонки (NFR-15, LANG-01)", () => {
+  it("у экранов входа один логотип и нет видимого текста с названием платформы; ссылка логотипа названа по-прежнему (kk, ru, en)", async () => {
+    for (const [locale, messages] of [
+      ["kk", kk],
+      ["ru", ru],
+      ["en", en],
+    ] as const) {
+      renderRoute("/login?error=no_account", { locale });
+
+      expect(await screen.findByRole("heading", { level: 1, name: messages.login.title })).toBeTruthy();
+      const home = screen.getByRole("link", { name: messages.common.appName });
+      expect(home.getAttribute("href")).toBe("/login");
+      expect(home.textContent).toBe("");
+      expect(document.querySelectorAll('img[src*="imbc-logo"]')).toHaveLength(1);
+      // Название платформы — только имя ссылки; ни рядом с логотипом, ни подписью «IMBC» его нет.
+      expect(screen.queryByText(messages.common.appName)).toBeNull();
+      expect(screen.queryByText("IMBC")).toBeNull();
+      cleanup();
+    }
+  });
+
+  it("панель реестра: заголовок, пояснение, строка о безопасности и строка подвала — в правой панели; на узком экране панель скрыта от программ чтения", async () => {
+    renderRoute("/login?error=no_account", { locale: "ru" });
+
+    const title = await screen.findByText(ru.authLayout.title);
+    expect(title.tagName).not.toBe("H1");
+    const panel = title.closest("aside");
+    expect(panel).toBeTruthy();
+    for (const text of [ru.authLayout.description, ru.authLayout.security, ru.authLayout.footer]) {
+      expect(panel?.contains(screen.getByText(text))).toBe(true);
+    }
+    // jsdom не раскладывает страницу: ниже lg панель скрыта display: none — и для программ чтения тоже.
+    expect(panel?.classList.contains("hidden")).toBe(true);
+    expect(panel?.classList.contains("lg:flex")).toBe(true);
+    expect(panel?.querySelector("img")).toBeNull();
+    // Подвала под страницей больше нет: его строка стоит в панели.
+    expect(document.querySelector("footer")).toBeNull();
+  });
+
+  it("у каждого экрана (вход, регистрация, код, ответственность) один h1 и нет карточки с тенью", async () => {
+    const screens: { path: string; title: string; api: Record<string, ApiReply> }[] = [
+      { path: "/login?error=no_account", title: kk.login.title, api: {} },
+      { path: "/register", title: kk.register.title, api: {} },
+      {
+        path: "/auth/verify",
+        title: kk.verify.title,
+        api: {
+          "GET /api/auth/me": { body: me({ mfa: false, responsibility: false }) },
+          "POST /api/auth/otp/send": { body: { sent: true, retryAfter: 60 } },
+        },
+      },
+      {
+        path: "/auth/responsibility",
+        title: kk.responsibility.title,
+        api: { "GET /api/auth/me": { body: me({ mfa: true, responsibility: false }) } },
+      },
+    ];
+    for (const { path, title, api } of screens) {
+      stubApi(api);
+      renderRoute(path);
+
+      const heading = await screen.findByRole("heading", { level: 1, name: title });
+      expect(screen.getAllByRole("heading", { level: 1 }), path).toHaveLength(1);
+      expect(heading.closest("main"), path).toBeTruthy();
+      expect(document.querySelector('[data-slot="card"]'), path).toBeNull();
+      expect(document.querySelector('[class*="shadow-lg"]'), path).toBeNull();
+      cleanup();
+    }
   });
 });
 
