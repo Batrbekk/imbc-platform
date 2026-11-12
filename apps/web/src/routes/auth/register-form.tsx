@@ -1,7 +1,6 @@
-import { checkBin, DEFAULT_LOCALE, type RegistrationRequest, type RegistrationTerms } from "@imbc/contracts";
+import { checkBin, DEFAULT_LOCALE, type RegistrationRequest, registrationTermsReadSchema } from "@imbc/contracts";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { MailCheckIcon } from "lucide-react";
-import { type ChangeEvent, type FormEvent, type Ref, useRef, useState } from "react";
+import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { useLocale, useTranslations } from "use-intl";
 import { z } from "zod";
@@ -37,6 +36,8 @@ type ErrorCode =
   | "nda_version_changed";
 /** Ошибки сервера, которые показываются у своего поля, а не общим сообщением. */
 const FIELD_CODES = new Set(["bin_format", "bin_check_digit", "bin_exists", "email_exists", "nda_version_changed"]);
+/** Ошибки сервера, после которых фокус уходит на поле с ошибкой. */
+const FOCUS_CODES = new Set(["bin_format", "bin_check_digit", "bin_exists", "email_exists"]);
 const TERMS_STATUS = "registration-terms-status";
 
 /**
@@ -61,15 +62,23 @@ export function RegisterForm() {
     ndaVersion: null as number | null,
   });
   const [errors, setErrors] = useState<Partial<Record<FieldName, ErrorCode>>>({});
-  const ndaCheckbox = useRef<HTMLElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  // Просьба перевести фокус на первое поле с ошибкой — после отрисовки ошибок.
+  const [focusRequest, setFocusRequest] = useState(0);
   const cooldown = useCooldown();
   const terms = useQuery({
     queryKey: ["registration", "terms"],
-    queryFn: () => api<RegistrationTerms>("/v1/registrations/terms"),
+    // Ответ неверной формы — ошибка загрузки, а не «undefined нұсқа» и галочка без номера версии.
+    queryFn: async () => registrationTermsReadSchema.parse(await api<unknown>("/v1/registrations/terms")),
   });
-  // Сбой перечитывания не оставляет на экране прежнюю версию: галочку можно поставить только у текущей.
-  const nda = terms.isError ? undefined : terms.data?.nda;
+  // Последний удачный ответ остаётся на экране и при сбое перечитывания; устаревшую версию отвергнет сервер (409).
+  const nda = terms.data?.nda;
   const ndaAccepted = nda !== undefined && form.ndaVersion === nda.version;
+  // Отмечена версия, которой больше нет: фоновое перечитывание принесло новую.
+  const ndaOutdated = nda !== undefined && form.ndaVersion !== null && form.ndaVersion !== nda.version;
+  useEffect(() => {
+    if (focusRequest) formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+  }, [focusRequest]);
   const submit = useMutation({
     mutationFn: (input: RegistrationRequest) =>
       api<{ status: string }>("/v1/registrations", { method: "POST", json: input }),
@@ -77,12 +86,13 @@ export function RegisterForm() {
     onError: (error) => {
       if (!(error instanceof ApiError)) return;
       if (error.status === 429) cooldown.start(error.retryAfter ?? 60);
+      if (FOCUS_CODES.has(error.code)) setFocusRequest((n) => n + 1);
       if (error.code === "nda_version_changed") {
-        // IMBC опубликовала новую версию, пока форма была открыта (FC-03): перечитать текст и принять заново.
+        // IMBC опубликовала новую версию, пока форма была открыта: прочитать текст и принять заново (FC-02).
         setForm((current) => ({ ...current, ndaVersion: null }));
         setErrors((current) => ({ ...current, acceptNda: "nda_version_changed" }));
+        setFocusRequest((n) => n + 1);
         void terms.refetch();
-        ndaCheckbox.current?.focus();
       }
       if (error.code === "nda_unavailable") void terms.refetch();
     },
@@ -101,6 +111,8 @@ export function RegisterForm() {
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
+    // Недоступность кнопки доходит до DOM на такт позже: второй Enter не шлёт заявку дважды.
+    if (submit.isPending) return;
     const next: Partial<Record<FieldName, ErrorCode>> = {};
     const companyName = form.companyName.trim();
     const email = form.email.trim();
@@ -113,8 +125,9 @@ export function RegisterForm() {
     else if (heardAboutUs.length > 500) next.heardAboutUs = "heard_about_us";
     if (!form.acceptPlatformTerms) next.acceptPlatformTerms = "platform_terms_required";
     if (!form.acceptPersonalData) next.acceptPersonalData = "personal_data_required";
-    if (!ndaAccepted) next.acceptNda = "nda_required";
+    if (!ndaAccepted) next.acceptNda = ndaOutdated ? "nda_version_changed" : "nda_required";
     setErrors(next);
+    if (Object.keys(next).length) setFocusRequest((n) => n + 1);
     if (Object.keys(next).length || !bin.valid || !ndaAccepted) return;
     // Ровно поля registrationRequestSchema: принятие NDA — номер отмеченной версии (FC-02).
     submit.mutate({
@@ -138,6 +151,7 @@ export function RegisterForm() {
     )
       return serverCode;
     if (field === "email" && serverCode === "email_exists") return serverCode;
+    if (field === "acceptNda" && ndaOutdated) return "nda_version_changed";
     return undefined;
   };
   const change = (field: TextField) => (event: ChangeEvent<HTMLInputElement>) => {
@@ -149,6 +163,29 @@ export function RegisterForm() {
     setForm((current) => ({ ...current, [field]: checked }));
     setErrors((current) => ({ ...current, [field]: undefined }));
   };
+  const ndaUnavailable = terms.error instanceof ApiError && terms.error.code === "nda_unavailable";
+  // Без текста NDA сообщение стоит на месте галочки, при сбое перечитывания — под ней.
+  const termsAlert = terms.isError && (
+    <Alert variant="destructive">
+      <AlertDescription id={TERMS_STATUS}>
+        {ndaUnavailable ? t("ndaUnavailable") : t("termsLoadError")}
+      </AlertDescription>
+      {!ndaUnavailable && (
+        <AlertAction>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={terms.isFetching}
+            onClick={() => void terms.refetch()}
+          >
+            {terms.isFetching && <Spinner />}
+            {common("retry")}
+          </Button>
+        </AlertAction>
+      )}
+    </Alert>
+  );
   // Текст «NDA не опубликована» уже стоит на месте галочки NDA — общим сообщением он не повторяется.
   const showSubmitError =
     submit.isError && !FIELD_CODES.has(serverCode ?? "") && !(serverCode === "nda_unavailable" && terms.isError);
@@ -162,9 +199,6 @@ export function RegisterForm() {
   if (submit.isSuccess) {
     return (
       <div className="space-y-5">
-        <div className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-          <MailCheckIcon className="size-6" />
-        </div>
         <div className="space-y-2" role="status">
           <h2 className="text-lg font-semibold">{t("successTitle")}</h2>
           <p className="break-words text-sm leading-relaxed text-muted-foreground">
@@ -202,7 +236,7 @@ export function RegisterForm() {
   }
 
   return (
-    <form onSubmit={onSubmit} noValidate>
+    <form ref={formRef} onSubmit={onSubmit} noValidate>
       <FieldGroup className="gap-5">
         <Field data-invalid={!!fieldError("companyName") || undefined}>
           <FieldLabel htmlFor="companyName">{t("companyName")}</FieldLabel>
@@ -277,7 +311,7 @@ export function RegisterForm() {
           checked={form.acceptPlatformTerms}
           onCheckedChange={tick("acceptPlatformTerms")}
           error={fieldError("acceptPlatformTerms") && t(`errors.${fieldError("acceptPlatformTerms")}`)}
-          document={{ title: legal("terms.title"), body: legal("terms.body"), placeholder: true }}
+          legalText={{ title: legal("terms.title"), body: legal("terms.body") }}
         />
         <Consent
           id="acceptPersonalData"
@@ -285,12 +319,11 @@ export function RegisterForm() {
           checked={form.acceptPersonalData}
           onCheckedChange={tick("acceptPersonalData")}
           error={fieldError("acceptPersonalData") && t(`errors.${fieldError("acceptPersonalData")}`)}
-          document={{ title: legal("privacy.title"), body: legal("privacy.body"), placeholder: true }}
+          legalText={{ title: legal("privacy.title"), body: legal("privacy.body") }}
         />
         {nda ? (
           <Consent
             id="acceptNda"
-            checkboxRef={ndaCheckbox}
             label={t("acceptNda", { version: format.number(nda.version) })}
             hint={t("ndaHint")}
             checked={ndaAccepted}
@@ -299,29 +332,11 @@ export function RegisterForm() {
               setErrors((current) => ({ ...current, acceptNda: undefined }));
             }}
             error={fieldError("acceptNda") && t(`errors.${fieldError("acceptNda")}`)}
-            // Текста IMBC ещё нет, на стенде — заглушка seed: отметку снимет изменение, которое принесёт текст.
-            document={{
-              title: legal("nda.title", { version: format.number(nda.version) }),
-              body: nda.body,
-              placeholder: true,
-            }}
+            legalText={{ title: legal("nda.title", { version: format.number(nda.version) }), body: nda.body }}
           />
-        ) : terms.isError ? (
-          <Alert variant="destructive">
-            <AlertDescription id={TERMS_STATUS}>
-              {terms.error instanceof ApiError && terms.error.code === "nda_unavailable"
-                ? t("ndaUnavailable")
-                : t("termsLoadError")}
-            </AlertDescription>
-            {!(terms.error instanceof ApiError && terms.error.code === "nda_unavailable") && (
-              <AlertAction>
-                <Button type="button" size="sm" variant="outline" onClick={() => void terms.refetch()}>
-                  {common("retry")}
-                </Button>
-              </AlertAction>
-            )}
-          </Alert>
-        ) : (
+        ) : null}
+        {termsAlert}
+        {!nda && !terms.isError && (
           <div className="flex items-start gap-3">
             <Skeleton className="mt-0.5 size-4 shrink-0" />
             <div className="flex flex-1 flex-col gap-2">
@@ -371,8 +386,7 @@ function Consent({
   checked,
   onCheckedChange,
   error,
-  document,
-  checkboxRef,
+  legalText,
 }: {
   id: string;
   label: string;
@@ -380,8 +394,7 @@ function Consent({
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
   error?: string | false;
-  document: { title: string; body: string; placeholder: boolean };
-  checkboxRef?: Ref<HTMLElement>;
+  legalText: { title: string; body: string };
 }) {
   const t = useTranslations("register");
   return (
@@ -389,7 +402,6 @@ function Consent({
       <div className="flex items-start gap-3">
         <Checkbox
           id={id}
-          ref={checkboxRef}
           className="mt-0.5"
           checked={checked}
           onCheckedChange={(value) => onCheckedChange(value === true)}
@@ -402,9 +414,8 @@ function Consent({
           </FieldLabel>
           {hint && <FieldDescription id={`${id}-help`}>{hint}</FieldDescription>}
           <LegalDialog
-            title={document.title}
-            body={document.body}
-            placeholder={document.placeholder}
+            title={legalText.title}
+            body={legalText.body}
             trigger={
               <Button
                 type="button"
@@ -412,7 +423,7 @@ function Consent({
                 size="sm"
                 className="h-auto px-0 py-0.5"
                 // Имя для программ чтения называет, что открывается; видимое «Прочитать» в нём есть.
-                aria-label={t("readDocument", { title: document.title })}
+                aria-label={t("readDocument", { title: legalText.title })}
               >
                 {t("read")}
               </Button>

@@ -3,14 +3,22 @@ import { QueryCache, QueryClient } from "@tanstack/react-query";
 import { ApiError } from "./api";
 import { meKey } from "./session";
 
+/**
+ * Повтор запроса: сбой сети и 5xx — до двух раз. 4xx не повторяем: это ответ сервера, а не сбой сети.
+ * `503 nda_unavailable` — тоже ответ (NDA не опубликована): повтор только тратит лимит маршрута (FC-02).
+ */
+export function retryQuery(count: number, error: unknown): boolean {
+  if (error instanceof ApiError && (error.status < 500 || error.code === "nda_unavailable")) return false;
+  return count < 2;
+}
+
 /** Клиент запросов приложения; тесты берут его же, чтобы реакция на 401 была как в браузере. */
 export function createQueryClient(): QueryClient {
   const client: QueryClient = new QueryClient({
     defaultOptions: {
       queries: {
         staleTime: 30_000,
-        // 4xx не повторяем: это ответ сервера, а не сбой сети.
-        retry: (count, error) => !(error instanceof ApiError && error.status < 500) && count < 2,
+        retry: retryQuery,
       },
     },
     queryCache: new QueryCache({

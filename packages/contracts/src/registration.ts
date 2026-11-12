@@ -32,3 +32,11 @@ export const registrationTermsSchema = z
   .object({ nda: z.object({ version: z.number().int().positive(), body: z.string().min(1) }).strict() })
   .strict();
 export type RegistrationTerms = z.infer<typeof registrationTermsSchema>;
+
+/**
+ * Чтение того же ответа формой: без `.strict()`, чтобы новое необязательное поле API не ломало регистрацию
+ * в браузере со старой сборкой (NFR-06), а ответ неверной формы стал ошибкой загрузки, а не «undefined нұсқа».
+ */
+export const registrationTermsReadSchema = z.object({
+  nda: z.object({ version: z.number().int().positive(), body: z.string().min(1) }),
+});

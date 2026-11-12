@@ -12,6 +12,7 @@ import {
   dashboardSchema,
   loginEmailSchema,
   registrationRequestSchema,
+  registrationTermsReadSchema,
   registrationTermsSchema,
   normalizeCompanyName,
   POLICY_MATRIX,
@@ -103,6 +104,14 @@ describe('регистрация производителя (MAN-01, FC-02, GEN-
     });
     expect(registrationTermsSchema.safeParse({ nda: { version: 1, body: '' } }).success).toBe(false);
     expect(registrationTermsSchema.safeParse({ nda: { version: 1, body: 'Текст', id: 'x' } }).success).toBe(false);
+  });
+
+  it('форма читает текст условий нестрого: новое поле API не мешает, неверная форма ответа — отказ (FC-02, NFR-06)', () => {
+    expect(registrationTermsReadSchema.parse({ nda: { version: 2, body: 'Текст', publishedAt: 'x' }, extra: 1 })).toEqual({
+      nda: { version: 2, body: 'Текст' },
+    });
+    for (const body of [{}, { nda: { body: 'Текст' } }, { nda: { version: 0, body: 'Текст' } }, { nda: { version: 1, body: '' } }])
+      expect(registrationTermsReadSchema.safeParse(body).success, JSON.stringify(body)).toBe(false);
   });
 });
 

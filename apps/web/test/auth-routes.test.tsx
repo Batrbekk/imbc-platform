@@ -1,8 +1,12 @@
 import { computeBinCheckDigit } from "@imbc/contracts";
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { focusManager } from "@tanstack/react-query";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { Providers } from "@/components/app/providers";
 import { leaveApp } from "@/lib/leave-app";
+import { LegalDialog, PLACEHOLDER } from "@/routes/auth/legal-dialog";
 import type { Me } from "@/lib/session";
 
 import en from "../messages/en.json";
@@ -60,6 +64,28 @@ const describedBy = (element: HTMLElement) =>
     .map((id) => document.getElementById(id)?.textContent ?? "");
 const registrationPosts = (api: ReturnType<typeof stubApi>) =>
   api.mock.calls.filter(([url, init]) => String(url) === "/api/v1/registrations" && init?.method === "POST");
+
+/** Текст NDA из seed стенда: заглушка начинается с маркера временного текста, первым — казахский абзац. */
+const SEED_NDA =
+  "УАҚЫТША МӘТІН — ЗАҢДЫҚ ҚҰЖАТ ЕМЕС. Мәтінді IMBC ұсынады.\n\nВРЕМЕННЫЙ ТЕКСТ — НЕ ЮРИДИЧЕСКИЙ ДОКУМЕНТ. Текст предоставит IMBC.\n\nPLACEHOLDER — NOT A LEGAL TEXT. IMBC will provide the text.";
+const ndaTitle = (messages: typeof kk, version = 1) => messages.legal.nda.title.replace("{version}", String(version));
+const submitButton = () => screen.getByRole("button", { name: kk.register.submit }) as HTMLButtonElement;
+
+/** Возврат на вкладку позже staleTime: клиент запросов перечитывает текст условий в фоне. */
+async function returnToTabLater() {
+  const realNow = Date.now.bind(Date);
+  const later = vi.spyOn(Date, "now").mockImplementation(() => realNow() + 31_000);
+  try {
+    // Клиент запросов зовёт onFocus после await: время сдвинуто, пока не начнётся перечитывание.
+    await act(async () => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  } finally {
+    later.mockRestore();
+  }
+}
 
 type Omitted = "platform" | "personal" | "nda" | "heard";
 async function fillRegistration(
@@ -521,7 +547,7 @@ describe("регистрация производителя (MAN-01, MAN-02, FC-
   });
 
   it("тексты: условия и политика — заглушки с отметкой «Заглушка», NDA — тело из API в диалоге; Escape закрывает диалог и возвращает фокус на кнопку", async () => {
-    const ndaBody = "Первый абзац NDA.\n\nВторой абзац NDA.";
+    const ndaBody = "УАҚЫТША МӘТІН — бірінші абзац.\n\nВРЕМЕННЫЙ ТЕКСТ — второй абзац.";
     stubApi(terms(1, ndaBody));
     const { user } = renderRoute("/register", { locale: "ru" });
     await screen.findByRole("checkbox", { name: ndaLabel(ru) });
@@ -540,13 +566,12 @@ describe("регистрация производителя (MAN-01, MAN-02, FC-
       await waitFor(() => expect(document.activeElement, title).toBe(read));
     }
 
-    const ndaTitle = ru.legal.nda.title.replace("{version}", "1");
-    const read = screen.getByRole("button", { name: readLabel(ru, ndaTitle) });
+    const read = screen.getByRole("button", { name: readLabel(ru, ndaTitle(ru)) });
     await user.click(read);
-    const dialog = await screen.findByRole("dialog", { name: ndaTitle });
+    const dialog = await screen.findByRole("dialog", { name: ndaTitle(ru) });
     expect(within(dialog).getByText(ru.legal.placeholder)).toBeTruthy();
     // Текст NDA — обычный текст с абзацами, не HTML.
-    const text = within(dialog).getByText(/Первый абзац NDA/);
+    const text = within(dialog).getByText(/бірінші абзац/);
     expect(text.textContent).toBe(ndaBody);
     expect(text.classList.contains("whitespace-pre-line")).toBe(true);
 
@@ -632,6 +657,171 @@ describe("регистрация производителя (MAN-01, MAN-02, FC-
     expect((screen.getByRole("button", { name: kk.register.submit }) as HTMLButtonElement).disabled).toBe(false);
     // Повтор загрузки не стирает введённое.
     expect((screen.getByLabelText(kk.register.companyName) as HTMLInputElement).value).toBe("ТОО Тест");
+  });
+
+  it("отметка «Заглушка» есть тогда и только тогда, когда текст начинается с маркера временного текста (FC-02)", async () => {
+    // Маркер и тексты не расходятся: заглушки условий и политики во всех языках начинаются с него.
+    for (const messages of [kk, ru, en]) {
+      expect(messages.legal.terms.body).toMatch(PLACEHOLDER);
+      expect(messages.legal.privacy.body).toMatch(PLACEHOLDER);
+    }
+    expect(SEED_NDA).toMatch(PLACEHOLDER);
+
+    for (const [locale, messages] of [
+      ["kk", kk],
+      ["ru", ru],
+      ["en", en],
+    ] as const) {
+      stubApi(terms(1, SEED_NDA));
+      const { user } = renderRoute("/register", { locale });
+      await screen.findByRole("checkbox", { name: ndaLabel(messages) });
+
+      for (const title of [messages.legal.terms.title, messages.legal.privacy.title, ndaTitle(messages)]) {
+        await user.click(screen.getByRole("button", { name: readLabel(messages, title) }));
+        const dialog = await screen.findByRole("dialog", { name: title });
+        expect(within(dialog).getByText(messages.legal.placeholder), `${locale}: ${title}`).toBeTruthy();
+        await user.keyboard("{Escape}");
+        await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      }
+      cleanup();
+    }
+
+    // Настоящий текст NDA (следующая версия от IMBC) — без отметки.
+    stubApi(terms(2, "Настоящий текст соглашения…"));
+    const { user } = renderRoute("/register", { locale: "ru" });
+    await user.click(await screen.findByRole("button", { name: readLabel(ru, ndaTitle(ru, 2)) }));
+    const nda = await screen.findByRole("dialog", { name: ndaTitle(ru, 2) });
+    expect(within(nda).getByText("Настоящий текст соглашения…")).toBeTruthy();
+    expect(within(nda).queryByText(ru.legal.placeholder)).toBeNull();
+    cleanup();
+
+    // Настоящий текст условий придёт правкой файлов переводов — без маркера отметки нет.
+    render(
+      <Providers initialLocale="ru" initialMessages={ru}>
+        <LegalDialog
+          title={ru.legal.terms.title}
+          body="Настоящий текст условий…"
+          trigger={<button type="button">open</button>}
+        />
+      </Providers>,
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: "open" }));
+    const termsDialog = await screen.findByRole("dialog", { name: ru.legal.terms.title });
+    expect(within(termsDialog).queryByText(ru.legal.placeholder)).toBeNull();
+    // Область текста названа заголовком диалога.
+    expect(within(termsDialog).getByRole("document", { name: ru.legal.terms.title }).textContent).toBe(
+      "Настоящий текст условий…",
+    );
+  });
+
+  it("ответ с текстом NDA неожиданной формы — ошибка загрузки с повтором, отправка недоступна (FC-02)", async () => {
+    stubApi({ [TERMS_PATH]: { body: { nda: { body: "NDA body" } } } });
+    renderRoute("/register");
+
+    expect(await screen.findByText(kk.register.termsLoadError)).toBeTruthy();
+    expect(screen.getByRole("button", { name: kk.common.retry })).toBeTruthy();
+    expect(submitButton().disabled).toBe(true);
+    expect(screen.queryByRole("checkbox", { name: /NDA/ })).toBeNull();
+    expect(screen.queryByText(/undefined|NaN/)).toBeNull();
+  });
+
+  it("фоновое перечитывание принесло версию 2, пока отмечена версия 1: галочка снята, сообщение о новой версии (FC-02)", async () => {
+    let version = 1;
+    stubApi({ [TERMS_PATH]: () => Response.json({ nda: { version, body: "NDA body" } }) });
+    const { user } = renderRoute("/register");
+    await user.click(await screen.findByRole("checkbox", { name: ndaLabel(kk) }));
+
+    version = 2;
+    try {
+      await returnToTabLater();
+
+      const nda = await screen.findByRole("checkbox", { name: ndaLabel(kk, 2) });
+      expect(nda.getAttribute("aria-checked")).toBe("false");
+      expect(describedBy(nda)).toContain(kk.register.errors.nda_version_changed);
+
+      await user.click(nda);
+      expect(nda.getAttribute("aria-checked")).toBe("true");
+      expect(screen.queryByText(kk.register.errors.nda_version_changed)).toBeNull();
+    } finally {
+      focusManager.setFocused(undefined);
+    }
+  });
+
+  it("фоновое перечитывание не удалось: отмеченная галочка NDA и её текст остаются, рядом ошибка с повтором; повтор в полёте — кнопка недоступна", async () => {
+    let reply: "ok" | "offline" | "hold" = "ok";
+    let release = () => {};
+    const body = { nda: { version: 1, body: "NDA body" } };
+    stubApi({
+      [TERMS_PATH]: (() => {
+        if (reply === "offline") throw new TypeError("Failed to fetch");
+        if (reply === "hold") return new Promise<Response>((resolve) => (release = () => resolve(Response.json(body))));
+        return Response.json(body);
+      }) as unknown as ApiReply,
+    });
+    const { user } = renderRoute("/register");
+    await user.click(await screen.findByRole("checkbox", { name: ndaLabel(kk) }));
+
+    reply = "offline";
+    try {
+      await returnToTabLater();
+
+      expect(await screen.findByText(kk.register.termsLoadError)).toBeTruthy();
+      expect(screen.getByRole("checkbox", { name: ndaLabel(kk) }).getAttribute("aria-checked")).toBe("true");
+      expect(screen.getByRole("button", { name: readLabel(kk, ndaTitle(kk)) })).toBeTruthy();
+      // Показанная версия — из последнего удачного ответа; устаревшую отвергнет сервер (409).
+      expect(submitButton().disabled).toBe(false);
+
+      reply = "hold";
+      const retry = screen.getByRole("button", { name: kk.common.retry }) as HTMLButtonElement;
+      await user.click(retry);
+      await waitFor(() => expect(retry.disabled).toBe(true));
+      expect(retry.querySelector('[data-slot="spinner"]')).toBeTruthy();
+
+      release();
+      await waitFor(() => expect(screen.queryByText(kk.register.termsLoadError)).toBeNull());
+      expect(screen.getByRole("checkbox", { name: ndaLabel(kk) }).getAttribute("aria-checked")).toBe("true");
+    } finally {
+      focusManager.setFocused(undefined);
+    }
+  });
+
+  it("после ошибок фокус — на первом поле с ошибкой: проверка в форме и ответ сервера (MAN-01, MAN-02)", async () => {
+    stubApi(terms());
+    const { user } = renderRoute("/register");
+
+    await fillRegistration(user, { skip: "heard" });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText(kk.register.heardAboutUs)));
+
+    // Несколько ошибок — фокус на первой по порядку полей.
+    await user.clear(screen.getByLabelText(kk.register.companyName));
+    await user.click(submitButton());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText(kk.register.companyName)));
+    expect(screen.getAllByRole("alert")).toHaveLength(2);
+    cleanup();
+
+    stubApi({ ...terms(), "POST /api/v1/registrations": problem(409, "bin_exists") });
+    const second = renderRoute("/register");
+    await fillRegistration(second.user);
+
+    expect(await screen.findByText(kk.register.errors.bin_exists)).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText(kk.register.bin)));
+  });
+
+  it("две отправки формы подряд, пока первая в пути, — одна заявка", async () => {
+    const api = stubApi({
+      ...terms(),
+      "POST /api/v1/registrations": { status: 202, body: { status: "password_email_queued" } },
+    });
+    const { user } = renderRoute("/register");
+    await fillRegistration(user, { skip: "nda" });
+    await user.click(screen.getByRole("checkbox", { name: ndaLabel(kk) }));
+
+    const form = submitButton().closest("form")!;
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+
+    expect(await screen.findByText(kk.register.successTitle)).toBeTruthy();
+    expect(registrationPosts(api)).toHaveLength(1);
   });
 
   it("тексты на kk и en", async () => {
