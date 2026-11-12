@@ -163,6 +163,14 @@ describe('GET /api/v1/profiles/own/adata', () => {
     },
   );
 
+  it('без сеанса — 401 problem+json, сервис не вызван (GEN-08)', async () => {
+    const res = await http.get(URL_PATH);
+    expect(res.status).toBe(401);
+    expect(res.headers.get('content-type')).toMatch(/^application\/problem\+json/);
+    expect(await res.json()).toMatchObject({ status: 401 });
+    expect(ownAdata).not.toHaveBeenCalled();
+  });
+
   it.each(['expert', 'director'] as const)('%s без профиля в организации — 404', async (role) => {
     const res = await imbc.get(URL_PATH, role);
     expect(res.status).toBe(404);

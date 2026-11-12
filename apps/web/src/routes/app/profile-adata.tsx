@@ -1,5 +1,6 @@
 import { type OwnAdataRead, PREFILL_FIELDS, type PrefillField } from "@imbc/contracts";
 import { useQuery } from "@tanstack/react-query";
+import { cn } from "cn";
 import { useId } from "react";
 import { useTranslations } from "use-intl";
 
@@ -13,6 +14,9 @@ import { useFormat } from "@/i18n/format";
 import { api } from "@/lib/api";
 
 type Field = OwnAdataRead["fields"][number];
+
+/** Длинное значение без пробелов (email, адрес сайта, склеенное название ОКЭД) переносится, а не обрезается. */
+const WRAP = "min-w-0 max-w-full [overflow-wrap:anywhere]";
 
 /** Текст конечного состояния без значений. */
 const STATE_TEXT = {
@@ -45,7 +49,8 @@ export function AdataReadCard() {
       <CardHeader>
         <CardTitle id={titleId}>{t("title")}</CardTitle>
         {read && (
-          <CardDescription className="flex items-center gap-2">
+          // Живая область: смена waiting → received объявляется программе чтения с экрана.
+          <CardDescription aria-live="polite" className="flex items-center gap-2">
             {read.state === "waiting" && <Spinner aria-hidden />}
             {read.state === "waiting"
               ? t("waiting")
@@ -97,17 +102,19 @@ function PrefilledRow({ field, value }: { field: PrefillField; value: Field | un
         : item.value;
 
   return (
-    <div className="grid gap-1 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:gap-4">
+    <div className="grid min-w-0 gap-1 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:gap-4">
       <dt className="text-muted-foreground">{t(`field.${field}`)}</dt>
-      <dd className="flex flex-col items-start gap-1">
+      <dd className={cn("flex flex-col items-start gap-1", WRAP)}>
         {value ? (
           <>
             {value.items.length === 1 && field !== "shareholders" ? (
-              <span>{text(value.items[0]!)}</span>
+              <span className={WRAP}>{text(value.items[0]!)}</span>
             ) : (
-              <ul className="flex flex-col gap-0.5">
+              <ul className={cn("flex flex-col gap-0.5", WRAP)}>
                 {value.items.map((item) => (
-                  <li key={item.value}>{text(item)}</li>
+                  <li key={item.value} className={WRAP}>
+                    {text(item)}
+                  </li>
                 ))}
               </ul>
             )}

@@ -254,6 +254,34 @@ describe("данные Adata своего профиля (MAN-06, MAN-07, GEN-11
     expect(legalForm.badge).toBeNull();
   });
 
+  it("длинное значение без пробелов показано целиком и переносится", async () => {
+    const email = `${"x".repeat(280)}@adata-test.local`;
+    const okedLabel = "Производство".repeat(25);
+    stubProfile(DEMO, {
+      ...RECEIVED,
+      fields: RECEIVED.fields.map((f) =>
+        f.field === "company_email"
+          ? { ...f, items: [item(email)] }
+          : f.field === "activity"
+            ? { ...f, items: [item("25110", okedLabel), item("28220")] }
+            : f,
+      ),
+    });
+    renderRoute("/profile", { locale: "ru" });
+
+    const card = await adataCard(ru.profile.adata.title);
+    // jsdom не раскладывает страницу: проверяются полный текст и классы переноса у значения и его dd.
+    const wraps = (element: Element) =>
+      ["min-w-0", "max-w-full", "[overflow-wrap:anywhere]"].every((c) => element.classList.contains(c));
+    const value = await within(card).findByText(email);
+    expect(value.textContent).toHaveLength(297);
+    expect(wraps(value)).toBe(true);
+    expect(wraps(value.closest("dd")!)).toBe(true);
+    const oked = within(card).getByText(`25110 — ${okedLabel}`);
+    expect(oked.tagName).toBe("LI");
+    expect(wraps(oked)).toBe(true);
+  });
+
   it("waiting — текст и повторный запрос через 5 секунд, затем значения", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let reads = 0;
@@ -270,13 +298,17 @@ describe("данные Adata своего профиля (MAN-06, MAN-07, GEN-11
     renderRoute("/profile", { locale: "ru" });
 
     const card = await adataCard(ru.profile.adata.title);
-    expect(await within(card).findByText(ru.profile.adata.waiting)).toBeTruthy();
+    // Строка состояния — живая область: смена waiting → received объявляется (тот же элемент).
+    const status = await within(card).findByText(ru.profile.adata.waiting);
+    expect(status.getAttribute("aria-live")).toBe("polite");
     expect(card.querySelector("dl")).toBeNull();
     expect(callsTo(api, ADATA_PATH)).toBe(1);
 
     act(() => vi.advanceTimersByTime(5000));
     expect(await within(card).findByText(/Тестов Тест Тестович/)).toBeTruthy();
     expect(within(card).queryByText(ru.profile.adata.waiting)).toBeNull();
+    expect(within(card).getByText(/^Получено из Adata /)).toBe(status);
+    expect(status.getAttribute("aria-live")).toBe("polite");
     expect(callsTo(api, ADATA_PATH)).toBe(2);
 
     // Получено — опрос остановлен; профиль не перезапрашивается.

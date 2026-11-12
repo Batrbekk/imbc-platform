@@ -37,7 +37,7 @@ export function ProfilePage() {
       {result.data ? (
         <>
           <ProfileView profile={result.data} />
-          {/* Чтение Adata — свой запрос; без профиля его нет (MAN-07). */}
+          {/* Чтение Adata — свой запрос; без профиля его нет. */}
           <AdataReadCard />
         </>
       ) : result.isError ? (
