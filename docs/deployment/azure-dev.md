@@ -353,7 +353,7 @@ sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql 
       where c.profile_id = p.id and c.connector = 'adata' and t.trigger = 'profile_created');"
 ```
 
-Первый запрос показывает, с какого момента будут прочитаны события пароля (нет строки — 30 дней). Второй — сколько производителей запустят чтение при входе или по событию. При пределе 1 запрос сделает первый из них; остальные получат `quota_exhausted`.
+Первый запрос показывает, с какого момента будут прочитаны события пароля (нет строки — 30 дней). Второй — сколько производителей запустят чтение при входе или по событию. При пределе 1 запрос сделает первый из них; остальные получат `quota_exhausted`. До выката этой версии таблиц `external_check` и `external_check_attempt` ещё нет, и второй запрос падает с «relation does not exist»: выполните его без части `and not exists (…)` — попыток ещё нет ни у одного профиля. Полный запрос — для последующих выкатов.
 
 ### Токен не печатать
 
@@ -375,6 +375,8 @@ sudo docker compose -f compose.yaml -f compose.azure.yaml logs worker | grep 'ad
 ```
 
 Ожидается: `used = 1`, одна попытка с `request_sent_at` и `state = received`, в журнале worker строка `adata attempt <id>: received`. БИН, значения ответа и адрес Adata в журнал не пишутся.
+
+Предел действует на период: 4-го числа (Asia/Almaty) предел по умолчанию 1 снова доступен, и его израсходует первый вошедший производитель с Draft-профилем, у которого попытка в `quota_exhausted` или `not_configured` (или новый зарегистрированный). Чтобы чтения не было без решения владельца, добавьте в серверную `.env` строку `ADATA_MONTHLY_LIMIT=0` и выполните `sudo docker compose -f compose.yaml -f compose.azure.yaml up -d worker`: при пределе 0 попытки заканчиваются `quota_exhausted` без запроса.
 
 ### Поднять предел
 
