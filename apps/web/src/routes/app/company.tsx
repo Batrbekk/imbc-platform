@@ -37,7 +37,8 @@ export function CompanyPage() {
     queryFn: () => api<Company>(`/v1/catalog/companies/${encodeURIComponent(profileId)}`),
   });
   const company = result.data;
-  const notFound = result.error instanceof ApiError && result.error.status === 404;
+  // 400 — id в адресе не uuid: для пользователя это тоже «не найдено», повтор не поможет.
+  const notFound = result.error instanceof ApiError && (result.error.status === 404 || result.error.status === 400);
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-4">

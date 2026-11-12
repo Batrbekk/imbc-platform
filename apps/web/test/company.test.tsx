@@ -181,6 +181,21 @@ describe("страница компании (OPR-09, OPR-10)", () => {
     expect(api.mock.calls.filter(([url]) => String(url) === URL_PATH)).toHaveLength(2);
   });
 
+  it("адрес с неверным id: API отвечает 400 — «не найдено», без повтора", async () => {
+    stubApi({
+      "GET /api/auth/me": { body: me("operator") },
+      "GET /api/v1/catalog/companies/123": problem(400, "validation"),
+    });
+    renderRoute("/companies/123", { locale: "en" });
+
+    expect(await screen.findByText(en.company.notFound)).toBeTruthy();
+    expect(within(screen.getByRole("main")).getByRole("link", { name: en.nav.catalog }).getAttribute("href")).toBe(
+      "/catalog",
+    );
+    expect(screen.queryByText(en.company.loadError)).toBeNull();
+    expect(screen.queryByRole("button", { name: en.common.retry })).toBeNull();
+  });
+
   it("ровно один заголовок вкладки — название компании", async () => {
     stubCompany("operator", OPERATOR_PAGE);
     renderRoute(`/companies/${ID}`, { locale: "ru" });

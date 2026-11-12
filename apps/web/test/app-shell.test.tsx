@@ -337,6 +337,15 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     expect(document.querySelector('[data-sidebar="header"] img')?.getAttribute("alt")).toBe("");
   });
 
+  it("рабочая область сужается до окна: широкая таблица каталога прокручивается внутри, а не растягивает страницу", async () => {
+    stubWorkspace(me("observer"));
+    renderRoute("/catalog", { locale: "kk" });
+
+    await screen.findByRole("heading", { name: kk.catalog.title });
+    // jsdom не считает раскладку: проверяется класс, который снимает min-width: auto у flex-элемента.
+    expect(document.querySelector('main[data-slot="sidebar-inset"]')?.classList.contains("min-w-0")).toBe(true);
+  });
+
   it("на телефоне меню — панель с переведёнными заголовком и описанием (NFR-14)", async () => {
     const matchMedia = window.matchMedia;
     window.matchMedia = (query: string) => ({ ...matchMedia(query), matches: true });

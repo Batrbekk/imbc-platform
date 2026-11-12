@@ -38,15 +38,16 @@ export async function startHttp(options: {
 }): Promise<HttpStand> {
   const audit = { record: vi.fn().mockResolvedValue(undefined) };
   const organizationId = options.organizationId ?? '00000000-0000-4000-8000-0000000000aa';
+  // Идентификаторы — валидные UUID: их можно передать в столбцы uuid (аудит, записи по пользователю).
   const resolve = vi.fn(async (token: string | undefined): Promise<AuthContext | null> => {
     if (!token || !(ROLES as readonly string[]).includes(token)) return null;
     const role = token as Role;
     return {
-      sessionId: 's',
+      sessionId: '00000000-0000-4000-8000-0000000000a1',
       mfaPassed: true,
       responsibilityAccepted: true,
       user: {
-        id: 'u',
+        id: '00000000-0000-4000-8000-0000000000a2',
         email: `${role}@test.local`,
         fullName: null,
         role,

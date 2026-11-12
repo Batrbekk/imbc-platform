@@ -152,7 +152,9 @@ export function AppShell() {
           </SidebarMenu>
         </SidebarFooter>
       </Sidebar>
-      <SidebarInset>
+      {/* min-w-0: flex-элемент с min-width: auto растянула бы широкая таблица каталога, и страница стала бы
+          шире окна; так таблица прокручивается в своём контейнере. */}
+      <SidebarInset className="min-w-0">
         <header className="flex h-14 items-center gap-2 border-b px-4">
           <SidebarTrigger aria-label={t("nav.toggleSidebar")} />
           {/* base-nova задаёт вертикальному разделителю data-vertical:self-stretch: с явной высотой

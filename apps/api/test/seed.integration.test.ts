@@ -143,6 +143,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
         parsed.every((r) => r.card.companyPhone && r.card.companyEmail?.endsWith('.demo.local')),
         run,
       ).toBe(true);
+      // Адрес контактного лица — тоже вымышленный, на .demo.local.
+      expect(
+        parsed.every((r) => r.card.focalPoint === null || r.card.focalPoint.email.endsWith('.demo.local')),
+        run,
+      ).toBe(true);
       // Стенд после прежней версии: строки уже есть с card = { demo: true }; повторный запуск их перезаписывает.
       await pool.query(`update catalog_visible set card = '{"demo": true}'::jsonb`);
     }
