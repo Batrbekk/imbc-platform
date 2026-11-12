@@ -3,7 +3,7 @@ import { COMMODITY_GROUPS, PROFILE_TIERS, UPDATE_STATUSES } from './enums.js';
 
 /**
  * Фильтры каталога (OPR-02, OPR-03). Значения живут в адресе страницы (OPR-05, D-21):
- * один и тот же объект парсится в Next.js (nuqs) и в API (query string).
+ * один и тот же объект парсится в web (React + Vite SPA, nuqs) и в API (query string).
  * Между фильтрами — AND, внутри одного фильтра — OR (OPR-04).
  */
 export const csv = <T extends z.ZodType>(item: T) =>

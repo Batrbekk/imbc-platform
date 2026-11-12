@@ -1,6 +1,6 @@
 # IMBC: dev-среда в Azure
 
-Конфигурация одного dev-сервера для Docker-стека IMBC. Здесь используются вымышленные демо-данные и Mailpit с Azure Communication Services SMTP relay: настоящие адреса получают письма, письма демо-адресам `.local` остаются в Mailpit. Для шести seed-аккаунтов и отдельного тестового администратора задан OTP `000000` без письма; исключение ограничено списком UUID и ожидаемых ролей. Общая авторизация использует собственные экраны IMBC на shadcn/ui; предметные кабинеты ролей ещё разрабатываются. Эта инструкция описывает конфигурацию и обслуживание, а результаты проверки конкретного развёртывания фиксируются отдельно.
+Конфигурация одного dev-сервера для Docker-стека IMBC. Здесь используются вымышленные демо-данные и Mailpit с Azure Communication Services SMTP relay: настоящие адреса получают письма, письма демо-адресам `.local` остаются в Mailpit. Для шести seed-аккаунтов и отдельного тестового администратора задан OTP `000000` без письма; исключение ограничено списком UUID и ожидаемых ролей. Общая авторизация использует собственные экраны IMBC на shadcn/ui; у ролей есть стартовые страницы и демо-экраны только для чтения, предметные кабинеты ещё разрабатываются. С 12.11.2026 стенд работает на спецификации v1.3 — см. [Переход на спецификацию v1.3](#переход-на-спецификацию-v13). Эта инструкция описывает конфигурацию и обслуживание, а результаты проверки конкретного развёртывания фиксируются отдельно.
 
 ## Ресурсы и адреса
 
@@ -103,6 +103,8 @@ Realm Keycloak импортируется только при первом со�
 
 Workflow [`.github/workflows/deploy-dev.yml`](../../.github/workflows/deploy-dev.yml) обновляет стенд без SSH и без хранимых секретов — процедура развёртывания по NFR-05. Секретов, которые нужно было бы хранить, у конвейера нет; менеджер секретов из NFR-10 он не заменяет — секреты приложения по-прежнему хранятся только в серверной `.env`.
 
+**Состояние на 12.11.2026.** Конвейер настроен в Azure и GitHub (идентичность `imbc-dev-github-deploy`, окружение `dev` только для `main`, защита `main` с двумя обязательными проверками), но ни разу не запускался: GitHub Actions на аккаунте владельца заблокирован из-за оплаты («The job was not started because your account is locked due to a billing issue»), поэтому не запускались и проверки CI. Снять блокировку может только владелец аккаунта. Не проверены: вход конвейера в Azure через OIDC, достаточность трёх действий собственной роли для `az vm run-command`, первое развёртывание конвейером и `deploy.sh preview`. Все выкаты 12.11 выполнены вручную: `deploy.sh redeploy` из чистого checkout нужного коммита.
+
 ### Как это работает
 
 1. **Запуск.** Автоматически — после успешного workflow `CI` для push в `main` этого репозитория. Если CI не прошёл, запуск относится к pull request или за время CI в `main` появился более новый коммит, развёртывание не начинается (новый коммит развернёт собственный запуск). Вручную — `workflow_dispatch` из ветки `main` с полем `ref`. Одновременно идёт не больше одного развёртывания: группа `deploy-dev` без отмены, `flock` на VM и ограничение Azure «один run-command на VM».
@@ -121,7 +123,7 @@ Workflow [`.github/workflows/deploy-dev.yml`](../../.github/workflows/deploy-dev
 - **Журналы Actions видит любой.** Поэтому скрипт на VM выводит только названия шагов, длительность и безопасные сообщения; вывод сборки, Compose и контейнеров остаётся в журнале на VM. Секретов в конвейере нет. Переменные `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` — идентификаторы, а не секреты: без OIDC-токена этого репозитория и окружения `dev` они не дают входа.
 - **Архив коммита скачивается анонимно.** Токены на VM не передаются: параметры run-command могут оставаться в настройках расширения на диске VM.
 - **Форки и pull request не развёртывают.** CI для pull request выполняется с токеном только для чтения и без доступа к окружению `dev`. Автоматический запуск принимает только push в `main` этого репозитория; ручной запуск доступен пользователям с правом записи и только из `main`. OIDC-токен с нужным subject выдаётся только заданию в окружении `dev`.
-- **Всё, что попало в `main`, исполняется на VM от root** — и скрипт развёртывания, и сборка контейнеров. Рекомендуется (настройки репозитория, скрипт их не меняет): защитить `main` правилами ветки — обязательный CI и ревью; ограничить разрешённые actions репозитория (Settings → Actions → «Allow select actions») теми, что используются; `deploy-dev.yml` закрепляет `actions/checkout` и `azure/login` по SHA коммита.
+- **Всё, что попало в `main`, исполняется на VM от root** — и скрипт развёртывания, и сборка контейнеров. Рекомендуется (настройки репозитория, скрипт их не меняет): защитить `main` правилами ветки — обязательный CI и ревью (12.11 включена защита с двумя обязательными проверками); ограничить разрешённые actions репозитория (Settings → Actions → «Allow select actions») теми, что используются; `deploy-dev.yml` закрепляет `actions/checkout` и `azure/login` по SHA коммита.
 
 ### Настройка
 
@@ -201,6 +203,59 @@ az vm run-command invoke -g imbc-dev-rg -n imbc-dev --command-id RunShellScript 
 - Смена DNS-имени стенда: оно задано в `deploy-dev.yml` (`DEV_HOST`) и должно совпадать с `PUBLIC_HOST` серверной `.env`.
 - **Ограничение: только публичный репозиторий.** Если репозиторий станет закрытым, конвейер остановится; прежде чем снова запускать его, нужен другой канал исходников без токена в параметрах run-command — например, ключ развёртывания только для чтения на VM или управляемый run-command с защищёнными параметрами. Ручной `deploy.sh` от этого не зависит.
 
+## Переход на спецификацию v1.3
+
+Спецификация v1.3 (раздел 3.1, UPD-06) переименовала роль и тип организации `spectator` в `observer` и статус актуальности профиля `inactive` в `unresponsive`; профиль unresponsive остаётся видимым и сортируется ниже (UPD-04). Демо-наблюдатель `spectator@spectator.local` стал `observer@observer.local`. Переход идёт по правилу expand → перенос данных → contract (NFR-06): этот релиз добавляет новые значения и переносит данные, прежние значения удаляет следующий релиз contract (миграция `0005`, состав — `docs/handoff/2026-11-11-context.md`, §8). На dev-стенде переход выполнен 12.11.2026 первым выкатом ветки `feat/spec-v1.3-contracts` (`851660b`): в журнале `migrate` — «Перенос v1.3: organizations 1, user_accounts 1».
+
+### Что делает выкат
+
+Шаги одинаковы для `./infrastructure/azure/deploy.sh redeploy` и для [конвейера](#конвейер-развёртывания): оба запускают на VM `infrastructure/azure/vm-deploy.sh`. Отдельной команды для перехода нет.
+
+1. **Compose** (`up -d --build --wait`, шаг `compose-up`). Одноразовый сервис `migrate` выполняет `node dist/database/migrate.js`:
+   - миграция `0003_spec_v13_expand` добавляет `observer` в типы `role` и `organization_type` и `unresponsive` в тип `update_status`; прежние значения остаются, поэтому прежняя версия приложения продолжает работать с базой;
+   - миграция `0004_catalog_tier` добавляет в `catalog_visible` вычисляемую колонку `tier` (IMBC-19, IMBC-20);
+   - после фиксации миграций — перенос данных `backfillSpecV13()` (`apps/api/src/database/backfill.ts`): `spectator → observer` в `organizations.type` и `user_accounts.role`, `inactive → unresponsive` в `manufacturer_profiles.update_status` и `catalog_visible.update_status`. Число изменённых строк печатается строкой «Перенос v1.3: …». Повторный запуск ничего не меняет.
+2. Затем, при `SEED_DEMO=true`, `seed.js` переименовывает демо-аккаунт в `user_accounts`: `spectator@spectator.local` → `observer@observer.local`. Идентификатор аккаунта, `idp_subject`, принятая ответственность, доверенные устройства и пара в `DEV_FIXED_OTP_ACCOUNTS` сохраняются. Если новый адрес уже занят, оба аккаунта остаются как были.
+3. `api` и `worker` новой версии стартуют только после успешного `migrate` (`service_completed_successfully`).
+4. Шаг `realm-sync`: `sync-realm.py --theme imbc` переименовывает пользователя Keycloak `spectator@spectator.local` → `observer@observer.local` (username и email; id и пароль сохраняются). Если новый адрес уже занят другим пользователем, скрипт печатает `Legacy demo user kept: target already exists` и ничего не меняет.
+5. Готовность HTTPS/API и отказ закрытых маршрутов, как при любом выкате.
+
+**Известное ограничение.** Перенос данных идёт в `migrate`, пока прежний `api` ещё работает: до его замены запрос наблюдателя к прежней версии завершается ошибкой 500. Окно — секунды, до старта нового `api`. Повторный запуск `migrate` безопасен.
+
+### Проверка после выката
+
+Команды ниже приведены для проверки; на стенде 12.11 выполнены только проверки снаружи без входа (readiness, отказ закрытых маршрутов), SQL-запросы и вход наблюдателя не выполнялись.
+
+```bash
+./infrastructure/azure/deploy.sh ssh
+cd /home/imbc/imbc-platform
+sudo docker compose -f compose.yaml -f compose.azure.yaml logs migrate | grep 'Перенос v1.3'
+sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
+  select 'organizations' as t, count(*) from organizations where type::text = 'spectator'
+  union all select 'user_accounts', count(*) from user_accounts where role::text = 'spectator'
+  union all select 'manufacturer_profiles', count(*) from manufacturer_profiles where update_status::text = 'inactive'
+  union all select 'catalog_visible', count(*) from catalog_visible where update_status::text = 'inactive';"
+sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
+  select email, role from user_accounts where lower(email) in ('spectator@spectator.local', 'observer@observer.local');"
+```
+
+Ожидается: во всех четырёх строках первого запроса `0`; второй запрос возвращает одну строку `observer@observer.local | observer`.
+
+Ожидаемый вход: `observer@observer.local` с прежним паролем демо-аккаунтов (`KEYCLOAK_DEV_USER_PASSWORD`) и кодом `000000` открывает `/dashboard`; страница компании не показывает focal point. Вход `spectator@spectator.local` после выката больше не работает: пользователь Keycloak переименован.
+
+### Откат
+
+Откат между коммитами v1.3 — как обычно (раздел «Откат» конвейера). Откат на версию до v1.3 — `deploy.sh redeploy` из checkout такого коммита: коммиты до v1.3 старше конвейера, конвейер их не развернёт. Схема не откатывается: прежние значения остаются в типах до релиза contract, поэтому прежняя версия работает с базой, если вернуть данные. Сразу после выката прежней версии:
+
+```sql
+UPDATE organizations SET type = 'spectator' WHERE type::text = 'observer';
+UPDATE user_accounts SET role = 'spectator' WHERE role::text = 'observer';
+UPDATE manufacturer_profiles SET update_status = 'inactive' WHERE update_status::text = 'unresponsive';
+UPDATE catalog_visible SET update_status = 'inactive' WHERE update_status::text = 'unresponsive';
+```
+
+Прежние seed и `sync-realm.py` адрес демо-наблюдателя обратно не переименовывают: для входа прежним адресом верните его в `user_accounts` (`UPDATE user_accounts SET email = 'spectator@spectator.local' WHERE lower(email) = 'observer@observer.local'`) и в консоли Keycloak (username и email пользователя), иначе прежний seed создаст второй аккаунт с прежним адресом. Если в серверной `.env` пара `DEV_FIXED_OTP_ACCOUNTS` уже переписана на `"role":"observer"`, верните `"role":"spectator"`: прежняя версия не знает роли `observer` и не запустится. После релиза contract такой откат невозможен. Откат на стенде не выполнялся.
+
 ## Статус и логи на VM
 
 После подключения по SSH:
@@ -259,7 +314,7 @@ Relay-секрет хранится только на VM: `infrastructure/mailpi
 
 Источники: [shadcn MCP](https://ui.shadcn.com/docs/mcp), [Codex MCP](https://developers.openai.com/codex/mcp/), [ACS SMTP](https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/email/send-email-smtp/smtp-authentication), [Mailpit relay](https://mailpit.axllent.org/docs/configuration/smtp-relay/).
 
-Автоматические проверки общего auth-среза: 83 теста API (из них 28 на отдельной PostgreSQL 18), 23 contracts и 4 web. Они не подтверждают прохождение всех браузерных сценариев конкретного развёртывания. Объём дальнейшей работы и критерии приёмки по ролям — в [development-roadmap.md](../development-roadmap.md).
+Автоматические проверки ветки `feat/spec-v1.3-contracts` на 12.11.2026: 206 тестов API (из них 80 на отдельной PostgreSQL 18), 87 contracts и 185 web; подробности — README, раздел 14. Они не подтверждают прохождение браузерных сценариев конкретного развёртывания. Объём дальнейшей работы и критерии приёмки по ролям — в [development-roadmap.md](../development-roadmap.md).
 
 Результаты приёмки работающего стенда: [verification-2026-11-10.md](verification-2026-11-10.md).
 
@@ -275,20 +330,22 @@ Relay-секрет хранится только на VM: `infrastructure/mailpi
 | `admin@imbc.local` | `administrator` | `DEV_FIXED_OTP_ACCOUNTS` |
 | `director@imbc.local` | `director` | `DEV_FIXED_OTP_ACCOUNTS` |
 | `operator@operator.local` | `operator` | `DEV_FIXED_OTP_ACCOUNTS` |
-| `spectator@spectator.local` | `spectator` | `DEV_FIXED_OTP_ACCOUNTS` |
+| `observer@observer.local` | `observer` | `DEV_FIXED_OTP_ACCOUNTS` |
 | `manufacturer@demo.local` | `manufacturer` | `DEV_FIXED_OTP_ACCOUNTS` |
 | `test-admin@imbc.local` | `administrator` | совместимый `DEV_FIXED_OTP_USER_ID` |
 
-Пароли остаются прежними и обязательными. Начальный пароль seed-аккаунтов хранится в `KEYCLOAK_DEV_USER_PASSWORD` серверной `.env`; пароль отдельного тестового администратора — в локальном файле владельца `~/.config/imbc/test-admin-access.md` (0600), вне Git. Права ролей, принятие ответственности, сроки сеанса, лимит пяти попыток, срок кода 10 минут и пауза повторного запроса 60 секунд сохраняются. Производитель открывает `/profile`, администраторы — `/account`, остальные роли — `/catalog`. Каталог, dashboard и профиль производителя администраторам недоступны; интерфейс управления другими аккаунтами ещё не реализован.
+Пароли остаются прежними и обязательными. Начальный пароль seed-аккаунтов хранится в `KEYCLOAK_DEV_USER_PASSWORD` серверной `.env`; пароль отдельного тестового администратора — в локальном файле владельца `~/.config/imbc/test-admin-access.md` (0600), вне Git. Права ролей, принятие ответственности, сроки сеанса, лимит пяти попыток, срок кода 10 минут и пауза повторного запроса 60 секунд сохраняются. Стартовая страница после входа: оператор, наблюдатель и директор — `/dashboard` (OPR-31), SME — `/reviews`, производитель — `/profile`, администраторы — `/admin/accounts` (стартовые страницы SME и администратора — решение для демо, спецификация их не задаёт). Каталог, dashboard и профиль производителя администраторам недоступны. Администратор видит список организаций и аккаунтов только для чтения; приглашения, блокировки и других действий с аккаунтами в интерфейсе пока нет.
 
 Исключение включается явными серверными настройками. Формат примера ниже требует подстановки настоящих UUID из `user_accounts`; email вместо UUID не подходит:
 
 ```dotenv
 DEPLOYMENT_ENV=development
 DEV_FIXED_OTP_ENABLED=true
-DEV_FIXED_OTP_ACCOUNTS='[{"id":"<UUID expert@imbc.local>","role":"expert"},{"id":"<UUID admin@imbc.local>","role":"administrator"},{"id":"<UUID director@imbc.local>","role":"director"},{"id":"<UUID operator@operator.local>","role":"operator"},{"id":"<UUID spectator@spectator.local>","role":"spectator"},{"id":"<UUID manufacturer@demo.local>","role":"manufacturer"}]'
+DEV_FIXED_OTP_ACCOUNTS='[{"id":"<UUID expert@imbc.local>","role":"expert"},{"id":"<UUID admin@imbc.local>","role":"administrator"},{"id":"<UUID director@imbc.local>","role":"director"},{"id":"<UUID operator@operator.local>","role":"operator"},{"id":"<UUID observer@observer.local>","role":"observer"},{"id":"<UUID manufacturer@demo.local>","role":"manufacturer"}]'
 DEV_FIXED_OTP_USER_ID=<UUID test-admin@imbc.local>
 ```
+
+До релиза contract (см. [переход](#переход-на-спецификацию-v13)) прежняя пара `"role":"spectator"` в серверной `.env` принимается как `"role":"observer"`: UUID демо-наблюдателя при переименовании не меняется, поэтому `.env` после выката v1.3 править не нужно. Заменить `spectator` на `observer` нужно до релиза contract: после него прежнее имя роли отклоняется при старте.
 
 По умолчанию tier — `production`, флаг выключен, `DEV_FIXED_OTP_ACCOUNTS=[]`. Список содержит объекты строго с полями `id` и `role`. Неверный JSON, недопустимые UUID/роли, повтор UUID и совпадение UUID из списка с legacy-настройкой отклоняются при старте даже при выключенном флаге. Включённый флаг требует `development` и хотя бы одну запись в списке или legacy UUID. `DEV_FIXED_OTP_USER_ID` остаётся совместимым способом разрешить отдельного администратора и не даёт исключения другим ролям. `NODE_ENV=production` означает оптимизированную сборку и не заменяет явный deployment tier.
 
