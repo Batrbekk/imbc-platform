@@ -79,7 +79,7 @@ describe("кабинет SME: отметки и запросы", () => {
     expect(state().siteSurveyRequests.find((r) => r.id === "ssr-03")!.status).toBe("done");
   });
 
-  it("сеанс не из демо-данных: его адрес не попадает в записи кабинета", async () => {
+  it("сеанс не из демо-данных: его адрес не попадает в хранилище, журнал включительно", async () => {
     const email = "someone@real.example";
     const first = renderCabinet("/proto/expert/profiles/p04?tab=notes", { role: "expert", email });
     const { user, state } = first;
@@ -93,12 +93,9 @@ describe("кабинет SME: отметки и запросы", () => {
     );
     expect(second.state().worksWithMarks.find((m) => m.id === "ww-02")!.decidedBy).toBe("acc-expert");
 
-    // Записи модуля (всё, кроме actor событий журнала — его исправляет общий слой) без адреса сеанса.
-    const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY)!) as Record<string, unknown> & {
-      audit: { actor: unknown }[];
-    };
-    const { audit, ...records } = stored;
-    expect(JSON.stringify(records)).not.toContain(email);
-    expect(JSON.stringify(audit.map((event) => ({ ...event, actor: null })))).not.toContain(email);
+    // Всё сохранённое состояние, журнал включительно: адреса сеанса нет нигде.
+    const stored = window.localStorage.getItem(STORAGE_KEY)!;
+    expect(stored).toContain("Заметка с чужого сеанса");
+    expect(stored).not.toContain(email);
   });
 });

@@ -3,6 +3,8 @@ import { dueDiligence as SOURCE_DD, ddResultOf } from "@/prototype/data/due-dili
 import { externalChecks as SOURCE_CHECKS } from "@/prototype/data/external-checks";
 import { newId } from "@/prototype/store";
 
+import { simText } from "./dossier/helpers";
+
 /**
  * Имитация запуска проверок: Adata не вызывается никогда. Ответ «источника» — исходные демо-данные
  * этого профиля (`data/due-diligence.ts`, `data/external-checks.ts`), то есть каталог IMBC-10
@@ -50,15 +52,15 @@ export function runExternalChecks(draft: ProtoState, profileId: string, at: stri
     {
       connector: "e_ondiris",
       status: "ok",
-      result: registry ? `${registry.entryNumber} · ${registry.inclusionDate}` : "Записей в реестре нет",
-      source: "Локальная копия e-Ondiris",
+      result: registry ? `${registry.entryNumber} · ${registry.inclusionDate}` : simText("sim.eondiris_none"),
+      source: simText("simSource.e_ondiris"),
       testData: false,
     },
     {
       connector: "legal_registry",
       status: "ok",
-      result: "Действующее юрлицо",
-      source: "Реестр юрлиц (заглушка)",
+      result: simText("sim.legal_active"),
+      source: simText("simSource.legal_registry"),
       testData: true,
     },
     unavailable("accounting")
@@ -66,14 +68,14 @@ export function runExternalChecks(draft: ProtoState, profileId: string, at: stri
           connector: "accounting",
           status: "unavailable",
           result: "—",
-          source: "Учётный сервис (заглушка)",
+          source: simText("simSource.accounting"),
           testData: true,
         }
       : {
           connector: "accounting",
           status: "ok",
-          result: "Отчётность сдана",
-          source: "Учётный сервис (заглушка)",
+          result: simText("sim.accounting_ok"),
+          source: simText("simSource.accounting"),
           testData: true,
         },
   ];

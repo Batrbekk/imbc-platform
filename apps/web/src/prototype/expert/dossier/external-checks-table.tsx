@@ -7,6 +7,7 @@ import type { ExternalCheck } from "@/prototype/data";
 import { useDictionary } from "@/prototype/i18n";
 import { useCommonTexts } from "@/prototype/labels";
 
+import { SIM_PREFIX, type SimTextKey } from "./helpers";
 import { dossierTexts } from "./texts";
 
 export function ExternalChecksTable({ checks }: { checks: ExternalCheck[] }) {
@@ -15,10 +16,15 @@ export function ExternalChecksTable({ checks }: { checks: ExternalCheck[] }) {
   const format = useFormat();
   if (checks.length === 0) return <p className="text-sm text-muted-foreground">{t("checksEmpty")}</p>;
   const sorted = [...checks].sort((a, b) => b.at.localeCompare(a.at));
+  // Тексты имитации — ключи словаря с префиксом (`simText`), остальное — данные как есть.
+  const text = (value: string) => {
+    const key = value.startsWith(SIM_PREFIX) ? value.slice(SIM_PREFIX.length) : null;
+    return key && key in dossierTexts.en ? t(key as SimTextKey) : value;
+  };
   const result = (c: ExternalCheck) =>
     c.connector === "adata" && (c.result === "green" || c.result === "amber" || c.result === "red")
       ? common(`dd.${c.result}`)
-      : c.result;
+      : text(c.result);
   return (
     <div className="overflow-x-auto rounded-lg border">
       <Table>
@@ -42,7 +48,7 @@ export function ExternalChecksTable({ checks }: { checks: ExternalCheck[] }) {
               <TableCell className="whitespace-normal">
                 {result(c)} {c.testData && <Badge variant="secondary">{t("testData")}</Badge>}
               </TableCell>
-              <TableCell className="whitespace-normal">{c.source}</TableCell>
+              <TableCell className="whitespace-normal">{text(c.source)}</TableCell>
               <TableCell className="text-xs">{format.dateTime(c.at)}</TableCell>
             </TableRow>
           ))}

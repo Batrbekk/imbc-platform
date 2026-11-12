@@ -22,3 +22,29 @@ export function worksWithOrganizations(state: ProtoState, profileId: string): st
   }
   return [...latest].filter(([, value]) => value).map(([org]) => org);
 }
+
+/**
+ * Тексты имитации внешних проверок хранятся ключом словаря частей досье с префиксом и переводятся
+ * при показе (`ExternalChecksTable`); значение без префикса — данные, показываются как есть.
+ */
+export const SIM_PREFIX = "expert:";
+export type SimTextKey =
+  | "sim.legal_active"
+  | "sim.accounting_ok"
+  | "sim.eondiris_none"
+  | "simSource.legal_registry"
+  | "simSource.accounting"
+  | "simSource.e_ondiris";
+export const simText = (key: SimTextKey) => `${SIM_PREFIX}${key}`;
+
+/** Следующая плановая проверка — через квартал (IMBC-07); нет такого дня в месяце — последний день месяца. */
+export function nextCheckDate(checkedAt: string): string {
+  const date = new Date(checkedAt);
+  // Дата проверки по календарю Алматы (UTC+5), как её видит SME.
+  const local = new Date(date.getTime() + 5 * 3_600_000);
+  const year = local.getUTCFullYear();
+  const month = local.getUTCMonth() + 3;
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const target = new Date(Date.UTC(year, month, Math.min(local.getUTCDate(), lastDay)));
+  return target.toISOString().slice(0, 10);
+}

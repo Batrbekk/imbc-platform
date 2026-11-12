@@ -6,7 +6,7 @@
 export { DossierSections, SectionReviewStatus } from "./dossier-sections";
 export { DueDiligenceView, EnhancedDueDiligenceCard } from "./due-diligence-view";
 export { ExternalChecksTable } from "./external-checks-table";
-export { referenceLabel, surveyCounts, worksWithOrganizations } from "./helpers";
+export { nextCheckDate, referenceLabel, surveyCounts, worksWithOrganizations } from "./helpers";
 export { ImbcNotesList } from "./notes-list";
 export { OperatorActivity } from "./operator-activity";
 export { type ReviewItemRef, SectionView } from "./section-view";

@@ -39,13 +39,13 @@ export function reviewItems(profile: ProtoProfile, section: ProfileSection): (Ce
   return [];
 }
 
-/** Обязательные типы сертификатов из справочника (MAN-34, ADM-09). */
-export function mandatoryCertificateTypes(state: ProtoState): string[] {
+/** Обязательные типы сертификатов из справочника (MAN-34, ADM-09): `code` и подпись. */
+export function mandatoryCertificateTypes(state: ProtoState): { code: string; label: string }[] {
   return (
     state.referenceLists
       .find((l) => l.id === "certificate_types")
       ?.items.filter((i) => i.mandatory && !i.retired)
-      .map((i) => i.label) ?? []
+      .map((i) => ({ code: i.code, label: i.label })) ?? []
   );
 }
 
@@ -60,7 +60,8 @@ export function verifyBlockers(state: ProtoState, profile: ProtoProfile, section
   if (section === "certificates") {
     const certificates = valuesUnderReview(profile, "certificates");
     const missing = mandatoryCertificateTypes(state).some(
-      (type) => !certificates.some((c) => c.type === type && c.status === "verified"),
+      // В сертификате хранится код справочника (`Certificate.type`).
+      (type) => !certificates.some((c) => c.type === type.code && c.status === "verified"),
     );
     if (missing) blockers.push("mandatory");
   }
@@ -84,3 +85,10 @@ export function resultOf(profile: ProtoProfile): "verified" | "returned" {
 
 /** Дата поступления (REV-04): отправка на проверку; у Draft — регистрация. */
 export const receivedAt = (p: ProtoProfile) => p.submittedAt ?? p.registeredAt;
+
+/**
+ * Круг ожидающих изменений, в котором не осталось изменённой секции без решения: такой профиль не должен
+ * висеть в очереди — досье предлагает закрыть круг (REV-08).
+ */
+export const changesRoundStuck = (profile: ProtoProfile) =>
+  reviewMode(profile) === "changes" && sectionsToDecide(profile).length === 0;
