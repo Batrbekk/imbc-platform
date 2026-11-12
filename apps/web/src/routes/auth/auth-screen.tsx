@@ -22,7 +22,9 @@ export function AuthScreen({
     <div className={cn("flex w-full flex-col gap-6", wide ? "max-w-md" : "max-w-sm")}>
       <div className="flex flex-col items-center gap-1 text-center">
         <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-        {description && <p className="break-words text-sm text-balance text-muted-foreground">{description}</p>}
+        {description && (
+          <p className="max-w-full text-sm text-balance wrap-anywhere text-muted-foreground">{description}</p>
+        )}
       </div>
       <div className="space-y-4">{children}</div>
       {footer && (

@@ -125,6 +125,10 @@ describe("рамка экранов входа: две колонки (NFR-15, L
       // Название платформы — только имя ссылки; ни рядом с логотипом, ни подписью «IMBC» его нет.
       expect(screen.queryByText(messages.common.appName)).toBeNull();
       expect(screen.queryByText("IMBC")).toBeNull();
+      // Пояснение под заголовком (в теме там бывает длинный адрес почты) переносится в любом месте и не шире колонки.
+      const description = screen.getByText(messages.login.subtitle);
+      expect(description.classList.contains("wrap-anywhere")).toBe(true);
+      expect(description.classList.contains("max-w-full")).toBe(true);
       cleanup();
     }
   });
@@ -136,6 +140,8 @@ describe("рамка экранов входа: две колонки (NFR-15, L
     expect(title.tagName).not.toBe("H1");
     const panel = title.closest("aside");
     expect(panel).toBeTruthy();
+    // Ориентир назван заголовком панели.
+    expect(screen.getByRole("complementary", { name: ru.authLayout.title })).toBe(panel);
     for (const text of [ru.authLayout.description, ru.authLayout.security, ru.authLayout.footer]) {
       expect(panel?.contains(screen.getByText(text))).toBe(true);
     }
