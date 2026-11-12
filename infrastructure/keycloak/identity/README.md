@@ -23,7 +23,7 @@ Supported configured screens: username/password login, separate username/passwor
 
 In development only, `?page=login-reset-password.ftl&locale=kk` (or `ru`, `en`) selects a preview using Keycloakify fixtures. No preview fixtures enter the production bundle. Repeat with the relevant page identifier for other screens.
 
-The two-column composition follows the official shadcn block `login-02` (markup only; the block was not added). Button, Input, Label, Card, Alert, Checkbox, Separator, DropdownMenu and Select were installed from the official `new-york` registry with the shadcn CLI; the frame no longer uses Card.
+The two-column composition follows the official shadcn block `login-02` (markup only; the block was not added). Button, Input, Label, Alert, Checkbox, Separator, DropdownMenu and Select were installed from the official `new-york` registry with the shadcn CLI.
 
 Kazakh server messages come from the native Keycloak 26.4.0 community bundle (Apache-2.0): https://github.com/keycloak/keycloak/blob/26.4.0/themes/src/main/resources-community/theme/base/login/messages/messages_kk.properties. Keycloakify supplies compatible message keys under MIT. The IMBC interface has dedicated Kazakh, Russian and English copy.
 

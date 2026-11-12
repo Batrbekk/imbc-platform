@@ -63,21 +63,21 @@ function Frame({ kc, t, locale, title, hint, footer, children }: { kc: KcContext
   return <div className="grid min-h-svh bg-background lg:grid-cols-2">
     <div className="flex min-w-0 flex-col gap-4 p-6 md:p-10">
       <header className="flex items-center justify-between gap-4">
-        <a href="/" className="inline-flex rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" aria-label={t.platform}><span className="inline-flex shrink-0 rounded-md bg-sidebar px-2.5 py-1.5"><Logo className="h-6" /></span></a>
+        <a href="/login" className="inline-flex rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" aria-label={t.platform}><span className="inline-flex shrink-0 rounded-md bg-sidebar px-2.5 py-1.5"><Logo className="h-6" /></span></a>
         {languages.length > 1 && <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="sm" aria-label={t.language}><Languages className="size-4" />{locale.toUpperCase()}</Button></DropdownMenuTrigger><DropdownMenuContent align="end">{languages.map(language => <DropdownMenuItem key={language.languageTag} asChild><a href={language.url} lang={language.languageTag} aria-current={language.languageTag === locale ? "true" : undefined}>{localeNames[language.languageTag as Locale]}</a></DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>}
       </header>
       <main className="flex flex-1 items-center justify-center py-4">
         <div className="flex w-full max-w-sm flex-col gap-6">
-          <div className="flex flex-col items-center gap-1 text-center"><h1 className="text-2xl font-semibold tracking-tight">{title}</h1>{hint && <p className="break-words text-sm text-balance text-muted-foreground">{hint}</p>}</div>
+          <div className="flex flex-col items-center gap-1 text-center"><h1 className="text-2xl font-semibold tracking-tight">{title}</h1>{hint && <p className="max-w-full text-sm text-balance wrap-anywhere text-muted-foreground">{hint}</p>}</div>
           <div className="space-y-4">{children}</div>
           {footer && <p className="flex flex-wrap justify-center gap-x-1 gap-y-1 text-center text-sm text-muted-foreground">{footer}</p>}
         </div>
       </main>
     </div>
-    {/* Below lg the panel is display: none, so screen readers skip it too. A long form scrolls; the panel stays. */}
-    <aside className="hidden bg-sidebar p-10 text-sidebar-foreground lg:sticky lg:top-0 lg:flex lg:h-svh lg:flex-col">
+    {/* Below lg the panel is display: none, so screen readers skip it too. A long form scrolls; the panel stays, and on a low window the panel scrolls itself. */}
+    <aside aria-labelledby="auth-registry-title" className="hidden bg-sidebar p-10 text-sidebar-foreground lg:sticky lg:top-0 lg:flex lg:h-svh lg:flex-col lg:overflow-y-auto">
       <div className="flex max-w-lg flex-1 flex-col justify-center gap-6">
-        <h2 className="text-4xl font-semibold leading-tight tracking-tight">{t.registry}</h2>
+        <h2 id="auth-registry-title" className="text-4xl font-semibold leading-tight tracking-tight">{t.registry}</h2>
         <p className="max-w-md text-base leading-relaxed text-sidebar-foreground/80">{t.description}</p>
         <div className="flex max-w-md items-start gap-3 border-t border-sidebar-border pt-6 text-sm leading-relaxed text-sidebar-foreground/80"><ShieldCheck className="mt-0.5 size-5 shrink-0 text-sidebar-primary" aria-hidden="true" /><p>{t.security}</p></div>
       </div>

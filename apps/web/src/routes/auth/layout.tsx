@@ -30,10 +30,16 @@ export function AuthLayout() {
           <Outlet />
         </main>
       </div>
-      {/* Ниже lg панель скрыта display: none — и для программ чтения тоже. Длинная форма прокручивается, панель стоит. */}
-      <aside className="hidden bg-sidebar p-10 text-sidebar-foreground lg:sticky lg:top-0 lg:flex lg:h-svh lg:flex-col">
+      {/* Ниже lg панель скрыта display: none — и для программ чтения тоже. Длинная форма прокручивается, панель стоит;
+          на низком окне прокручивается сама панель. */}
+      <aside
+        aria-labelledby="auth-registry-title"
+        className="hidden bg-sidebar p-10 text-sidebar-foreground lg:sticky lg:top-0 lg:flex lg:h-svh lg:flex-col lg:overflow-y-auto"
+      >
         <div className="flex max-w-lg flex-1 flex-col justify-center gap-6">
-          <h2 className="text-4xl font-semibold leading-tight tracking-tight">{auth("title")}</h2>
+          <h2 id="auth-registry-title" className="text-4xl font-semibold leading-tight tracking-tight">
+            {auth("title")}
+          </h2>
           <p className="max-w-md text-base leading-relaxed text-sidebar-foreground/80">{auth("description")}</p>
           <div className="flex max-w-md items-start gap-3 border-t border-sidebar-border pt-6 text-sm leading-relaxed text-sidebar-foreground/80">
             <ShieldCheckIcon className="mt-0.5 size-5 shrink-0 text-sidebar-primary" aria-hidden="true" />
