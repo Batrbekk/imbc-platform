@@ -276,6 +276,8 @@ services:
       dockerfile: infrastructure/docker/web.Dockerfile
       args:
         NODE_VERSION: ${NODE_VERSION:-26}
+        # Прототип кабинетов ролей: только при PROTOTYPE_CABINETS=true (apps/web/src/prototype).
+        VITE_PROTOTYPE_CABINETS: ${PROTOTYPE_CABINETS:-false}
     restart: unless-stopped
     depends_on: [api]
 

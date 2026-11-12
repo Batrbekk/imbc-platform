@@ -1,0 +1,56 @@
+import type { ReactNode } from "react";
+
+import { PageTitle } from "@/components/app/page-title";
+
+import { useCommonTexts } from "../labels";
+import { resetProto } from "../store";
+import { PrototypeBadge, Release2Badge } from "./badges";
+import { ConfirmAction } from "./confirm-action";
+
+/**
+ * Каркас страницы прототипа: один `PageTitle`, заголовок, бейдж «Прототип» с пояснением,
+ * бейдж «Release 2» по флагу, свои действия и «Сбросить демо-данные». Каждый экран модуля — в нём.
+ */
+export function ProtoPage({
+  title,
+  description,
+  actions,
+  release2 = false,
+  children,
+}: {
+  title: string;
+  description?: ReactNode;
+  actions?: ReactNode;
+  release2?: boolean;
+  children: ReactNode;
+}) {
+  const t = useCommonTexts();
+  return (
+    <div className="mx-auto flex max-w-7xl flex-col gap-4">
+      <PageTitle title={title} />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-col gap-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+            <PrototypeBadge />
+            {release2 && <Release2Badge />}
+          </div>
+          <p className="text-sm text-muted-foreground">{t("prototypeHint")}</p>
+          {description && <div className="text-sm text-muted-foreground">{description}</div>}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {actions}
+          <ConfirmAction
+            variant="outline"
+            label={t("reset")}
+            title={t("resetTitle")}
+            description={t("resetDescription")}
+            confirmLabel={t("reset")}
+            onConfirm={resetProto}
+          />
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}

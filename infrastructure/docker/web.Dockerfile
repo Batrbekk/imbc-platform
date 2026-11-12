@@ -17,6 +17,10 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm-store \
 COPY tsconfig.base.json turbo.json ./
 COPY packages/contracts packages/contracts
 COPY apps/web apps/web
+# Кабинеты ролей — прототип интерфейса (GEN-08, NFR-15). Vite читает флаг при сборке; без "true"
+# в dist нет ни меню, ни маршрутов, ни кода прототипа. Объявлен здесь, чтобы не сбивать кэш установки.
+ARG VITE_PROTOTYPE_CABINETS=false
+ENV VITE_PROTOTYPE_CABINETS=${VITE_PROTOTYPE_CABINETS}
 RUN pnpm --filter @imbc/contracts build && pnpm --filter @imbc/web build
 
 FROM ${NGINX_IMAGE} AS runtime

@@ -34,6 +34,12 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # The dev stand shows the role-cabinet prototype (apps/web/src/prototype); PROTOTYPE_CABINETS=false turns it off.
+  web:
+    build:
+      args:
+        VITE_PROTOTYPE_CABINETS: ${PROTOTYPE_CABINETS:-true}
+
   # Caddy is the external ingress; diagnostic consoles are reachable by SSH tunnel.
   nginx:
     ports: !override

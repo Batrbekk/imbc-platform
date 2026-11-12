@@ -54,7 +54,13 @@
 
 ## Browser storage
 
-- `sessionStorage` holds only: the reload flags `imbc:startup-reload` and `imbc:lazy-reload` and the trial key `imbc:storage-probe` (`src/lib/reload-guard.ts`), and the scroll positions of React Router's `ScrollRestoration` (`react-router-scroll-positions`). The application stores nothing else there and nothing in `localStorage`: data of a signed-in user must not outlive the session in the browser. The language is the `NEXT_LOCALE` cookie.
+- `sessionStorage` holds only: the reload flags `imbc:startup-reload` and `imbc:lazy-reload` and the trial key `imbc:storage-probe` (`src/lib/reload-guard.ts`), and the scroll positions of React Router's `ScrollRestoration` (`react-router-scroll-positions`). The application stores nothing else there and nothing in `localStorage`: data of a signed-in user must not outlive the session in the browser. The language is the `NEXT_LOCALE` cookie. The one exception is the role-cabinet prototype below: its fictional demo state lives in `localStorage["imbc-prototype-v1"]`, only in a build with the prototype flag.
+
+## Role-cabinet prototype (`src/prototype`)
+
+- A demo layer, not product code: each role's cabinet under `/proto/<role>/<screen>` with fictional data in the browser; no `/api/v1` calls, only the session (`useMe`). It is built only with `VITE_PROTOTYPE_CABINETS=true` (on for the Azure dev stand in `compose.azure.yaml`, `PROTOTYPE_CABINETS` for the local stand); without it `dist` has no prototype code, menu group or route.
+- Code outside `src/prototype` reaches it only through `import()` behind the literal `import.meta.env.VITE_PROTOTYPE_CABINETS === "true"` at the call site (`router.tsx`, `app-shell.tsx`); a static import or the `PROTOTYPE` constant there would ship the chunks (`test/prototype-off.test.tsx`).
+- The contract for role modules — registry, store, data, shared components, dictionary and test helper — is `src/prototype/README.md`. A role module changes only `src/prototype/<role>/**` and `test/prototype/<role>/**`. Tests under `test/prototype/**` run in the vitest project `prototype` with the flag on; the rest run without it.
 
 ## Local development
 

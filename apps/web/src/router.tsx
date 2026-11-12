@@ -93,6 +93,14 @@ export const routes: RouteObject[] = [
             handle: { title: "nav.profile" } satisfies AppRouteHandle,
             lazy: lazyPage(() => import("@/routes/app/profile"), (m) => m.ProfilePage),
           },
+          // Прототип кабинетов ролей (GEN-08, NFR-15): только в сборке с VITE_PROTOTYPE_CABINETS=true.
+          // Без флага ветки нет, и `/proto/...` — «не найдено»; шлюз роли — в `prototype/gate.tsx`.
+          // Условие — литерал здесь, а не PROTOTYPE из prototype/flag.ts: сборщик не выпускает чанк
+          // import() только из ветки, мёртвой в этом же модуле; с импортированной константой чанки
+          // прототипа оставались в dist.
+          ...(import.meta.env.VITE_PROTOTYPE_CABINETS === "true"
+            ? [{ path: "proto/:role/*", lazy: lazyPage(() => import("@/prototype/gate"), (m) => m.PrototypeGate) }]
+            : []),
         ],
       },
       { path: "*", element: <NotFoundPage /> },

@@ -8,7 +8,7 @@ import {
   UserRoundIcon,
   UsersIcon,
 } from "lucide-react";
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Link, Outlet, useLocation, useMatches, useNavigate } from "react-router";
 import { useTranslations } from "use-intl";
 
@@ -33,6 +33,15 @@ import {
 } from "@/components/ui/sidebar";
 import { ApiError } from "@/lib/api";
 import { authDestination, useLogout, useMe } from "@/lib/session";
+
+/**
+ * Группа «Прототип» в меню (GEN-08, NFR-15): модуль загружается только в сборке с
+ * VITE_PROTOTYPE_CABINETS=true; без флага её кода в сборке нет. Условие — литерал, как в router.tsx.
+ */
+const PrototypeMenu =
+  import.meta.env.VITE_PROTOTYPE_CABINETS === "true"
+    ? lazy(() => import("@/prototype/menu").then((m) => ({ default: m.PrototypeMenu })))
+    : null;
 
 /** `handle` рабочего маршрута: ключ заголовка вкладки, пока страница ещё не показана. */
 export interface AppRouteHandle {
@@ -147,6 +156,11 @@ export function AppShell() {
               ))}
             </SidebarMenu>
           </SidebarGroup>
+          {PrototypeMenu && (
+            <Suspense fallback={null}>
+              <PrototypeMenu role={role} />
+            </Suspense>
+          )}
         </SidebarContent>
         <SidebarFooter>
           {logout.isError && (
