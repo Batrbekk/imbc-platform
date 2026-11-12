@@ -103,8 +103,8 @@ describe("общие компоненты прототипа", () => {
       </>,
       "kk",
     );
-    expect(screen.getByText("Verified")).toBeTruthy();
+    expect(screen.getByText("Верификацияланды")).toBeTruthy();
     expect(screen.getByText("Күтудегі өзгерістер")).toBeTruthy();
-    expect(screen.getByText("Amber")).toBeTruthy();
+    expect(screen.getByText("Сары")).toBeTruthy();
   });
 });

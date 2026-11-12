@@ -2,6 +2,7 @@
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { PROTOTYPE_RELOAD } from "@/prototype/boundary";
 import { STORAGE_KEY } from "@/prototype/store";
 
 import en from "../../messages/en.json";
@@ -30,6 +31,13 @@ describe("модуль роли в каркасе прототипа", () => {
     expect(links.indexOf("Notes (example)")).toBeGreaterThan(links.indexOf(en.nav.account));
     expect(screen.getByRole("link", { name: "Notes (example)" }).hasAttribute("data-active")).toBe(true);
     expect(apiV1Calls(api)).toEqual([]);
+  });
+
+  it("загруженное меню снимает флаг перезагрузки из-за чанка прототипа", async () => {
+    window.sessionStorage.setItem(PROTOTYPE_RELOAD, "1");
+    renderCabinet("/proto/operator/notes", { role: "operator" });
+    expect(await screen.findByRole("link", { name: "Notes (example)" })).toBeTruthy();
+    await waitFor(() => expect(window.sessionStorage.getItem(PROTOTYPE_RELOAD)).toBeNull());
   });
 
   it("оператор видит заметки только своей организации (GEN-12)", async () => {
