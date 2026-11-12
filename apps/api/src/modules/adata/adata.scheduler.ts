@@ -17,15 +17,25 @@ import { QUEUES, type AdataPrefillJob } from '../../jobs/queues.js';
 
 export type AdataReadOrigin = 'password_set' | 'sign_in';
 
-type QueueDb = { executeSql(text: string, values?: unknown[]): Promise<{ rows: unknown[] }> };
+/** Соединение транзакции для pg-boss (`send(..., { db })`): задание фиксируется вместе с записями. */
+export type QueueDb = { executeSql(text: string, values?: unknown[]): Promise<{ rows: unknown[] }> };
 
 /** Конечные состояния, в которых запроса к Adata не было: попытку можно поставить снова. */
 const NOT_SENT = ['not_configured', 'quota_exhausted'] as const;
 
 /** Код SQLSTATE из ошибки pg или из её обёртки Drizzle. */
-function sqlState(error: unknown): unknown {
+export function sqlState(error: unknown): unknown {
   const e = error as { code?: unknown; cause?: { code?: unknown } } | null;
   return e?.code ?? e?.cause?.code;
+}
+
+/**
+ * Вход и опрос событий не ждут чужую открытую транзакцию на строках аккаунта и профиля: отказ — warn
+ * у вызывающего. Первые операторы транзакции, в которой ставится чтение.
+ */
+export async function boundLockWaits(tx: Database): Promise<void> {
+  await tx.execute(sql`set local lock_timeout = '2s'`);
+  await tx.execute(sql`set local statement_timeout = '5s'`);
 }
 
 /**
@@ -48,7 +58,10 @@ export class AdataScheduler {
     origin: AdataReadOrigin,
   ): Promise<'scheduled' | 'requeued' | 'skipped'> {
     try {
-      return await withQueueTransaction(this.pool, (tx, queueDb) => this.request(tx, queueDb, accountId, origin));
+      return await withQueueTransaction(this.pool, async (tx, queueDb) => {
+        await boundLockWaits(tx);
+        return this.requestInTransaction(tx, queueDb, accountId, origin);
+      });
     } catch (error) {
       // Запасная граница — частичный уникальный индекс попытки profile_created: гонка кончается skipped.
       if (sqlState(error) === '23505') return 'skipped';
@@ -56,15 +69,16 @@ export class AdataScheduler {
     }
   }
 
-  private async request(
+  /**
+   * Попытка и задание в транзакции вызывающего: профиль и его чтение фиксируются вместе (MAN-03, IMBC-07).
+   * Ожидание блокировок вызывающий уже ограничил (`boundLockWaits`); 23505 гонки — его исход.
+   */
+  async requestInTransaction(
     tx: Database,
     queueDb: QueueDb,
     accountId: string,
     origin: AdataReadOrigin,
   ): Promise<'scheduled' | 'requeued' | 'skipped'> {
-    // Вход и опрос событий не ждут чужую открытую транзакцию на строке профиля: отказ — warn у входа.
-    await tx.execute(sql`set local lock_timeout = '2s'`);
-    await tx.execute(sql`set local statement_timeout = '5s'`);
     const [target] = await tx
       .select({
         profileId: manufacturerProfiles.id,

@@ -28,10 +28,10 @@ import {
 import { S3 } from '../infra/infra.module.js';
 import { MailService } from '../mail/mail.service.js';
 import { renderMail } from '../mail/templates.js';
-import { AdataScheduler } from '../modules/adata/adata.scheduler.js';
 import { KeycloakAdminService } from '../modules/auth/keycloak-admin.service.js';
 import { SessionService } from '../modules/auth/session.service.js';
 import { sha256 } from '../modules/auth/crypto.js';
+import { ManufacturerOnboardingService } from '../modules/registration/onboarding.service.js';
 import type { IdentityJob, ScanFileJob, SendNotificationJob } from '../jobs/queues.js';
 import { scanStream } from './clamd.js';
 
@@ -62,7 +62,7 @@ export class JobHandlers {
     private readonly audit: AuditService,
     private readonly keycloak: KeycloakAdminService,
     private readonly sessions: SessionService,
-    private readonly adata: AdataScheduler,
+    private readonly onboarding: ManufacturerOnboardingService,
   ) {}
 
   /** Файл из карантина проверяется ClamAV и только чистым переносится в рабочий бакет (FILE-03). */
@@ -182,7 +182,8 @@ export class JobHandlers {
     const events = await this.keycloak.securityEvents(since);
     const ordered = events.sort((a, b) => a.time - b.time);
     // Revocations must finish even when an unrelated lockout notification cannot be mailed.
-    const passwordSet = new Set<string>();
+    // Самое раннее время установки пароля в пакете — момент появления профиля (registered_at, MAN-03).
+    const passwordSet = new Map<string, Date>();
     for (const event of ordered) {
       if (!event.userId || event.error || !Number.isFinite(event.time)) continue;
       if (isPasswordEvent(event)) {
@@ -191,11 +192,11 @@ export class JobHandlers {
           new Date(event.time),
           `password:${sha256(event.id ?? `${event.type}:${event.userId}:${event.time}`)}`,
         );
-        passwordSet.add(event.userId);
+        if (!passwordSet.has(event.userId)) passwordSet.set(event.userId, new Date(event.time));
       }
     }
-    // Чтение Adata — после всех отзывов пакета и до уведомлений: отзыв не ждёт планировщик.
-    for (const subject of passwordSet) await this.requestAdataRead(subject);
+    // Профиль и чтение Adata — после всех отзывов пакета и до уведомлений: отзыв не ждёт онбординг.
+    for (const [subject, at] of passwordSet) await this.onboardAfterPassword(subject, at);
     for (const event of ordered) {
       if (!event.userId || event.error || !Number.isFinite(event.time)) continue;
       if (event.type !== 'USER_DISABLED_BY_TEMPORARY_LOCKOUT') continue;
@@ -234,19 +235,20 @@ export class JobHandlers {
   }
 
   /**
-   * Установка пароля создаёт профиль (MAN-03, NOT-23) — с ней ставится одно чтение Adata (IMBC-07).
-   * Сбой не мешает отзыву сеансов и письмам NOT-03. Повтор события в пятиминутном окне опроса даёт skipped,
-   * а для попытки в quota_exhausted или not_configured — requeued (новое задание и запись аудита).
+   * Установка пароля создаёт Draft-профиль и принятие NDA (MAN-03, FC-02) и ставит одно чтение Adata
+   * (IMBC-07) — одной транзакцией, без писем (NOT-23). Сбой не мешает отзыву сеансов, письмам NOT-03
+   * и сдвигу курсора: следующий вход или повтор события в пятиминутном окне опроса создаст всё. Повтор
+   * события — existing; попытку в quota_exhausted или not_configured он ставит снова (requeued).
    */
-  private async requestAdataRead(subject: string): Promise<void> {
+  private async onboardAfterPassword(subject: string, at: Date): Promise<void> {
     try {
       const [account] = await this.db
         .select({ id: userAccounts.id })
         .from(userAccounts)
         .where(eq(userAccounts.idpSubject, subject));
-      if (account) await this.adata.requestOnProfileCreated(account.id, 'password_set');
+      if (account) await this.onboarding.onPasswordSet(account.id, 'password_set', at);
     } catch {
-      this.logger.warn('adata: чтение после установки пароля не поставлено');
+      this.logger.warn('onboarding: профиль после установки пароля не создан');
     }
   }
 

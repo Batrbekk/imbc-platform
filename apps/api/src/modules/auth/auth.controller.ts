@@ -7,7 +7,6 @@ import { AuditService } from '../../common/audit.service.js';
 import { parseOrThrow, ProblemException } from '../../common/problem.js';
 import { ENV, type Env } from '../../config/env.js';
 import { MailService } from '../../mail/mail.service.js';
-import { AdataScheduler } from '../adata/adata.scheduler.js';
 import type { AuthContext } from './auth.types.js';
 import { sign, unsign } from './crypto.js';
 import { otpDeliveryFor } from './development-otp.js';
@@ -16,6 +15,7 @@ import { AllowMfaPending, AllowResponsibilityPending, Auth, Public, SignedBackch
 import { OidcService } from './oidc.service.js';
 import { ABSOLUTE_TIMEOUT_MS, OTP_TTL_MS, SessionService, TRUSTED_DEVICE_MS } from './session.service.js';
 import { AuthRateLimitService } from './rate-limit.service.js';
+import { ManufacturerOnboardingService } from '../registration/onboarding.service.js';
 
 const FLOW_COOKIE = 'imbc-oidc-flow';
 const FLOW_TTL_MS = 10 * 60 * 1000;
@@ -43,7 +43,7 @@ export class AuthController {
     private readonly mail: MailService,
     private readonly rates: AuthRateLimitService,
     @Inject(ENV) private readonly env: Env,
-    private readonly adata: AdataScheduler,
+    private readonly onboarding: ManufacturerOnboardingService,
   ) {}
 
   @Public()
@@ -165,12 +165,14 @@ export class AuthController {
       isAccountEvent: true,
       ip: req.ip ?? null,
     });
-    // Пароль задан — профиль есть (MAN-03); если событие Keycloak ещё не пришло, чтение Adata ставит вход
-    // (IMBC-07). Вход от результата не зависит.
+    // Вход означает, что пароль задан: если событие Keycloak ещё не пришло, профиль, принятие NDA и чтение
+    // Adata создаёт вход (MAN-03, FC-02, IMBC-07). Ожидание ограничено lock_timeout; вход от результата не зависит.
     if (current.role === 'manufacturer')
-      await this.adata
-        .requestOnProfileCreated(current.id, 'sign_in')
-        .catch(() => this.logger.warn('adata: чтение при входе не поставлено'));
+      await this.onboarding
+        .onPasswordSet(current.id, 'sign_in', new Date())
+        .catch(() =>
+          this.logger.warn('onboarding: профиль при входе не создан, adata: чтение при входе не поставлено'),
+        );
 
     res.cookie(this.env.SESSION_COOKIE_NAME, session.token, {
       ...this.sessions.cookieBase,

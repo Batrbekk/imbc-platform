@@ -11,6 +11,8 @@ import { ADATA_DEFAULT_TIMING } from '../modules/adata/adata.client.js';
 import { AdataScheduler } from '../modules/adata/adata.scheduler.js';
 import { KeycloakAdminService } from '../modules/auth/keycloak-admin.service.js';
 import { SessionService } from '../modules/auth/session.service.js';
+import { ProfilesService } from '../modules/profiles/profiles.service.js';
+import { ManufacturerOnboardingService } from '../modules/registration/onboarding.service.js';
 import { ADATA_QUEUE_OPTIONS, PLATFORM_TZ, QUEUES, type QueueName, SCHEDULES } from '../jobs/queues.js';
 import { ADATA_CLIENT_FACTORY, ADATA_TIMING, AdataPrefillJob, defaultAdataClientFactory } from './adata-prefill.job.js';
 import { JobHandlers } from './handlers.service.js';
@@ -37,6 +39,8 @@ import { JobHandlers } from './handlers.service.js';
     KeycloakAdminService,
     SessionService,
     AdataScheduler,
+    ProfilesService,
+    ManufacturerOnboardingService,
     AdataPrefillJob,
     { provide: ADATA_CLIENT_FACTORY, useValue: defaultAdataClientFactory },
     { provide: ADATA_TIMING, useValue: ADATA_DEFAULT_TIMING },

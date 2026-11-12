@@ -15,9 +15,11 @@ import { AdataClient, type AdataTiming } from '../src/modules/adata/adata.client
 import { AdataScheduler } from '../src/modules/adata/adata.scheduler.js';
 import { AuthController } from '../src/modules/auth/auth.controller.js';
 import { sign } from '../src/modules/auth/crypto.js';
+import { IdentityProvisioningService } from '../src/modules/auth/identity-provisioning.service.js';
 import { AuthRateLimitService } from '../src/modules/auth/rate-limit.service.js';
 import { SessionService } from '../src/modules/auth/session.service.js';
 import { ProfilesService } from '../src/modules/profiles/profiles.service.js';
+import { ManufacturerOnboardingService } from '../src/modules/registration/onboarding.service.js';
 import { RegistrationController } from '../src/modules/registration/registration.controller.js';
 import { AdataPrefillJob } from '../src/worker/adata-prefill.job.js';
 import { JobHandlers } from '../src/worker/handlers.service.js';
@@ -53,6 +55,7 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
   let sessions: SessionService;
   let rates: AuthRateLimitService;
   let scheduler: AdataScheduler;
+  let onboarding: ManufacturerOnboardingService;
 
   beforeAll(async () => {
     pool = openTestPool();
@@ -69,6 +72,9 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     sessions = new SessionService(db, env);
     rates = new AuthRateLimitService(db);
     scheduler = new AdataScheduler(pool, boss, audit);
+    onboarding = new ManufacturerOnboardingService(pool, new ProfilesService(db), scheduler, audit);
+    // Регистрация принимает текущую версию NDA (MAN-01, FC-02).
+    await db.insert(schema.ndaVersion).values({ versionNumber: 1, body: 'NDA (тест)', isCurrent: true });
   }, 60000);
 
   afterAll(async () => {
@@ -191,16 +197,14 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     const keycloak = { createUser: vi.fn(async () => subject), deleteUser: vi.fn(), sendPasswordEmail: vi.fn() };
     return new RegistrationController(
       db,
-      pool,
       boss,
-      keycloak as never,
+      new IdentityProvisioningService(pool, boss, keycloak as never),
       new AuditService(db),
-      new ProfilesService(db),
       rates,
     );
   }
 
-  function passwordEvents(subject: string, adata: Pick<AdataScheduler, 'requestOnProfileCreated'> = scheduler) {
+  function passwordEvents(subject: string, service: Pick<ManufacturerOnboardingService, 'onPasswordSet'> = onboarding) {
     return new JobHandlers(
       db,
       {} as never,
@@ -219,14 +223,14 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
         ],
       } as never,
       sessions,
-      adata as AdataScheduler,
+      service as ManufacturerOnboardingService,
     );
   }
 
   /** OIDC callback с заглушкой обмена кода; ответ — только 302. */
   async function signIn(
     account: typeof schema.userAccounts.$inferSelect,
-    adata: Pick<AdataScheduler, 'requestOnProfileCreated'> = scheduler,
+    service: Pick<ManufacturerOnboardingService, 'onPasswordSet'> = onboarding,
   ) {
     const oidc = {
       exchange: vi.fn(async () => ({
@@ -245,7 +249,7 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
       {} as never,
       rates,
       env,
-      adata as AdataScheduler,
+      service as ManufacturerOnboardingService,
     );
     const flow = sign({ v: 'verifier', s: 'state', r: '/profile', exp: Date.now() + 60000 }, env.SESSION_SECRET);
     const req = {
@@ -316,16 +320,24 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
   it('регистрация без установки пароля не ставит задание и не вызывает Adata (IMBC-07, MAN-03)', async () => {
     const bin = validBin();
     const email = `${randomUUID()}@example.invalid`;
-    const body = { bin, companyName: 'Registered only', email, acceptTerms: true, heardAboutUs: null };
+    const body = {
+      bin,
+      companyName: 'Registered only',
+      email,
+      heardAboutUs: 'Выставка',
+      acceptPlatformTerms: true,
+      acceptPersonalData: true,
+      ndaVersion: 1,
+    };
     expect(await registration().register(body, { ip: '127.0.0.31' } as never)).toEqual({
       status: 'password_email_queued',
     });
     await registration().resend({ email }, { ip: '127.0.0.31' } as never);
     const org = await db.query.organizations.findFirst({ where: eq(schema.organizations.bin, bin) });
-    const profile = await db.query.manufacturerProfiles.findFirst({
-      where: eq(schema.manufacturerProfiles.organizationId, org!.id),
-    });
-    expect(profile?.status).toBe('draft');
+    // Профиля нет, пока не задан пароль (MAN-03, NOT-23).
+    expect(
+      await db.query.manufacturerProfiles.findMany({ where: eq(schema.manufacturerProfiles.organizationId, org!.id) }),
+    ).toHaveLength(0);
     expect(
       await db.select().from(schema.externalCheck).where(eq(schema.externalCheck.organizationId, org!.id)),
     ).toHaveLength(0);
@@ -357,10 +369,10 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
   it('сбой планировщика не ломает отзыв сеансов по событию пароля', async () => {
     const m = await manufacturer();
     await db.update(schema.userAccounts).set({ state: 'active' }).where(eq(schema.userAccounts.id, m.account.id));
-    const failing = { requestOnProfileCreated: vi.fn().mockRejectedValue(new Error(`boom ${TOKEN}`)) };
+    const failing = { onPasswordSet: vi.fn().mockRejectedValue(new Error(`boom ${TOKEN}`)) };
     const { error, output } = await captured(() => passwordEvents(m.account.idpSubject!, failing).keycloakEvents());
     expect(error).toBeUndefined();
-    expect(failing.requestOnProfileCreated).toHaveBeenCalledWith(m.account.id, 'password_set');
+    expect(failing.onPasswordSet).toHaveBeenCalledWith(m.account.id, 'password_set', expect.any(Date));
     expect(output).not.toContain(TOKEN);
     const account = await db.query.userAccounts.findFirst({ where: eq(schema.userAccounts.id, m.account.id) });
     expect(account?.authVersion).toBe(m.account.authVersion + 1);
@@ -372,9 +384,9 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     const revoke = vi.spyOn(sessions, 'revokeForPasswordChange');
     revoke.mockImplementation(async (subject) => void order.push(`revoke:${subject}`));
     const adata = {
-      requestOnProfileCreated: vi.fn(async (accountId: string) => {
+      onPasswordSet: vi.fn(async (accountId: string) => {
         order.push(`adata:${accountId}`);
-        return 'skipped' as const;
+        return { profile: 'existing', adata: 'skipped' } as const;
       }),
     };
     const now = Date.now();
@@ -437,19 +449,19 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     expect(await queuedJobs()).toHaveLength(1);
 
     const operator = await manufacturer({ role: 'operator' });
-    const spy = { requestOnProfileCreated: vi.fn() };
+    const spy = { onPasswordSet: vi.fn() };
     expect(await signIn(operator.account, spy)).toBe(
       `/auth/verify?returnTo=${encodeURIComponent(roleHome('operator'))}`,
     );
-    expect(spy.requestOnProfileCreated).not.toHaveBeenCalled();
+    expect(spy.onPasswordSet).not.toHaveBeenCalled();
     expect(await scheduler.requestOnProfileCreated(operator.account.id, 'sign_in')).toBe('skipped');
     expect(await attemptsOf(operator.profileId)).toHaveLength(0);
 
     const other = await manufacturer();
-    const failing = { requestOnProfileCreated: vi.fn().mockRejectedValue(new Error('scheduler down')) };
+    const failing = { onPasswordSet: vi.fn().mockRejectedValue(new Error('scheduler down')) };
     const { value, output } = await captured(() => signIn(other.account, failing));
     expect(value).toBe('/auth/verify?returnTo=%2Fprofile');
-    expect(failing.requestOnProfileCreated).toHaveBeenCalledWith(other.account.id, 'sign_in');
+    expect(failing.onPasswordSet).toHaveBeenCalledWith(other.account.id, 'sign_in', expect.any(Date));
     expect(output).not.toContain('scheduler down');
     expect(await db.query.sessions.findMany({ where: eq(schema.sessions.userId, other.account.id) })).toHaveLength(1);
   });
@@ -654,15 +666,24 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     const bin = validBin();
     const email = `${randomUUID()}@example.invalid`;
     await registration(subject).register(
-      { bin, companyName: 'No token', email, acceptTerms: true, heardAboutUs: null },
+      {
+        bin,
+        companyName: 'No token',
+        email,
+        heardAboutUs: 'Выставка',
+        acceptPlatformTerms: true,
+        acceptPersonalData: true,
+        ndaVersion: 1,
+      },
       { ip: '127.0.0.32' } as never,
     );
     await boss.deleteAllJobs(QUEUES.sendPasswordEmail);
     const account = (await db.query.userAccounts.findFirst({ where: eq(schema.userAccounts.idpSubject, subject) }))!;
+    // Профиль создаёт событие пароля (MAN-03).
+    await passwordEvents(subject).keycloakEvents();
     const profile = (await db.query.manufacturerProfiles.findFirst({
       where: eq(schema.manufacturerProfiles.organizationId, account.organizationId),
     }))!;
-    await passwordEvents(subject).keycloakEvents();
     const { output } = await captured(() => throughQueue(prefillJob({ ADATA_API_TOKEN: undefined })));
     const attempt = await attemptOf(profile.id);
     expect(attempt).toMatchObject({ state: 'not_configured', requestSentAt: null, allowancePeriod: null });

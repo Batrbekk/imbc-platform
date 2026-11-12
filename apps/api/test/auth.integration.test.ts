@@ -16,10 +16,10 @@ import { AuthController } from '../src/modules/auth/auth.controller.js';
 import { randomToken, sha256 } from '../src/modules/auth/crypto.js';
 import * as crypto from '../src/modules/auth/crypto.js';
 import { DEVELOPMENT_OTP_HASH_PREFIX } from '../src/modules/auth/development-otp.js';
+import { IdentityProvisioningService } from '../src/modules/auth/identity-provisioning.service.js';
 import { KeycloakAdminService, KeycloakRequestError } from '../src/modules/auth/keycloak-admin.service.js';
 import { AuthRateLimitService } from '../src/modules/auth/rate-limit.service.js';
 import { SessionService } from '../src/modules/auth/session.service.js';
-import { ProfilesService } from '../src/modules/profiles/profiles.service.js';
 import { RegistrationController } from '../src/modules/registration/registration.controller.js';
 import { JobHandlers } from '../src/worker/handlers.service.js';
 import { migrateThrough, openTestPool, resetDatabase } from './support/database.js';
@@ -52,6 +52,8 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
     await boss.start();
     await boss.createQueue(QUEUES.sendPasswordEmail, { retryLimit: 10, retryDelay: 0 });
     await boss.createQueue(QUEUES.cleanupIdentity);
+    // Регистрация принимает текущую версию NDA (MAN-01, FC-02).
+    await db.insert(schema.ndaVersion).values({ versionNumber: 1, body: 'NDA (тест)', isCurrent: true });
   }, 60000);
 
   afterAll(async () => {
@@ -498,7 +500,7 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
         ],
       } as never,
       sessions,
-      { requestOnProfileCreated: vi.fn().mockResolvedValue('skipped') } as never,
+      { onPasswordSet: vi.fn().mockResolvedValue({ profile: 'skipped', adata: 'skipped' }) } as never,
     );
     await expect(worker.keycloakEvents()).rejects.toThrow('SMTP unavailable');
     expect(await sessions.resolve(old.token)).toBeNull();
@@ -547,11 +549,9 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
   function registration(keycloak: Pick<KeycloakAdminService, 'createUser' | 'deleteUser'>, queue = boss) {
     return new RegistrationController(
       db,
-      pool,
       queue,
-      keycloak as KeycloakAdminService,
+      new IdentityProvisioningService(pool, queue, keycloak as KeycloakAdminService),
       new AuditService(db),
-      new ProfilesService(db),
       rates,
     );
   }
@@ -559,12 +559,14 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
   const registrationBody = (bin = validBin()) => ({
     bin,
     companyName: 'Integration manufacturer',
-    email: `${randomUUID()}@example.invalid`,
-    acceptTerms: true,
-    heardAboutUs: null,
+    email: `${randomUUID()}@stage1.local`,
+    heardAboutUs: 'Выставка',
+    acceptPlatformTerms: true,
+    acceptPersonalData: true,
+    ndaVersion: 1,
   });
 
-  it('commits a draft and durable email job, while SMTP failure remains retryable', async () => {
+  it('commits the organization and the account without a profile, and a durable email job, while SMTP failure remains retryable', async () => {
     const keycloak = {
       createUser: vi.fn(async () => randomUUID()),
       deleteUser: vi.fn(),
@@ -575,13 +577,18 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
       status: 'password_email_queued',
     });
     const user = await db.query.userAccounts.findFirst({ where: eq(schema.userAccounts.email, body.email) });
-    const profile = await db.query.manufacturerProfiles.findFirst({
-      where: eq(schema.manufacturerProfiles.organizationId, user!.organizationId),
-    });
-    expect(profile?.status).toBe('draft');
     expect(
-      await db.query.profileSections.findMany({ where: eq(schema.profileSections.profileId, profile!.id) }),
-    ).toHaveLength(8);
+      await db.query.organizations.findFirst({ where: eq(schema.organizations.id, user!.organizationId) }),
+    ).toMatchObject({
+      type: 'manufacturer',
+      bin: body.bin,
+    });
+    // Профиль появляется, когда задан пароль (MAN-03, NOT-23), не при регистрации.
+    expect(
+      await db.query.manufacturerProfiles.findMany({
+        where: eq(schema.manufacturerProfiles.organizationId, user!.organizationId),
+      }),
+    ).toHaveLength(0);
     const worker = new JobHandlers(
       db,
       {} as never,
@@ -614,7 +621,7 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
     }
   });
 
-  it('rolls back nested draft writes when durable enqueue fails and compensates IdP creation', async () => {
+  it('rolls back account writes when durable enqueue fails and compensates IdP creation', async () => {
     const keycloak = { createUser: vi.fn(async () => randomUUID()), deleteUser: vi.fn().mockResolvedValue(undefined) };
     const body = registrationBody();
     const failedQueue = { send: vi.fn().mockRejectedValue(new Error('queue unavailable')) } as unknown as PgBoss;

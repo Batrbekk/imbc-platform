@@ -10,6 +10,9 @@ import {
   companyPageSchema,
   computeBinCheckDigit,
   dashboardSchema,
+  loginEmailSchema,
+  registrationRequestSchema,
+  registrationTermsSchema,
   normalizeCompanyName,
   POLICY_MATRIX,
   type PolicyMatrix,
@@ -51,6 +54,55 @@ describe('БИН (MAN-02, MIG-05)', () => {
   it('отклоняет не 12 цифр', () => {
     expect(checkBin('12345')).toEqual({ valid: false, reason: 'format' });
     expect(checkBin('12345678901a')).toEqual({ valid: false, reason: 'format' });
+  });
+});
+
+describe('регистрация производителя (MAN-01, FC-02, GEN-01)', () => {
+  const valid = {
+    companyName: 'ТОО «Тест»',
+    bin: '980540000381',
+    email: 'Info@Company.local',
+    heardAboutUs: 'Выставка',
+    acceptPlatformTerms: true,
+    acceptPersonalData: true,
+    ndaVersion: 1,
+  };
+
+  it('регистрация: без любого согласия, без ответа «Как вы узнали», с acceptTerms или password — отклоняется (MAN-01)', () => {
+    expect(registrationRequestSchema.parse(valid)).toEqual({ ...valid, email: 'info@company.local', locale: 'kk' });
+    for (const key of ['acceptPlatformTerms', 'acceptPersonalData', 'ndaVersion', 'heardAboutUs'] as const) {
+      const { [key]: _omitted, ...rest } = valid;
+      expect(registrationRequestSchema.safeParse(rest).success, key).toBe(false);
+    }
+    for (const over of [
+      { acceptPlatformTerms: false },
+      { acceptPersonalData: false },
+      { ndaVersion: 0 },
+      { ndaVersion: 1.5 },
+      { heardAboutUs: '   ' },
+      { heardAboutUs: null },
+      { heardAboutUs: 'x'.repeat(501) },
+      { acceptTerms: true },
+      { password: 'Secret-123' },
+    ])
+      expect(registrationRequestSchema.safeParse({ ...valid, ...over }).success, JSON.stringify(over)).toBe(false);
+    expect(registrationRequestSchema.parse({ ...valid, heardAboutUs: '  Выставка  ' }).heardAboutUs).toBe('Выставка');
+  });
+
+  it('почта логина в нижнем регистре, больше 254 — отклоняется', () => {
+    expect(loginEmailSchema.parse('  Admin@IMBC.Local ')).toBe('admin@imbc.local');
+    const long = `${'a'.repeat(64)}@${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(57)}.local`;
+    expect(long.length).toBeGreaterThan(254);
+    expect(loginEmailSchema.safeParse(long).success).toBe(false);
+    expect(loginEmailSchema.safeParse('not-an-email').success).toBe(false);
+  });
+
+  it('текст условий регистрации — только номер и текст текущей версии NDA (FC-02)', () => {
+    expect(registrationTermsSchema.parse({ nda: { version: 1, body: 'Текст' } })).toEqual({
+      nda: { version: 1, body: 'Текст' },
+    });
+    expect(registrationTermsSchema.safeParse({ nda: { version: 1, body: '' } }).success).toBe(false);
+    expect(registrationTermsSchema.safeParse({ nda: { version: 1, body: 'Текст', id: 'x' } }).success).toBe(false);
   });
 });
 

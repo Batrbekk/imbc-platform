@@ -13,6 +13,7 @@ import { AccountsService } from './modules/admin/accounts.service.js';
 import { AdataScheduler } from './modules/adata/adata.scheduler.js';
 import { AuthController } from './modules/auth/auth.controller.js';
 import { SessionGuard } from './modules/auth/guards.js';
+import { IdentityProvisioningService } from './modules/auth/identity-provisioning.service.js';
 import { KeycloakAdminService } from './modules/auth/keycloak-admin.service.js';
 import { OidcService } from './modules/auth/oidc.service.js';
 import { SessionService } from './modules/auth/session.service.js';
@@ -22,6 +23,7 @@ import { CatalogService } from './modules/catalog/catalog.service.js';
 import { HealthController } from './modules/health/health.controller.js';
 import { ProfilesController } from './modules/profiles/profiles.controller.js';
 import { ProfilesService } from './modules/profiles/profiles.service.js';
+import { ManufacturerOnboardingService } from './modules/registration/onboarding.service.js';
 import { RegistrationController } from './modules/registration/registration.controller.js';
 import { ReviewsController } from './modules/reviews/reviews.controller.js';
 import { ReviewsService } from './modules/reviews/reviews.service.js';
@@ -65,6 +67,8 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     AccountsService,
     MailService,
     AdataScheduler,
+    IdentityProvisioningService,
+    ManufacturerOnboardingService,
     { provide: APP_GUARD, useClass: SessionGuard },
     { provide: APP_FILTER, useClass: ProblemDetailsFilter },
   ],
