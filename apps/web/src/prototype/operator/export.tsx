@@ -40,7 +40,21 @@ export function ExportScreen() {
   const build = useBuildExport();
   const describe = useDescribeFilters();
   const [params, setParams] = useSearchParams();
-  const filters = parseFilters(params);
+  // Текст поиска живёт в поле: адрес React Router меняет в переходе, и поле, читающее значение из
+  // адреса, теряло каретку и буквы. В адрес пишем из поля; извне сменённый адрес (назад, ссылка)
+  // возвращаем в поле — кроме значений, которые записали сами и которые адрес догоняет.
+  const addressQ = params.get("q") ?? "";
+  const [q, setQ] = useState(addressQ);
+  const [seenQ, setSeenQ] = useState(addressQ);
+  const [writtenQ, setWrittenQ] = useState<string[]>([]);
+  if (addressQ !== seenQ) {
+    setSeenQ(addressQ);
+    if (!writtenQ.includes(addressQ)) {
+      setQ(addressQ);
+      setWrittenQ([]);
+    }
+  }
+  const filters = { ...parseFilters(params), q };
   const filtersString = serializeFilters(filters);
   const results = searchProfiles(state, filters);
   const rowCount = results.reduce((n, p) => n + p.sections.products.length, 0);
@@ -100,16 +114,8 @@ export function ExportScreen() {
         });
       },
     );
+    // Собрать файл здесь и есть скачать: одно событие `export.create` на нажатие (AUD-01).
     setBuilt(file);
-    // Скачивание — отдельное событие журнала (AUD-01).
-    update(
-      {
-        action: "export.download",
-        subject: { type: "export", id, label: file.name },
-        summary: localized(texts, "auditDownload", { name: file.name }),
-      },
-      () => {},
-    );
     downloadFile(file.name, file.content, file.format);
   };
 
@@ -124,8 +130,13 @@ export function ExportScreen() {
             <Input
               id="export-q"
               className="sm:w-64"
-              value={filters.q}
-              onChange={(e) => setFilter("q", e.target.value || null)}
+              value={q}
+              onChange={(e) => {
+                const value = e.target.value;
+                setQ(value);
+                setWrittenQ((prev) => [...prev.slice(-50), value]);
+                setFilter("q", value || null);
+              }}
             />
           </div>
           <Choice
