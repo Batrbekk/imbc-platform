@@ -237,7 +237,25 @@
     "observer": "Observer"
   },
   "profile": {
-    "welcome": "Welcome to your manufacturer workspace.",
+    "company": "Company",
+    "bin": "BIN",
+    "status": "Profile status",
+    "statusValue": {
+      "draft": "Draft",
+      "submitted": "Submitted",
+      "under_review": "Under review",
+      "verified": "Verified",
+      "returned": "Returned"
+    },
+    "pendingChanges": "Changes are awaiting IMBC verification",
+    "completeness": "Completeness",
+    "updateStatus": "Update status",
+    "tier": "Tier",
+    "notVerifiedYet": "Appears after verification",
+    "registeredAt": "Registered on",
+    "verifiedAt": "Verified on",
+    "readOnlyHint": "Editing the profile will be available in a later release.",
+    "loadError": "Could not load the profile.",
     "accountHint": "Your account details and sign-in security are available on your account page."
   },
   "notFound": {

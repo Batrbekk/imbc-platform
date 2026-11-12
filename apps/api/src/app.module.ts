@@ -17,6 +17,7 @@ import { AuthRateLimitService } from './modules/auth/rate-limit.service.js';
 import { CatalogController } from './modules/catalog/catalog.controller.js';
 import { CatalogService } from './modules/catalog/catalog.service.js';
 import { HealthController } from './modules/health/health.controller.js';
+import { ProfilesController } from './modules/profiles/profiles.controller.js';
 import { ProfilesService } from './modules/profiles/profiles.service.js';
 import { RegistrationController } from './modules/registration/registration.controller.js';
 
@@ -39,7 +40,7 @@ import { RegistrationController } from './modules/registration/registration.cont
     InfraModule,
     AuditModule,
   ],
-  controllers: [HealthController, AuthController, RegistrationController, CatalogController],
+  controllers: [HealthController, AuthController, RegistrationController, CatalogController, ProfilesController],
   providers: [
     OidcService,
     SessionService,

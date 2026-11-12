@@ -115,7 +115,7 @@ describe("заголовок вкладки", () => {
       },
     });
     renderRoute("/profile", { locale: "ru" });
-    expect(await screen.findByText(ru.profile.welcome)).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: ru.nav.profile })).toBeTruthy();
     expect(titles()).toEqual([`${ru.nav.profile} · ${ru.common.appName}`]);
   });
 

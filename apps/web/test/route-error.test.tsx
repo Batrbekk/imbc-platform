@@ -184,7 +184,7 @@ describe("ошибка маршрута (LANG-02)", () => {
     stubApi({ "GET /api/auth/me": { body: MANUFACTURER } });
     renderRoute("/profile");
 
-    expect(await screen.findByText(kk.profile.welcome)).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: kk.nav.profile })).toBeTruthy();
     await waitFor(() => expect(sessionStorage.getItem(FLAG)).toBeNull());
     expect(reloadApp).not.toHaveBeenCalled();
   });

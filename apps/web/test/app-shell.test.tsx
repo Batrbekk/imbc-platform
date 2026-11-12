@@ -1,5 +1,5 @@
 // Оболочка рабочих страниц: интерфейс прячет недоступное, решает сервер (GEN-08, GEN-10).
-import { can, type Dashboard, ROLES, roleHome } from "@imbc/contracts";
+import { can, type Dashboard, type OwnProfile, ROLES, roleHome } from "@imbc/contracts";
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import { useEffect } from "react";
 import type { NonIndexRouteObject, RouteObject } from "react-router";
@@ -76,8 +76,10 @@ function withCompanyPage(): RouteObject[] {
   ];
 }
 
+/** Свой профиль запрашивает стартовая страница производителя /profile, а не закрытая страница. */
+const OWN_PROFILE = "/api/v1/profiles/own";
 const apiCalls = (api: ReturnType<typeof stubApi>) =>
-  api.mock.calls.map(([url]) => String(url)).filter((url) => url.startsWith("/api/v1/"));
+  api.mock.calls.map(([url]) => String(url)).filter((url) => url.startsWith("/api/v1/") && url !== OWN_PROFILE);
 const DASHBOARD: Dashboard = {
   total: 0,
   byRegion: [],
@@ -89,11 +91,25 @@ const DASHBOARD: Dashboard = {
   generatedAt: "2026-11-11T10:00:00Z",
 };
 
+const OWN_PROFILE_BODY: OwnProfile = {
+  profileId: "00000000-0000-4000-8000-000000000010",
+  organizationName: "ТОО «Тест»",
+  bin: "240100000001",
+  status: "draft",
+  hasPendingChanges: false,
+  updateStatus: null,
+  tier: null,
+  completenessPct: 0,
+  registeredAt: "2026-11-11T10:00:00Z",
+  verifiedAt: null,
+};
+
 function stubWorkspace(user: Me) {
   return stubApi({
     "GET /api/auth/me": { body: user },
     "GET /api/v1/catalog/search": { body: EMPTY_PAGE },
     "GET /api/v1/dashboard": { body: DASHBOARD },
+    [`GET ${OWN_PROFILE}`]: { body: OWN_PROFILE_BODY },
   });
 }
 
@@ -131,7 +147,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     stubWorkspace(me("manufacturer"));
     let { router } = renderRoute("/catalog");
     await waitFor(() => expect(router.state.location.pathname).toBe("/profile"));
-    expect(await screen.findByText(kk.profile.welcome)).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: kk.nav.profile })).toBeTruthy();
     const page = within(screen.getByRole("main"));
     // Ссылка с видом кнопки остаётся ссылкой, а не кнопкой Base UI.
     expect(page.getByRole("link", { name: kk.nav.account }).getAttribute("href")).toBe("/account");
@@ -166,8 +182,8 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     const { router } = renderRoute("/catalog/?q=steel");
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/profile"));
-    expect(await screen.findByText(kk.profile.welcome)).toBeTruthy();
-    expect(api.mock.calls.map(([url]) => String(url)).filter((url) => url.startsWith("/api/v1/"))).toEqual([]);
+    expect(await screen.findByRole("heading", { level: 1, name: kk.nav.profile })).toBeTruthy();
+    expect(apiCalls(api)).toEqual([]);
   });
 
   it("эксперт на /dashboard/ уходит на /catalog; /catalog/ ему открыт", async () => {
@@ -223,7 +239,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     const { router } = renderRoute("/%63atalog");
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/profile"));
-    expect(await screen.findByText(kk.profile.welcome)).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: kk.nav.profile })).toBeTruthy();
     expect(apiCalls(api)).toEqual([]);
   });
 
@@ -235,7 +251,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
       expect(await screen.findByRole("heading", { name: kk.notFound.title })).toBeTruthy();
       expect(router.state.location.pathname).toBe("/CATALOG");
       expect(document.querySelector('[data-sidebar="sidebar"]')).toBeNull();
-      expect(api.mock.calls.map(([url]) => String(url)).filter((url) => url.startsWith("/api/v1/"))).toEqual([]);
+      expect(apiCalls(api)).toEqual([]);
       cleanup();
     }
   });

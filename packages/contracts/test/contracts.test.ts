@@ -14,6 +14,7 @@ import {
   POLICY_MATRIX,
   type PolicyMatrix,
   ORGANIZATION_TYPES,
+  ownProfileSchema,
   PROFILE_TIERS,
   ROLES,
   UPDATE_STATUSES,
@@ -153,6 +154,29 @@ describe('страница компании (OPR-09, OPR-10, GEN-13)', () => {
     expect(companyCardDataSchema.safeParse({ companyPhone: null, companyEmail: null, focalPoint: null }).success).toBe(
       true,
     );
+  });
+});
+
+describe('свой профиль производителя (MAN-41, MAN-46, IMBC-22)', () => {
+  const verified = {
+    profileId: '00000000-0000-4000-8000-000000000001',
+    organizationName: 'ТОО «Тест»',
+    bin: '240100000001',
+    status: 'verified',
+    hasPendingChanges: false,
+    updateStatus: 'active',
+    tier: 'tier_2',
+    completenessPct: 100,
+    registeredAt: '2026-10-01T10:00:00.000Z',
+    verifiedAt: '2026-11-03T10:00:00.000Z',
+  };
+
+  it('свой профиль: updateStatus и tier null до верификации', () => {
+    expect(ownProfileSchema.parse(verified)).toEqual(verified);
+    const draft = { ...verified, status: 'draft', updateStatus: null, tier: null, completenessPct: 40, verifiedAt: null };
+    expect(ownProfileSchema.parse(draft)).toEqual(draft);
+    expect(ownProfileSchema.safeParse({ ...verified, tier: 'tier_3' }).success).toBe(false);
+    expect(ownProfileSchema.safeParse({ ...verified, completenessPct: 101 }).success).toBe(false);
   });
 });
 
