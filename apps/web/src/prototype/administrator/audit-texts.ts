@@ -1,0 +1,58 @@
+import { defineDictionary } from "@/prototype/i18n";
+
+export const auditTexts = defineDictionary({
+  en: {
+    title: "Audit log",
+    description:
+      "Account events only: accounts, organisations and pull-API credentials. Entries cannot be changed or deleted.",
+    filter: "Object",
+    all: "All",
+    "subject.account": "Accounts",
+    "subject.organization": "Organisations",
+    "subject.api_credential": "Pull API",
+    count: "Events: {count}",
+    at: "Time",
+    who: "User",
+    organization: "Organisation",
+    what: "What changed",
+    object: "Object",
+    empty: "No account events yet.",
+    emptyFiltered: "No events of this kind.",
+  },
+  ru: {
+    title: "Журнал аудита",
+    description:
+      "Только события аккаунтов: аккаунты, организации и учётные данные pull API. Записи нельзя изменить или удалить.",
+    filter: "Объект",
+    all: "Все",
+    "subject.account": "Аккаунты",
+    "subject.organization": "Организации",
+    "subject.api_credential": "Pull API",
+    count: "Событий: {count}",
+    at: "Время",
+    who: "Пользователь",
+    organization: "Организация",
+    what: "Что изменилось",
+    object: "Объект",
+    empty: "Событий аккаунтов пока нет.",
+    emptyFiltered: "Событий такого вида нет.",
+  },
+  kk: {
+    title: "Аудит журналы",
+    description:
+      "Тек аккаунт оқиғалары: аккаунттар, ұйымдар және pull API деректері. Жазбаларды өзгертуге не жоюға болмайды.",
+    filter: "Нысан",
+    all: "Барлығы",
+    "subject.account": "Аккаунттар",
+    "subject.organization": "Ұйымдар",
+    "subject.api_credential": "Pull API",
+    count: "Оқиғалар: {count}",
+    at: "Уақыты",
+    who: "Пайдаланушы",
+    organization: "Ұйым",
+    what: "Не өзгерді",
+    object: "Нысан",
+    empty: "Аккаунт оқиғалары әзірге жоқ.",
+    emptyFiltered: "Мұндай оқиға жоқ.",
+  },
+});
