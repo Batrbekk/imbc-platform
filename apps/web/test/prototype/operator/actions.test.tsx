@@ -185,6 +185,7 @@ describe("выгрузка и подписки", () => {
     await screen.findByText(/Found: \d+ manufacturers/);
     await user.click(screen.getByRole("radio", { name: "CSV" }));
     await user.click(screen.getByRole("button", { name: "Company: None" }));
+    const before = state().audit.length;
     await user.click(screen.getByRole("button", { name: "Build file" }));
 
     const record = state().exportRecords.at(-1)!;
@@ -195,12 +196,13 @@ describe("выгрузка и подписки", () => {
       filters: "group=B",
     });
     expect(record.rows).toBeGreaterThan(0);
-    expect(state().audit.at(-2)).toMatchObject({
+    // Собрать файл здесь и есть скачать: одно событие на одно нажатие (AUD-01).
+    expect(state().audit).toHaveLength(before + 1);
+    expect(state().audit.at(-1)).toMatchObject({
       action: "export.create",
+      actor: ACTOR,
       summary: { en: expect.stringContaining("CSV") },
     });
-    // Скачивание собранного файла — своё событие журнала (AUD-01).
-    expect(state().audit.at(-1)).toMatchObject({ action: "export.download", actor: ACTOR });
     expect(await screen.findByRole("status")).toBeTruthy();
     expect(screen.getByRole("status").textContent).toMatch(/imbc-export-.*\.csv is ready/);
     expect(screen.getAllByText("Group B").length).toBeGreaterThan(0);
@@ -214,6 +216,31 @@ describe("выгрузка и подписки", () => {
     expect(screen.getByText(/Found: 1 manufacturers/)).toBeTruthy();
     expect(screen.getByText("ТОО «Демо Насос Завод»")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Build file" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("правка в середине текста поиска не сбивает каретку и не теряет буквы", async () => {
+    const { user, router } = renderCabinet("/proto/operator/export", { role: "operator" });
+    const field = (await screen.findByLabelText("Name or BIN")) as HTMLInputElement;
+    await user.type(field, "Демо Завод");
+    await user.type(field, "Насос ", { initialSelectionStart: 5, initialSelectionEnd: 5 });
+    expect(field.value).toBe("Демо Насос Завод");
+    await user.keyboard("{ArrowLeft}{ArrowLeft}x");
+    expect(field.value).toBe("Демо Насос Завод".slice(0, 9) + "x" + "Демо Насос Завод".slice(9));
+    await user.keyboard("{Backspace}");
+    expect(field.value).toBe("Демо Насос Завод");
+    expect(await screen.findByText("ТОО «Демо Насос Завод»")).toBeTruthy();
+    expect(new URLSearchParams(router.state.location.search).get("q")).toBe("Демо Насос Завод");
+  });
+
+  it("поле поиска следует за адресом, если тот сменился не от набора (назад, ссылка)", async () => {
+    const { user, router } = renderCabinet("/proto/operator/export?q=Каспий", { role: "operator" });
+    const field = (await screen.findByLabelText("Name or BIN")) as HTMLInputElement;
+    expect(field.value).toBe("Каспий");
+    await user.clear(field);
+    await user.type(field, "Степь");
+    await router.navigate("/proto/operator/export?q=Пример");
+    expect(await screen.findByDisplayValue("Пример")).toBeTruthy();
+    expect(await screen.findByText("АО «Пример Кабель»")).toBeTruthy();
   });
 
   it("без колонок файл не собирается", async () => {
