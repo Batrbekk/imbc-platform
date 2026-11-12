@@ -9,11 +9,13 @@ import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useFormat } from "@/i18n/format";
 import { api } from "@/lib/api";
+
+import { FilterSelectContent } from "./filter-select";
 
 /** Колонки очереди (REV-04); скелет загрузки занимает их все. */
 const COLUMNS = ["manufacturer", "status", "assignee", "registeredAt"] as const;
@@ -67,13 +69,13 @@ export function ReviewsPage() {
             <span className="text-muted-foreground">{t("statusFilter")}:</span>
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
+          <FilterSelectContent>
             {statusItems.map((item) => (
               <SelectItem key={item.value} value={item.value}>
                 {item.label}
               </SelectItem>
             ))}
-          </SelectContent>
+          </FilterSelectContent>
         </Select>
       </div>
 

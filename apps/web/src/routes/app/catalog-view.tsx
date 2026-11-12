@@ -13,12 +13,14 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useFormat } from "@/i18n/format";
 import { api } from "@/lib/api";
 import { catalogParsers, serializeCatalog } from "@/lib/catalog-params";
+
+import { FilterSelectContent } from "./filter-select";
 
 /** Фильтры из записанного адреса страницы — теми же парсерами, что у полей. */
 const loadCatalog = createLoader(catalogParsers);
@@ -127,13 +129,13 @@ export function CatalogView() {
             <span className="text-muted-foreground">{t("surveyed")}:</span>
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
+          <FilterSelectContent>
             {triItems.map((item) => (
               <SelectItem key={item.value} value={item.value}>
                 {item.label}
               </SelectItem>
             ))}
-          </SelectContent>
+          </FilterSelectContent>
         </Select>
 
         <Select
@@ -145,13 +147,13 @@ export function CatalogView() {
             <span className="text-muted-foreground">{t("unifiedRegister")}:</span>
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
+          <FilterSelectContent>
             {triItems.map((item) => (
               <SelectItem key={item.value} value={item.value}>
                 {item.label}
               </SelectItem>
             ))}
-          </SelectContent>
+          </FilterSelectContent>
         </Select>
 
         <Input
@@ -176,13 +178,13 @@ export function CatalogView() {
           <SelectTrigger className="w-auto" aria-label={t("sort")}>
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
+          <FilterSelectContent>
             {sortItems.map((item) => (
               <SelectItem key={item.value} value={item.value}>
                 {item.label}
               </SelectItem>
             ))}
-          </SelectContent>
+          </FilterSelectContent>
         </Select>
 
         {hasFilters && (
