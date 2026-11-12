@@ -1,0 +1,536 @@
+// Каталог: фильтры в адресе страницы уходят в API в формате catalogFilterSchema (OPR-04, OPR-05).
+import {
+  type CatalogItem,
+  catalogFilterSchema,
+  type CatalogPage,
+  type CompanyPage,
+  type Dashboard,
+} from "@imbc/contracts";
+import { screen, waitFor, within } from "@testing-library/react";
+import { toast } from "sonner";
+import { afterEach, describe, expect, it, type Mock, vi } from "vitest";
+
+import { catalogParsers } from "@/lib/catalog-params";
+import type { Me } from "@/lib/session";
+
+import en from "../messages/en.json";
+import kk from "../messages/kk.json";
+import ru from "../messages/ru.json";
+import { stubApi } from "./support/api";
+import { renderRoute } from "./support/render";
+
+vi.mock("@/lib/leave-app", () => ({ leaveApp: vi.fn(), reloadApp: vi.fn() }));
+
+afterEach(() => {
+  vi.clearAllMocks();
+  // Очередь toast у sonner общая для модуля: уведомления одного теста не доживают до следующего.
+  toast.dismiss();
+});
+
+// Оператор с пройденными шлюзами входа.
+const OPERATOR: Me = {
+  user: {
+    id: "00000000-0000-4000-8000-000000000001",
+    email: "operator@operator.local",
+    fullName: "Оператор",
+    role: "operator",
+    organizationId: "00000000-0000-4000-8000-000000000002",
+    organizationType: "operator",
+    locale: "kk",
+  },
+  gates: { mfa: true, responsibility: true },
+  homePath: "/dashboard",
+  otpDelivery: "email",
+};
+
+const ITEM: CatalogItem = {
+  profileId: "00000000-0000-4000-8000-000000000010",
+  bin: "980540000384",
+  nameEn: "Steel LLP",
+  nameRu: "ТОО Сталь",
+  region: "KZ-ATY",
+  commodityGroups: ["A", "B"],
+  mainTnved: "7208",
+  certificateTypes: ["ST-KZ"],
+  siteSurveyed: true,
+  tier: "tier_1",
+  verifiedAt: "2026-11-11T20:00:00Z",
+  updateStatus: "active",
+  pendingChanges: true,
+  worksWithCount: 0,
+};
+
+const DASHBOARD: Dashboard = {
+  total: 1,
+  byRegion: [
+    { region: "KZ-MAN", count: 1 },
+    { region: "KZ-ATY", count: 3 },
+  ],
+  byCommodityGroup: [],
+  siteSurveyed: 0,
+  unifiedRegister: 0,
+  updateStatus: { active: 0, outdated: 0, unresponsive: 0 },
+  tier: { tier_1: 1, tier_2: 0 },
+  generatedAt: "2026-11-11T10:00:00Z",
+};
+
+function stubCatalog(page: CatalogPage = { items: [ITEM], total: 1, page: 1, pageSize: 25 }) {
+  return stubApi({
+    "GET /api/auth/me": { body: OPERATOR },
+    "GET /api/v1/catalog/search": () => Response.json(page),
+    "GET /api/v1/dashboard": { body: DASHBOARD },
+  });
+}
+
+/** Адреса поисковых запросов к API в порядке вызова. */
+const searches = (api: Mock<typeof fetch>) =>
+  api.mock.calls.map(([url]) => String(url)).filter((url) => url.startsWith("/api/v1/catalog/search"));
+
+describe("каталог (OPR-04, OPR-05)", () => {
+  it("фильтры из адреса уходят в API тем же query string", async () => {
+    const query = "?region=KZ-ATY,KZ-MAN&group=A,B&surveyed=true&sort=verified_at&page=2";
+    const api = stubCatalog();
+    renderRoute(`/catalog${query}`);
+
+    expect(await screen.findByRole("heading", { name: kk.catalog.title })).toBeTruthy();
+    await waitFor(() => expect(searches(api)).toEqual([`/api/v1/catalog/search${query}`]));
+    expect(document.title).toBe(`${kk.catalog.title} · ${kk.common.appName}`);
+  });
+
+  it("закодированная запятая в ссылке даёт тот же запрос", async () => {
+    const api = stubCatalog();
+    const { router } = renderRoute("/catalog?region=KZ-ATY%2CKZ-MAN");
+
+    await waitFor(() => expect(searches(api)).toEqual(["/api/v1/catalog/search?region=KZ-ATY,KZ-MAN"]));
+    // Оба региона выбраны: счётчик на кнопке фильтра.
+    const region = screen.getByRole("button", { name: new RegExp(kk.catalog.region) });
+    expect(within(region).getByText("2")).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/catalog");
+  });
+
+  it("селект показывает подпись, а не значение из адреса", async () => {
+    stubCatalog();
+    renderRoute("/catalog?surveyed=true", { locale: "ru" });
+
+    const surveyed = (await screen.findByText(`${ru.catalog.surveyed}:`)).closest("button")!;
+    expect(surveyed.textContent).toContain(ru.common.yes);
+    expect(surveyed.textContent).not.toContain("true");
+    const unified = screen.getByText(`${ru.catalog.unifiedRegister}:`).closest("button")!;
+    expect(unified.textContent).toContain(ru.common.any);
+    expect(unified.textContent).not.toContain("any");
+    // Сортировка по умолчанию — подпись «По названию», а не значение name.
+    const sort = screen.getAllByRole("combobox").at(-1)!;
+    expect(sort.textContent).toContain(ru.catalog.sortName);
+    expect(sort.textContent).not.toContain("name");
+  });
+
+  it("выбор в селекте меняет адрес и сбрасывает страницу", async () => {
+    const api = stubCatalog();
+    const { router, user } = renderRoute("/catalog?page=3", { locale: "en" });
+
+    await user.click(await screen.findByText(`${en.catalog.unifiedRegister}:`));
+    await user.click(await screen.findByRole("option", { name: en.common.no }));
+
+    await waitFor(() => expect(router.state.location.search).toBe("?unifiedRegister=false"));
+    await waitFor(() => expect(searches(api).at(-1)).toBe("/api/v1/catalog/search?unifiedRegister=false"));
+    expect(screen.getByText(`${en.catalog.unifiedRegister}:`).closest("button")!.textContent).toContain(en.common.no);
+  });
+
+  it("сеанс истёк после смены фильтра — возврат на вход с новыми фильтрами (OPR-05)", async () => {
+    let expired = false;
+    const unauthorized = () =>
+      Response.json({ status: 401, code: "unauthorized", title: "unauthorized" }, { status: 401 });
+    stubApi({
+      "GET /api/auth/me": () => (expired ? unauthorized() : Response.json(OPERATOR)),
+      "GET /api/v1/catalog/search": (url) => {
+        if (!url.searchParams.has("unifiedRegister")) return Response.json({ items: [], total: 0, page: 1, pageSize: 25 });
+        expired = true;
+        return unauthorized();
+      },
+      "GET /api/v1/dashboard": { body: DASHBOARD },
+    });
+    const { router, user } = renderRoute("/catalog", { locale: "en" });
+
+    await user.click(await screen.findByText(`${en.catalog.unifiedRegister}:`));
+    await user.click(await screen.findByRole("option", { name: en.common.no }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+    expect(router.state.location.search).toBe(
+      `?error=session_expired&returnTo=${encodeURIComponent("/catalog?unifiedRegister=false")}`,
+    );
+  });
+
+  it("«Скопировать ссылку» копирует адрес с текущими фильтрами (OPR-05)", async () => {
+    stubCatalog();
+    const { user } = renderRoute("/catalog?region=KZ-ATY,KZ-MAN&surveyed=true", { locale: "en" });
+
+    await user.click(await screen.findByRole("button", { name: en.catalog.copyLink }));
+
+    expect(await screen.findByText(en.catalog.linkCopied)).toBeTruthy();
+    // Абсолютный адрес, как его даёт сам браузер.
+    expect(await navigator.clipboard.readText()).toBe(
+      `${window.location.origin}/catalog?region=KZ-ATY,KZ-MAN&surveyed=true`,
+    );
+  });
+
+  it("«Скопировать ссылку»: кириллица в поиске закодирована, как в адресной строке (OPR-05)", async () => {
+    stubCatalog();
+    const { user } = renderRoute("/catalog?region=KZ-ATY", { locale: "en" });
+
+    await user.type(await screen.findByPlaceholderText(en.catalog.query), "труба");
+    await user.click(screen.getByRole("button", { name: en.catalog.copyLink }));
+
+    expect(await screen.findByText(en.catalog.linkCopied)).toBeTruthy();
+    expect(await navigator.clipboard.readText()).toBe(
+      `${window.location.origin}/catalog?q=%D1%82%D1%80%D1%83%D0%B1%D0%B0&region=KZ-ATY`,
+    );
+  });
+
+  it("быстрый ввод пяти символов — один запрос после задержки, с query string страницы (OPR-05)", async () => {
+    const api = stubCatalog();
+    const { router, user } = renderRoute("/catalog", { locale: "en" });
+    await waitFor(() => expect(searches(api)).toEqual(["/api/v1/catalog/search"]));
+
+    await user.type(await screen.findByPlaceholderText(en.catalog.query), "steel");
+    // Пока адрес не записан (задержка 350 мс), новых запросов нет.
+    expect(searches(api)).toHaveLength(1);
+
+    await waitFor(() => expect(router.state.location.search).toBe("?q=steel"));
+    await waitFor(() => expect(searches(api)).toHaveLength(2));
+    expect(searches(api)[1]).toBe(`/api/v1/catalog/search${router.state.location.search}`);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(searches(api)).toHaveLength(2);
+  });
+
+  it("«Скопировать ссылку» сразу после ввода содержит набранный текст", async () => {
+    stubCatalog();
+    const { user } = renderRoute("/catalog?region=KZ-ATY", { locale: "en" });
+
+    await user.type(await screen.findByPlaceholderText(en.catalog.query), "pipe");
+    await user.click(screen.getByRole("button", { name: en.catalog.copyLink }));
+
+    expect(await screen.findByText(en.catalog.linkCopied)).toBeTruthy();
+    expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/catalog?q=pipe&region=KZ-ATY`);
+  });
+
+  it("буфер обмена недоступен — сообщение об ошибке вместо необработанного отказа", async () => {
+    stubCatalog();
+    const { user } = renderRoute("/catalog", { locale: "ru" });
+    // user-event ставит свой navigator.clipboard при setup(): подменяем его метод.
+    const writeText = vi
+      .spyOn(navigator.clipboard, "writeText")
+      .mockRejectedValue(new DOMException("denied", "NotAllowedError"));
+
+    await user.click(await screen.findByRole("button", { name: ru.catalog.copyLink }));
+
+    expect(await screen.findByText(ru.catalog.linkCopyFailed)).toBeTruthy();
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(ru.catalog.linkCopied)).toBeNull();
+  });
+
+  it("поля поиска следуют адресу: «Сбросить» и переход по ссылке меняют их текст (OPR-05)", async () => {
+    stubCatalog();
+    const { router, user } = renderRoute("/catalog?q=steel&tnved=72", { locale: "en" });
+
+    const query = (await screen.findByPlaceholderText(en.catalog.query)) as HTMLInputElement;
+    const tnved = screen.getByPlaceholderText(en.catalog.tnved) as HTMLInputElement;
+    expect(query.value).toBe("steel");
+    expect(tnved.value).toBe("72");
+
+    await user.click(screen.getByRole("button", { name: en.common.reset }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    expect(query.value).toBe("");
+    expect(tnved.value).toBe("");
+
+    // Переход на адрес с другими фильтрами (как «Назад» или ссылка дашборда).
+    await router.navigate("/catalog?q=pipe&tnved=7304");
+    await waitFor(() => expect(query.value).toBe("pipe"));
+    expect(tnved.value).toBe("7304");
+
+    // В поле кода остаются только цифры, как и в адресе.
+    await user.clear(tnved);
+    await user.type(tnved, "73a0");
+    expect(tnved.value).toBe("730");
+  });
+
+  it("у селектов есть доступные имена — текст видимой подписи", async () => {
+    stubCatalog();
+    renderRoute("/catalog", { locale: "ru" });
+
+    expect(await screen.findByRole("combobox", { name: ru.catalog.surveyed })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: ru.catalog.unifiedRegister })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: ru.catalog.sort })).toBeTruthy();
+  });
+
+  it("множественный выбор группы — OR внутри фильтра (OPR-04)", async () => {
+    const api = stubCatalog();
+    const { router, user } = renderRoute("/catalog?group=A", { locale: "en" });
+
+    await user.click(await screen.findByRole("button", { name: new RegExp(en.catalog.group) }));
+    await user.click(await screen.findByRole("option", { name: "Group C" }));
+
+    await waitFor(() => expect(router.state.location.search).toBe("?group=A,C"));
+    await waitFor(() => expect(searches(api).at(-1)).toBe("/api/v1/catalog/search?group=A,C"));
+  });
+
+  it("«Сбросить» очищает адрес и повторяет поиск без фильтров", async () => {
+    const api = stubCatalog();
+    const { router, user } = renderRoute("/catalog?region=KZ-ATY&surveyed=false&sort=region");
+
+    await user.click(await screen.findByRole("button", { name: kk.common.reset }));
+
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    await waitFor(() => expect(searches(api).at(-1)).toBe("/api/v1/catalog/search"));
+    expect(screen.queryByRole("button", { name: kk.common.reset })).toBeNull();
+  });
+
+  it("дата верификации — в формате языка (LANG-04)", async () => {
+    stubCatalog();
+    renderRoute("/catalog", { locale: "en" });
+
+    const row = (await screen.findByText("ТОО Сталь")).closest("tr")!;
+    const cells = within(row).getAllByRole("cell");
+    expect(cells[6]?.textContent).toBe("Nov 12, 2026");
+    expect(within(row).getByText("Steel LLP")).toBeTruthy();
+    expect(within(row).getByText("980540000384")).toBeTruthy();
+    expect(within(row).getByText(en.catalog.status.active)).toBeTruthy();
+    expect(within(row).getByText(en.catalog.pending)).toBeTruthy();
+    expect(screen.getByText("1 company found")).toBeTruthy();
+  });
+
+  it("пустой результат отличается от ошибки; постраничный переход (OPR-08)", async () => {
+    const api = stubApi({
+      "GET /api/auth/me": { body: OPERATOR },
+      "GET /api/v1/catalog/search": (url) =>
+        Response.json(
+          url.searchParams.get("q") === "none"
+            ? { items: [], total: 0, page: 1, pageSize: 25 }
+            : { items: [ITEM], total: 60, page: Number(url.searchParams.get("page") ?? 1), pageSize: 25 },
+        ),
+      "GET /api/v1/dashboard": { body: DASHBOARD },
+    });
+    const { router, user } = renderRoute("/catalog", { locale: "en" });
+
+    expect(await screen.findByText("Page 1 of 3")).toBeTruthy();
+    const prev = screen.getByRole("button", { name: en.catalog.prev });
+    expect((prev as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: en.catalog.next }));
+    await waitFor(() => expect(router.state.location.search).toBe("?page=2"));
+    expect(await screen.findByText("Page 2 of 3")).toBeTruthy();
+    expect(searches(api).at(-1)).toBe("/api/v1/catalog/search?page=2");
+
+    await router.navigate("/catalog?q=none");
+    expect(await screen.findByText(en.catalog.empty)).toBeTruthy();
+    expect(screen.queryByText(/Page \d of/)).toBeNull();
+  });
+
+  it("сбой поиска — сообщение и повтор (OPR-08)", async () => {
+    let fail = true;
+    const api = stubApi({
+      "GET /api/auth/me": { body: OPERATOR },
+      "GET /api/v1/catalog/search": () =>
+        fail
+          ? Response.json({ status: 503, code: "unavailable", title: "unavailable" }, { status: 503 })
+          : Response.json({ items: [ITEM], total: 1, page: 1, pageSize: 25 }),
+      "GET /api/v1/dashboard": { body: DASHBOARD },
+    });
+    const { user } = renderRoute("/catalog", { locale: "en" });
+
+    expect(await screen.findByText(en.common.error)).toBeTruthy();
+    fail = false;
+    await user.click(screen.getByRole("button", { name: en.common.retry }));
+    expect(await screen.findByText("ТОО Сталь")).toBeTruthy();
+    expect(searches(api)).toHaveLength(2);
+  });
+
+  it("фильтр «Тир» — множественный выбор после товарных групп; выбор уходит в адрес и в API (OPR-02, OPR-04)", async () => {
+    const api = stubCatalog();
+    const { router, user } = renderRoute("/catalog?tier=tier_1", { locale: "en" });
+
+    const tier = await screen.findByRole("button", { name: new RegExp(`^${en.catalog.tier}`) });
+    const group = screen.getByRole("button", { name: new RegExp(en.catalog.group) });
+    // Поле тира стоит сразу после поля товарных групп.
+    expect(group.nextElementSibling).toBe(tier);
+    expect(within(tier).getByText("1")).toBeTruthy();
+
+    await user.click(tier);
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([en.catalog.tierValue.tier_1, en.catalog.tierValue.tier_2]);
+    await user.click(screen.getByRole("option", { name: en.catalog.tierValue.tier_2 }));
+
+    await waitFor(() => expect(router.state.location.search).toBe("?tier=tier_1,tier_2"));
+    await waitFor(() => expect(searches(api).at(-1)).toBe("/api/v1/catalog/search?tier=tier_1,tier_2"));
+    expect(catalogFilterSchema.parse({ tier: router.state.location.search.slice("?tier=".length) }).tier).toEqual([
+      "tier_1",
+      "tier_2",
+    ]);
+  });
+
+  it("неизвестный тир в адресе не ломает страницу: значение отбрасывается до запроса", async () => {
+    const api = stubCatalog();
+    renderRoute("/catalog?tier=tier_3,tier_2&region=KZ-ATY", { locale: "en" });
+
+    expect(await screen.findByText("ТОО Сталь")).toBeTruthy();
+    expect(searches(api)).toEqual(["/api/v1/catalog/search?region=KZ-ATY&tier=tier_2"]);
+    const tier = screen.getByRole("button", { name: new RegExp(`^${en.catalog.tier}`) });
+    expect(within(tier).getByText("1")).toBeTruthy();
+  });
+
+  it("колонка «Тир» перед датой верификации — у каждой строки, и у unresponsive (OPR-06)", async () => {
+    stubCatalog({
+      items: [
+        ITEM,
+        {
+          ...ITEM,
+          profileId: "00000000-0000-4000-8000-000000000011",
+          nameRu: "ТОО Труба",
+          tier: "tier_2",
+          updateStatus: "unresponsive",
+          pendingChanges: false,
+        },
+      ],
+      total: 2,
+      page: 1,
+      pageSize: 25,
+    });
+    renderRoute("/catalog", { locale: "ru" });
+
+    expect(await screen.findByText("ТОО Труба")).toBeTruthy();
+    const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
+    expect(headers.indexOf(ru.catalog.columns.tier)).toBe(headers.indexOf(ru.catalog.columns.verifiedAt) - 1);
+    const tierCell = (name: string) => {
+      const cells = within(screen.getByText(name).closest("tr")!).getAllByRole("cell");
+      return cells[headers.indexOf(ru.catalog.columns.tier)];
+    };
+    // В колонке — короткая подпись, длинная остаётся в фильтре.
+    expect(tierCell("ТОО Сталь")?.textContent).toBe(ru.catalog.tierShort.tier_1);
+    const unresponsive = tierCell("ТОО Труба")!;
+    expect(unresponsive.textContent).toBe(ru.catalog.tierShort.tier_2);
+    expect(screen.queryByText(ru.catalog.tierValue.tier_2)).toBeNull();
+    expect(unresponsive.querySelector('[data-slot="badge"]')).toBeTruthy();
+    expect(within(screen.getByText("ТОО Труба").closest("tr")!).getByText(ru.catalog.status.unresponsive)).toBeTruthy();
+  });
+
+  it("пока идёт поиск — скелет на всю ширину таблицы, по числу колонок", async () => {
+    stubApi({
+      "GET /api/auth/me": { body: OPERATOR },
+      "GET /api/v1/catalog/search": () => new Promise<Response>(() => {}) as unknown as Response,
+      "GET /api/v1/dashboard": { body: DASHBOARD },
+    });
+    renderRoute("/catalog", { locale: "en" });
+
+    const headers = await screen.findAllByRole("columnheader");
+    const skeleton = document.querySelector('[data-slot="skeleton"]')!.closest("td")!;
+    expect(skeleton.colSpan).toBe(headers.length);
+    expect(headers.map((h) => h.textContent)).toContain(en.catalog.columns.tier);
+  });
+
+  it("ссылка из строки каталога ведёт на /companies/:id, «Назад» возвращает фильтры (OPR-06)", async () => {
+    const company: CompanyPage = {
+      ...ITEM,
+      tnvedCodes: ["7208"],
+      headcountTotal: null,
+      certificates: [{ type: "ST-KZ", validUntil: null }],
+      unifiedRegister: false,
+      verifiedAt: "2026-11-11T20:00:00Z",
+      companyPhone: null,
+      companyEmail: null,
+      focalPoint: null,
+    };
+    const api = stubApi({
+      "GET /api/auth/me": { body: OPERATOR },
+      "GET /api/v1/catalog/search": () => Response.json({ items: [ITEM], total: 1, page: 1, pageSize: 25 }),
+      "GET /api/v1/dashboard": { body: DASHBOARD },
+      [`GET /api/v1/catalog/companies/${ITEM.profileId}`]: { body: company },
+    });
+    const { router, user } = renderRoute("/catalog?region=KZ-ATY&sort=verified_at", { locale: "en" });
+
+    const link = await screen.findByRole("link", { name: ITEM.nameRu });
+    expect(link.getAttribute("href")).toBe(`/companies/${ITEM.profileId}`);
+    await user.click(link);
+
+    expect(await screen.findByRole("heading", { level: 1, name: ITEM.nameEn })).toBeTruthy();
+    expect(router.state.location.pathname).toBe(`/companies/${ITEM.profileId}`);
+    const back = screen.getByRole("link", { name: en.company.back });
+    expect(back.getAttribute("href")).toBe("/catalog?region=KZ-ATY&sort=verified_at");
+
+    await user.click(back);
+    expect(await screen.findByRole("heading", { name: en.catalog.title })).toBeTruthy();
+    expect(router.state.location.search).toBe("?region=KZ-ATY&sort=verified_at");
+    await waitFor(() => expect(searches(api).at(-1)).toBe("/api/v1/catalog/search?region=KZ-ATY&sort=verified_at"));
+  });
+
+  it("регионы фильтра — из дашборда, по алфавиту до справочника регионов (ADM-08)", async () => {
+    stubCatalog();
+    const { user } = renderRoute("/catalog", { locale: "en" });
+
+    await user.click(await screen.findByRole("button", { name: new RegExp(en.catalog.region) }));
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["KZ-ATY", "KZ-MAN"]);
+  });
+});
+
+/**
+ * Ключи catalogFilterSchema, у которых в интерфейсе пока нет поля. Страница строит запрос из
+ * catalogParsers, поэтому такой ключ из адреса в API не уходит. Добавляя поле, перенесите ключ
+ * в catalogParsers (src/lib/catalog-params.ts) и в SAMPLES ниже.
+ */
+const KEYS_WITHOUT_CONTROL = [
+  // Общие фильтры OPR-02 без поля: тип продукции и тип сертификата (ждут справочников, ADM-08).
+  "type",
+  "cert",
+  // Расширенные фильтры OPR-03 без поля.
+  "kpved",
+  "oked",
+  "worksWith",
+  "headcountMin",
+  "headcountMax",
+  "certValidUntil",
+  "certAnyStatus",
+  "verifiedFrom",
+  "verifiedTo",
+  // Размер страницы не выбирается: сервер отдаёт 25 по умолчанию схемы.
+  "pageSize",
+];
+
+/** Значение каждого ключа, который знает интерфейс, — не по умолчанию, в формате адреса. */
+const SAMPLES: Record<keyof typeof catalogParsers, string> = {
+  q: "металл",
+  region: "KZ-ATY,KZ-MAN",
+  group: "A,B",
+  surveyed: "true",
+  tier: "tier_1,tier_2",
+  unifiedRegister: "false",
+  tnved: "7308",
+  sort: "verified_at",
+  page: "2",
+};
+
+describe("контракт адреса каталога и catalogFilterSchema (OPR-05)", () => {
+  it("каждый ключ схемы либо обрабатывает интерфейс, либо явно назван ключом без поля", () => {
+    const handled = Object.keys(catalogParsers);
+    const schema = Object.keys(catalogFilterSchema.shape);
+    expect(schema.filter((key) => !handled.includes(key) && !KEYS_WITHOUT_CONTROL.includes(key))).toEqual([]);
+    // Списки не устаревают: ключ не в обоих сразу, и в каждом — только ключи схемы.
+    expect(handled.filter((key) => !schema.includes(key))).toEqual([]);
+    expect(KEYS_WITHOUT_CONTROL.filter((key) => !schema.includes(key) || handled.includes(key))).toEqual([]);
+  });
+
+  it("адрес с каждым известным ключом даёт в API тот же запрос; схема разбирает его без ошибок", async () => {
+    const query = `?${new URLSearchParams(SAMPLES)}`;
+    expect(catalogFilterSchema.safeParse(Object.fromEntries(new URLSearchParams(SAMPLES))).success).toBe(true);
+    const api = stubCatalog();
+    renderRoute(`/catalog${query}`);
+
+    await waitFor(() => expect(searches(api)).toHaveLength(1));
+    const sent = new URL(searches(api)[0], window.location.origin).searchParams;
+    expect([...sent].sort()).toEqual(Object.entries(SAMPLES).sort());
+  });
+
+  it("ключи без поля в интерфейсе в запрос не попадают", async () => {
+    const api = stubCatalog();
+    renderRoute("/catalog?region=KZ-ATY&kpved=25.1&pageSize=100");
+
+    await waitFor(() => expect(searches(api)).toEqual(["/api/v1/catalog/search?region=KZ-ATY"]));
+  });
+});

@@ -2,10 +2,9 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import cookieParser from 'cookie-parser';
-import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module.js';
+import { configureHttp } from './common/http.js';
 import { ENV, type Env } from './config/env.js';
 
 async function bootstrap(): Promise<void> {
@@ -13,10 +12,7 @@ async function bootstrap(): Promise<void> {
   const env = app.get<Env>(ENV);
 
   app.useLogger(app.get(Logger));
-  app.set('trust proxy', 1); // за ingress/nginx: IP клиента из X-Forwarded-For (NDA, аудит)
-  app.use(helmet());
-  app.use(cookieParser());
-  app.setGlobalPrefix('api');
+  configureHttp(app);
   app.enableShutdownHooks();
 
   // OpenAPI 3.1 — контракт для Web UI и операторов (раздел 13 спецификации).

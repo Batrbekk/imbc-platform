@@ -4,6 +4,24 @@ import { ENV, type Env } from '../../config/env.js';
 /** Срок ссылки установки пароля — 72 часа (AUTH-01). */
 export const PASSWORD_LINK_LIFESPAN_S = 72 * 60 * 60;
 
+export class KeycloakRequestError extends Error {
+  constructor(
+    readonly status: number,
+    operation: string,
+  ) {
+    super(`Keycloak ${operation}: ${status}`);
+  }
+}
+
+export interface KeycloakEvent {
+  id?: string;
+  time: number;
+  userId?: string;
+  type: string;
+  error?: string;
+  details?: Record<string, string>;
+}
+
 /**
  * Минимальный клиент Keycloak Admin REST API (сервисный клиент imbc-admin-api,
  * роли realm-management: manage-users, view-users). Keycloak остаётся стандартным,
@@ -34,6 +52,7 @@ export class KeycloakAdminService {
         client_id: this.env.KEYCLOAK_ADMIN_CLIENT_ID,
         client_secret: this.env.KEYCLOAK_ADMIN_CLIENT_SECRET,
       }),
+      signal: AbortSignal.timeout(10000),
     });
     if (!response.ok) throw new Error(`Keycloak token: ${response.status}`);
     const json = (await response.json()) as { access_token: string; expires_in: number };
@@ -44,6 +63,7 @@ export class KeycloakAdminService {
   private async call(path: string, init: RequestInit = {}): Promise<Response> {
     const response = await fetch(`${this.base}/admin/realms/${this.env.KEYCLOAK_REALM}${path}`, {
       ...init,
+      signal: init.signal ?? AbortSignal.timeout(10000),
       headers: {
         authorization: `Bearer ${await this.accessToken()}`,
         'content-type': 'application/json',
@@ -62,12 +82,12 @@ export class KeycloakAdminService {
         email: input.email.toLowerCase(),
         firstName: input.firstName,
         enabled: true,
-        emailVerified: true,
+        emailVerified: false,
+        requiredActions: ['VERIFY_EMAIL', 'UPDATE_PASSWORD'],
         attributes: { locale: [input.locale] },
       }),
     });
-    if (response.status === 409) throw new Error('user_exists');
-    if (!response.ok) throw new Error(`Keycloak create user: ${response.status}`);
+    if (!response.ok) throw new KeycloakRequestError(response.status, 'create user');
     const location = response.headers.get('location');
     const id = location?.split('/').pop();
     if (!id) throw new Error('Keycloak не вернул id пользователя');
@@ -83,7 +103,7 @@ export class KeycloakAdminService {
     });
     const response = await this.call(`/users/${userId}/execute-actions-email?${params}`, {
       method: 'PUT',
-      body: JSON.stringify(['UPDATE_PASSWORD']),
+      body: JSON.stringify(['VERIFY_EMAIL', 'UPDATE_PASSWORD']),
     });
     if (!response.ok) throw new Error(`Keycloak execute-actions-email: ${response.status}`);
   }
@@ -105,7 +125,25 @@ export class KeycloakAdminService {
 
   async deleteUser(userId: string): Promise<void> {
     const response = await this.call(`/users/${userId}`, { method: 'DELETE' });
-    if (!response.ok && response.status !== 404) this.logger.warn(`Keycloak delete user: ${response.status}`);
+    if (!response.ok && response.status !== 404) throw new KeycloakRequestError(response.status, 'delete user');
+  }
+
+  async securityEvents(since: Date): Promise<KeycloakEvent[]> {
+    const events: KeycloakEvent[] = [];
+    const types = ['UPDATE_PASSWORD', 'RESET_PASSWORD', 'UPDATE_CREDENTIAL', 'USER_DISABLED_BY_TEMPORARY_LOCKOUT'];
+    for (let first = 0; ; first += 500) {
+      const params = new URLSearchParams({
+        dateFrom: since.toISOString().slice(0, 10),
+        first: String(first),
+        max: '500',
+      });
+      for (const type of types) params.append('type', type);
+      const response = await this.call(`/events?${params}`);
+      if (!response.ok) throw new KeycloakRequestError(response.status, 'events');
+      const page = (await response.json()) as KeycloakEvent[];
+      events.push(...page.filter((event) => event.time >= since.getTime()));
+      if (page.length < 500) return events;
+    }
   }
 
   /** События входа за сутки (AUTH-04): нужна роль realm-management view-events. */

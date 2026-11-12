@@ -4,6 +4,7 @@ import { Redis } from 'ioredis';
 import nodemailer, { type Transporter } from 'nodemailer';
 import { PgBoss } from 'pg-boss';
 import { ENV, type Env } from '../config/env.js';
+import { QUEUES } from '../jobs/queues.js';
 
 export const VALKEY = Symbol('VALKEY');
 export const S3 = Symbol('S3');
@@ -74,6 +75,10 @@ export class InfraModule implements OnModuleInit, OnApplicationShutdown {
       this.logger.warn(`Valkey: ${error.message}`);
     });
     await this.queue.start();
+    // API can enqueue a registration before the worker process has finished starting.
+    for (const name of [QUEUES.sendPasswordEmail, QUEUES.cleanupIdentity]) {
+      await this.queue.createQueue(name, { retryLimit: 10, retryDelay: 30, retryBackoff: true });
+    }
     await this.valkey.connect().catch((error: unknown) => this.logger.warn(`Valkey недоступен: ${String(error)}`));
   }
 

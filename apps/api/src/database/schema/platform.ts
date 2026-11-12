@@ -1,4 +1,4 @@
-import { sql } from 'drizzle-orm';
+import { type SQL, sql } from 'drizzle-orm';
 import {
   boolean,
   date,
@@ -14,7 +14,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { createdAt, id } from './_shared.js';
 import { organizations, userAccounts } from './access.js';
-import { commodityGroup, snapshotPeriod, updateStatus } from './enums.js';
+import { commodityGroup, profileTier, snapshotPeriod, updateStatus } from './enums.js';
 import { manufacturerProfiles } from './profiles.js';
 
 /** Справочники ADM-10 с переводами и флагом обязательности (ADM-11, DATA-04). */
@@ -100,9 +100,12 @@ export const notificationsSent = pgTable(
 );
 
 /**
- * Проекция каталога: одна строка на видимый профиль (Verified + active/outdated),
- * собрана только из верифицированных редакций (архитектура §10). Её читают поиск,
- * страница компании, выгрузки, pull API и дашборд — и ничего больше.
+ * Проекция каталога: одна строка на видимый профиль, собрана только из верифицированных
+ * редакций (архитектура §10). Видимый профиль — Verified и due diligence green/amber при любом
+ * статусе актуальности (раздел 4); unresponsive остаётся в выдаче (UPD-04) и идёт ниже остальных.
+ * Её читают поиск, страница компании, выгрузки, pull API и дашборд — и ничего больше. Исключение —
+ * собственный профиль производителя (ProfilesService.own): одна строка своего профиля, только поле
+ * tier (IMBC-22, GEN-11).
  */
 export const catalogVisible = pgTable(
   'catalog_visible',
@@ -128,6 +131,13 @@ export const catalogVisible = pgTable(
     mainTnved: text('main_tnved'),
     headcountTotal: smallint('headcount_total'),
     siteSurveyed: boolean('site_surveyed').notNull().default(false),
+    /** Тир профиля (IMBC-19, IMBC-20): вычисляется из site_surveyed, отдельно не записывается. */
+    tier: profileTier('tier')
+      .notNull()
+      .generatedAlwaysAs(
+        (): SQL =>
+          sql`case when ${catalogVisible.siteSurveyed} then 'tier_2'::profile_tier else 'tier_1'::profile_tier end`,
+      ),
     unifiedRegister: boolean('unified_register').notNull().default(false),
     worksWithCount: smallint('works_with_count').notNull().default(0),
     updateStatus: updateStatus('update_status').notNull(),

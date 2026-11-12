@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="kk" class="h-full antialiased">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Временный значок: логотип заказчика целиком на тёмно-синем квадрате, пока нет квадратного знака (NFR-15). -->
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <title>IMBC</title>
+  </head>
+  <body class="min-h-full">
+    <!-- Старт не удался и после одной перезагрузки: файла переводов нет, поэтому тексты здесь
+         на трёх языках. Показывает main.tsx; inline-скриптов нет (CSP script-src 'self'). -->
+    <div id="startup-error" role="alert" hidden class="flex min-h-svh items-center justify-center p-6">
+      <div class="max-w-md space-y-3 text-center text-sm text-muted-foreground">
+        <p lang="kk">Платформаны жүктеу мүмкін болмады. Бетті біраздан соң жаңартыңыз.</p>
+        <p lang="ru">Не удалось загрузить платформу. Обновите страницу немного позже.</p>
+        <p lang="en">The platform could not be loaded. Please reload the page a little later.</p>
+      </div>
+    </div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

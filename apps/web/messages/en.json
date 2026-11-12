@@ -12,38 +12,75 @@
     "yes": "Yes",
     "no": "No",
     "language": "Language",
-    "back": "Back"
+    "back": "Back",
+    "logoAlt": "IMBC — International Machine Building Center",
+    "notifications": "Notifications"
   },
   "nav": {
+    "reviews": "Review queue",
     "catalog": "Catalog",
     "dashboard": "Dashboard",
-    "profile": "Company profile"
+    "profile": "Company profile",
+    "adminAccounts": "Accounts",
+    "account": "My account",
+    "toggleSidebar": "Show or hide the menu",
+    "sheetTitle": "Menu",
+    "signOutAs": "Sign out ({email})",
+    "sheetDescription": "Platform sections"
   },
   "login": {
     "title": "Sign in to the platform",
-    "subtitle": "Registry of domestic manufacturers for operators and IMBC",
-    "button": "Sign in with single sign-on",
+    "subtitle": "Use the email address associated with your account.",
+    "button": "Sign in",
     "noAccount": "No account yet?",
     "errors": {
-      "flow_expired": "The sign-in attempt expired, please try again",
-      "oidc": "Could not complete sign-in",
-      "no_account": "Account not found or blocked. Contact IMBC"
-    }
+      "flow_expired": "Your sign-in request expired. Please start again.",
+      "oidc": "We could not complete sign-in. Please try again.",
+      "no_account": "Access for this account was not found or is restricted. Please contact IMBC.",
+      "account_inactive": "Your account is inactive. Reset your password to continue.",
+      "email_unverified": "Verify your email address to sign in.",
+      "session_expired": "Your session has ended. Sign in again to continue."
+    },
+    "forgotPassword": "Forgot password?",
+    "securityHint": "You may be asked for an email code after entering your password.",
+    "useAnotherEmail": "Use another email",
+    "signedOutTitle": "You are signed out",
+    "signedOutDescription": "Your session has ended. Sign in again to return to your workspace.",
+    "signInAgain": "Sign in again"
   },
   "verify": {
     "title": "Confirm sign-in",
-    "hint": "We sent a six-digit code to your email. The code is valid for 10 minutes.",
+    "hint": "Enter the six-digit code to confirm your sign-in.",
     "button": "Confirm",
     "resend": "Resend code",
     "resent": "A new code has been sent",
-    "tooSoon": "You can request a code once a minute",
-    "trust": "Trust this device for 30 days",
-    "invalid": "Invalid or expired code"
+    "tooSoon": "Emails have been requested too often. Please wait before trying again.",
+    "trust": "After confirmation, this device will be trusted for 30 days.",
+    "invalid": "This code does not match. Check the digits and try again.",
+    "codeLabel": "Confirmation code",
+    "expiryHint": "The code is valid for 10 minutes.",
+    "sending": "Sending your code…",
+    "notSent": "Your code could not be sent yet.",
+    "sent": "Code sent. Check your inbox.",
+    "alreadyRequested": "A code has already been requested. Check your inbox or request another after the pause.",
+    "preparing": "Preparing your email…",
+    "verifyError": "We could not verify the code. Please try again.",
+    "sendError": "We could not send the email. Please try again shortly.",
+    "expired": "This code has expired. Request a new code.",
+    "locked": "You have reached the attempt limit. Request a new code.",
+    "resendIn": "Send again in {seconds}s",
+    "deliveryHint": "If the email has not arrived, check your spam folder and the address above.",
+    "developmentCode": "Test account: use code 000000. No email is sent.",
+    "developmentSendError": "We could not prepare the code. Please try again.",
+    "developmentTooSoon": "Codes have been requested too often. Please wait before trying again.",
+    "developmentResend": "Refresh code",
+    "developmentResendIn": "Refresh code in {seconds}s"
   },
   "responsibility": {
     "title": "Responsibility for credentials",
     "text": "I confirm that this account was issued to me personally. I do not share my password or sign-in codes with third parties and I am responsible for actions taken under my account.",
-    "accept": "I accept"
+    "accept": "I accept",
+    "error": "We could not save your confirmation. Please try again."
   },
   "register": {
     "title": "Manufacturer registration",
@@ -51,17 +88,32 @@
     "companyName": "Company name",
     "bin": "BIN",
     "binHint": "12 digits",
-    "email": "Email",
+    "email": "Corporate email address",
     "heardAboutUs": "How did you hear about the platform",
     "acceptTerms": "I accept the platform terms of use",
     "submit": "Register",
-    "success": "Done. Check your email — we sent a link to set your password.",
+    "success": "A password setup link will be sent to {email}. It is valid for 72 hours.",
     "errors": {
       "bin_format": "BIN must be 12 digits",
       "bin_check_digit": "Check the BIN: the check digit does not match",
       "bin_exists": "A company with this BIN is already registered. Contact IMBC",
-      "email_exists": "This email is already in use"
-    }
+      "email_exists": "This email is already in use",
+      "company_name": "Enter a company name between 2 and 300 characters.",
+      "email_invalid": "Enter a valid email address.",
+      "heard_about_us": "Keep your answer within 500 characters.",
+      "terms_required": "Confirm that you agree to the terms of use."
+    },
+    "emailHint": "Your password setup link and sign-in codes will be sent here.",
+    "optional": "(optional)",
+    "successTitle": "Registration received",
+    "deliveryHint": "Wait for the email and check your spam folder.",
+    "resend": "Send the link again",
+    "resendIn": "Try again in {seconds}s",
+    "resendAccepted": "Request received. If the account is awaiting a password, an email will be sent.",
+    "rateLimited": "Too many requests. Wait a minute and try again.",
+    "requestError": "We could not process your request. Check your connection and try again.",
+    "recoverAccount": "Recover access",
+    "alreadyRegistered": "Already registered?"
   },
   "catalog": {
     "title": "Manufacturer catalog",
@@ -69,6 +121,15 @@
     "region": "Region",
     "group": "Commodity group",
     "groupValue": "Group {group}",
+    "tier": "Tier",
+    "tierValue": {
+      "tier_1": "Tier 1 — verified",
+      "tier_2": "Tier 2 — site surveyed"
+    },
+    "tierShort": {
+      "tier_1": "Tier 1",
+      "tier_2": "Tier 2"
+    },
     "surveyed": "Site survey",
     "unifiedRegister": "In the unified register",
     "tnved": "HS (TN VED) code",
@@ -77,39 +138,175 @@
     "sortName": "By name",
     "sortVerified": "By verification date",
     "sortRegion": "By region",
-    "found": "{count, plural, one {# company found} other {# companies found}}",
+    "found": "{count, plural, one {{total} company found} other {{total} companies found}}",
     "empty": "Nothing found. Change the filters.",
     "copyLink": "Copy link",
     "linkCopied": "Link with filters copied",
+    "linkCopyFailed": "Could not copy the link. Copy it from the address bar.",
     "columns": {
       "name": "Company",
       "bin": "BIN",
       "region": "Region",
       "groups": "Groups",
       "certificates": "Certificates",
+      "tier": "Tier",
       "verifiedAt": "Verified",
       "status": "Freshness"
     },
     "status": {
       "active": "Up to date",
       "outdated": "Needs update",
-      "inactive": "Inactive"
+      "unresponsive": "Unresponsive"
     },
     "pending": "Changes under review",
     "prev": "Previous",
     "next": "Next",
     "page": "Page {page} of {pages}"
   },
+  "company": {
+    "title": "Company page",
+    "back": "Back to catalog",
+    "details": "Company details",
+    "bin": "BIN",
+    "region": "Region",
+    "headcount": "Headcount",
+    "groups": "Commodity groups",
+    "tnved": "HS (TN VED) codes",
+    "unifiedRegister": "In the unified register",
+    "verifiedAt": "Verified on",
+    "certificates": "Certificates",
+    "certType": "Type",
+    "validUntil": "Valid until",
+    "noCertificates": "No certificates",
+    "imbc": "IMBC information",
+    "siteSurveyed": "Site survey",
+    "worksWith": "Major operators working with the company",
+    "worksWithValue": "{count} of 3",
+    "pending": "Changes are awaiting IMBC verification",
+    "contacts": "Contacts",
+    "companyPhone": "Company phone",
+    "companyEmail": "Company email",
+    "focalPoint": "Focal point",
+    "notProvided": "Not provided",
+    "notFound": "The company was not found or is not available to you.",
+    "loadError": "Could not load the company page."
+  },
   "dashboard": {
     "title": "Dashboard",
     "total": "Visible manufacturers",
     "siteSurveyed": "Site surveyed",
     "unifiedRegister": "In the unified register",
+    "tier1": "Tier 1",
+    "tier2": "Tier 2",
     "active": "Up to date",
     "outdated": "Need update",
-    "inactive": "Inactive",
+    "unresponsive": "Unresponsive",
     "byRegion": "By region",
     "byGroup": "By commodity group",
     "generatedAt": "Updated {time}"
+  },
+  "auth": {
+    "checkingSession": "Checking your access…",
+    "connectionError": "We could not connect to the platform. Check your connection and try again.",
+    "retry": "Try again",
+    "logoutError": "We could not sign you out. Please try again.",
+    "signOut": "Sign out",
+    "changeAccount": "Use another email"
+  },
+  "authLayout": {
+    "title": "Kazakhstan manufacturer registry",
+    "description": "Company profiles and verified information for manufacturers, operators and the IMBC team.",
+    "security": "Your role determines access to information. Signing in on a new device requires a code sent by email.",
+    "footer": "IMBC · Connecting with manufacturers"
+  },
+  "account": {
+    "title": "My account",
+    "description": "Your account details and sign-in security.",
+    "details": "Account details",
+    "email": "Email address",
+    "role": "Role",
+    "name": "Name",
+    "security": "Security",
+    "securityHint": "Signing in on a new device requires an email code. You can reset your password using your email address.",
+    "resetPassword": "Reset password"
+  },
+  "roles": {
+    "manufacturer": "Manufacturer",
+    "expert": "IMBC expert",
+    "administrator": "IMBC administrator",
+    "director": "IMBC director",
+    "operator": "Operator",
+    "observer": "Observer"
+  },
+  "profile": {
+    "company": "Company",
+    "bin": "BIN",
+    "status": "Profile status",
+    "statusValue": {
+      "draft": "Draft",
+      "submitted": "Submitted",
+      "under_review": "Under review",
+      "verified": "Verified",
+      "returned": "Returned"
+    },
+    "pendingChanges": "Changes are awaiting IMBC verification",
+    "completeness": "Completeness",
+    "updateStatus": "Update status",
+    "tier": "Tier",
+    "notVerifiedYet": "Appears after verification",
+    "registeredAt": "Registered on",
+    "verifiedAt": "Verified on",
+    "readOnlyHint": "Editing the profile will be available in a later release.",
+    "loadError": "Could not load the profile.",
+    "accountHint": "Your account details and sign-in security are available on your account page."
+  },
+  "reviews": {
+    "title": "Profile review queue",
+    "manufacturer": "Manufacturer",
+    "status": "Status",
+    "assignee": "SME",
+    "unassigned": "Not assigned",
+    "registeredAt": "Registered",
+    "pendingChanges": "Pending changes",
+    "statusFilter": "Status",
+    "statusAll": "All",
+    "found": "{count, plural, one {{total} profile} other {{total} profiles}}",
+    "empty": "The queue is empty.",
+    "loadError": "Could not load the queue."
+  },
+  "adminAccounts": {
+    "title": "Organisations and accounts",
+    "typeValue": {
+      "imbc": "IMBC",
+      "operator": "Operator",
+      "observer": "Observer",
+      "manufacturer": "Manufacturer"
+    },
+    "majorOperator": "Major operator",
+    "email": "Email",
+    "name": "Name",
+    "role": "Role",
+    "state": "State",
+    "stateValue": {
+      "invited": "Invited",
+      "active": "Active",
+      "inactive": "Inactive",
+      "blocked": "Blocked"
+    },
+    "lastSignIn": "Last sign-in",
+    "never": "Never",
+    "noAccounts": "No accounts",
+    "empty": "No organisations.",
+    "loadError": "Could not load accounts."
+  },
+  "notFound": {
+    "title": "Page not found",
+    "description": "The address may be mistyped, or the page has moved.",
+    "home": "Go to the start page"
+  },
+  "routeError": {
+    "title": "The page could not be opened",
+    "description": "The platform may have been updated. Reload the page to continue.",
+    "reload": "Reload the page"
   }
 }

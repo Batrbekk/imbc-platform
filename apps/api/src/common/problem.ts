@@ -62,6 +62,9 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       this.logger.error(exception);
     }
 
+    if (status === 429 && typeof body.retryAfter === 'number') {
+      res.setHeader('Retry-After', String(body.retryAfter));
+    }
     res
       .status(status)
       .type('application/problem+json')

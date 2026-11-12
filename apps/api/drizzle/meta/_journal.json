@@ -8,6 +8,34 @@
       "when": 1794234954399,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794279942690,
+      "tag": "0001_auth_security",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794280576865,
+      "tag": "0002_logout_revocation",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794416710612,
+      "tag": "0003_spec_v13_expand",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794419550887,
+      "tag": "0004_catalog_tier",
+      "breakpoints": true
     }
   ]
 }

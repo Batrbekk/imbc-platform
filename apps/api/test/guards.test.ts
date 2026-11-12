@@ -5,11 +5,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { ProblemException } from '../src/common/problem.js';
 import type { AuthContext } from '../src/modules/auth/auth.types.js';
 import { Can, Public, SessionGuard } from '../src/modules/auth/guards.js';
+import { ORGANIZATION_TYPE } from './support/organization-type.js';
 
 class Routes {
   @Public() open() {}
   @Can('catalog.search') search() {}
   @Can('accounts.manage') manageUsers() {}
+  @Can('catalog.export') exportResults() {}
+  @Can('dashboard.read') board() {}
   me() {}
 }
 
@@ -35,7 +38,7 @@ function auth(role: AuthContext['user']['role'], over: Partial<AuthContext> = {}
       fullName: null,
       role,
       organizationId: 'o',
-      organizationType: 'operator',
+      organizationType: ORGANIZATION_TYPE[role],
       locale: 'kk',
     },
     ...over,
@@ -89,8 +92,46 @@ describe('SessionGuard', () => {
     );
   });
 
+  it('наблюдатель ищет по видимым профилям и открывает дашборд (GEN-13)', async () => {
+    for (const handler of ['search', 'board'] as const) {
+      const c = ctx(handler, {});
+      expect(await code(guard(auth('observer')).g.canActivate(c))).toBe('ok');
+      expect(c.switchToHttp().getRequest<{ auth: AuthContext }>().auth.scope).toBe('visible');
+    }
+  });
+
+  it('прямой запрос наблюдателя на выгрузку отклоняется и пишется в аудит (GEN-08, GEN-13)', async () => {
+    const { g, audit } = guard(auth('observer'));
+    expect(await code(g.canActivate(ctx('exportResults', {})))).toBe('forbidden');
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'denied', action: 'catalog.export' }),
+    );
+  });
+
   it('отклоняет изменяющий запрос с чужого Origin', async () => {
     const req = { method: 'POST', get: (h: string) => (h === 'origin' ? 'https://evil.example' : undefined) };
     expect(await code(guard(auth('operator')).g.canActivate(ctx('open', req)))).toBe('bad_origin');
+  });
+
+  it.each([undefined, 'null', 'invalid-url', 'https://evil.example'])(
+    'rejects invalid or absent Origin with a session cookie',
+    async (origin) => {
+      const req = { method: 'POST', get: (h: string) => (h === 'origin' ? origin : undefined) };
+      expect(await code(guard(auth('operator')).g.canActivate(ctx('open', req)))).toBe('bad_origin');
+    },
+  );
+
+  it('accepts a same-origin mutation and a public non-browser request without cookies', async () => {
+    expect(
+      await code(
+        guard(auth('operator')).g.canActivate(
+          ctx('me', {
+            method: 'POST',
+            get: (h: string) => (h === 'origin' ? 'https://imbc.example.kz' : undefined),
+          }),
+        ),
+      ),
+    ).toBe('ok');
+    expect(await code(guard(null).g.canActivate(ctx('open', { method: 'POST', cookies: {} })))).toBe('ok');
   });
 });

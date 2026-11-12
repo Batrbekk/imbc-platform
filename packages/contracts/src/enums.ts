@@ -1,14 +1,14 @@
 /**
- * Перечисления предметной области. Источник — спецификация v1.2
- * (разделы 3, 6.3, 5.5) и архитектура v0.4 (разделы 6–9).
+ * Перечисления предметной области. Источник — спецификация v1.3
+ * (разделы 3.1, 5.5, 6.3, 6.10) и архитектура v0.4 (разделы 6–9).
  */
 
 /** Тип организации (GEN-01…06). */
-export const ORGANIZATION_TYPES = ['manufacturer', 'operator', 'spectator', 'imbc'] as const;
+export const ORGANIZATION_TYPES = ['manufacturer', 'operator', 'observer', 'imbc'] as const;
 export type OrganizationType = (typeof ORGANIZATION_TYPES)[number];
 
 /** Роли (раздел 3.1, D-51). У IMBC три роли, суперпользователя нет. */
-export const ROLES = ['manufacturer', 'expert', 'administrator', 'director', 'operator', 'spectator'] as const;
+export const ROLES = ['manufacturer', 'expert', 'administrator', 'director', 'operator', 'observer'] as const;
 export type Role = (typeof ROLES)[number];
 
 /** Состояние аккаунта (раздел 9.1). */
@@ -20,10 +20,17 @@ export const PROFILE_STATUSES = ['draft', 'submitted', 'under_review', 'verified
 export type ProfileStatus = (typeof PROFILE_STATUSES)[number];
 
 /** Статус актуальности верифицированного профиля (UPD-01…06). */
-export const UPDATE_STATUSES = ['active', 'outdated', 'inactive'] as const;
+export const UPDATE_STATUSES = ['active', 'outdated', 'unresponsive'] as const;
 export type UpdateStatus = (typeof UPDATE_STATUSES)[number];
 
-/** Восемь секций профиля (раздел 5.2). Production — не входит в полноту (MAN-91). */
+/**
+ * Тир профиля (IMBC-19, IMBC-20): tier_1 — верифицирован, tier_2 — пока профиль site surveyed.
+ * Тир выводится, отдельно не записывается. Tier 3 принадлежит продукту (IMBC-21) и сюда не входит.
+ */
+export const PROFILE_TIERS = ['tier_1', 'tier_2'] as const;
+export type ProfileTier = (typeof PROFILE_TIERS)[number];
+
+/** Восемь секций профиля (раздел 5.2). Production — не входит в полноту (MAN-41). */
 export const PROFILE_SECTIONS = [
   'main',
   'contacts',
@@ -45,11 +52,11 @@ export type DocumentStatus = (typeof DOCUMENT_STATUSES)[number];
 export const COMMODITY_GROUPS = ['A', 'B', 'C', 'D', 'E'] as const;
 export type CommodityGroup = (typeof COMMODITY_GROUPS)[number];
 
-/** Роль контакта (MAN-20). */
+/** Роль контакта (MAN-13). */
 export const CONTACT_ROLES = ['management', 'technical', 'commercial'] as const;
 export type ContactRole = (typeof CONTACT_ROLES)[number];
 
-/** Единицы производственной мощности в год (MAN-50). */
+/** Единицы производственной мощности в год (MAN-23). */
 export const CAPACITY_UNITS = ['pieces', 'tonnes', 'metres', 'sets'] as const;
 export type CapacityUnit = (typeof CAPACITY_UNITS)[number];
 

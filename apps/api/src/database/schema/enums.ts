@@ -9,6 +9,7 @@ import {
   ORGANIZATION_TYPES,
   PROFILE_SECTIONS,
   PROFILE_STATUSES,
+  PROFILE_TIERS,
   ROLES,
   UPDATE_STATUSES,
 } from '@imbc/contracts';
@@ -19,6 +20,7 @@ export const role = pgEnum('role', ROLES);
 export const accountState = pgEnum('account_state', ACCOUNT_STATES);
 export const profileStatus = pgEnum('profile_status', PROFILE_STATUSES);
 export const updateStatus = pgEnum('update_status', UPDATE_STATUSES);
+export const profileTier = pgEnum('profile_tier', PROFILE_TIERS);
 export const profileSection = pgEnum('profile_section', PROFILE_SECTIONS);
 export const documentStatus = pgEnum('document_status', DOCUMENT_STATUSES);
 export const commodityGroup = pgEnum('commodity_group', COMMODITY_GROUPS);

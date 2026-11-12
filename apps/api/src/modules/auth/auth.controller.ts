@@ -2,15 +2,19 @@ import { Body, Controller, Get, HttpCode, Inject, Logger, Post, Query, Req, Res 
 import { ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
+import { LOCALES, roleHome, safeReturnTo } from '@imbc/contracts';
 import { AuditService } from '../../common/audit.service.js';
 import { parseOrThrow, ProblemException } from '../../common/problem.js';
 import { ENV, type Env } from '../../config/env.js';
 import { MailService } from '../../mail/mail.service.js';
 import type { AuthContext } from './auth.types.js';
 import { sign, unsign } from './crypto.js';
-import { AllowMfaPending, AllowResponsibilityPending, Auth, Public } from './guards.js';
+import { otpDeliveryFor } from './development-otp.js';
+import { postLoginPath } from './post-login.js';
+import { AllowMfaPending, AllowResponsibilityPending, Auth, Public, SignedBackchannel } from './guards.js';
 import { OidcService } from './oidc.service.js';
 import { ABSOLUTE_TIMEOUT_MS, OTP_TTL_MS, SessionService, TRUSTED_DEVICE_MS } from './session.service.js';
+import { AuthRateLimitService } from './rate-limit.service.js';
 
 const FLOW_COOKIE = 'imbc-oidc-flow';
 const FLOW_TTL_MS = 10 * 60 * 1000;
@@ -21,9 +25,6 @@ interface Flow {
   r: string;
   exp: number;
 }
-
-const safeReturnTo = (value: unknown): string =>
-  typeof value === 'string' && value.startsWith('/') && !value.startsWith('//') ? value : '/';
 
 /**
  * BFF-вход (ADR-04, ADR-20): OIDC Code + PKCE → сеанс в PostgreSQL →
@@ -39,6 +40,7 @@ export class AuthController {
     private readonly sessions: SessionService,
     private readonly audit: AuditService,
     private readonly mail: MailService,
+    private readonly rates: AuthRateLimitService,
     @Inject(ENV) private readonly env: Env,
   ) {}
 
@@ -47,6 +49,7 @@ export class AuthController {
   async login(
     @Query('returnTo') returnTo: string | undefined,
     @Query('locale') locale: string | undefined,
+    @Query('prompt') prompt: string | undefined,
     @Res() res: Response,
   ) {
     const pkce = OidcService.newPkce();
@@ -63,9 +66,32 @@ export class AuthController {
     const url = await this.oidc.authorizationUrl({
       state: pkce.state,
       codeChallenge: await pkce.challenge,
-      locale: locale ?? 'kk',
+      locale: LOCALES.includes(locale as never) ? locale! : 'kk',
+      ...(prompt === 'login' ? { prompt: 'login' as const } : {}),
     });
     res.redirect(302, url.toString());
+  }
+
+  @Public()
+  @Get('password-reset')
+  passwordReset(@Query('locale') locale: string | undefined, @Res() res: Response) {
+    res.redirect(302, this.oidc.passwordResetUrl(LOCALES.includes(locale as never) ? locale! : 'kk').toString());
+  }
+
+  @Public()
+  @SignedBackchannel()
+  @Post('backchannel-logout')
+  @HttpCode(200)
+  async backchannelLogout(@Body() body: unknown) {
+    const { logout_token } = parseOrThrow(z.object({ logout_token: z.string().min(1).max(16000) }), body);
+    let claims: Awaited<ReturnType<OidcService['verifyLogoutToken']>>;
+    try {
+      claims = await this.oidc.verifyLogoutToken(logout_token);
+    } catch {
+      throw new ProblemException(400, 'invalid_logout_token', 'Некорректное уведомление о выходе');
+    }
+    await this.sessions.backchannelLogout(claims);
+    return { ok: true };
   }
 
   @Public()
@@ -86,7 +112,11 @@ export class AuthController {
       return res.redirect(302, '/login?error=oidc');
     }
 
-    const account = await this.sessions.findAccountForLogin(identity.subject, identity.email);
+    if (!identity.emailVerified) return res.redirect(302, '/login?error=email_unverified');
+    if (!identity.sessionId || !Number.isFinite(identity.authTime.getTime()) || identity.authTime.getTime() <= 0) {
+      return res.redirect(302, '/login?error=oidc');
+    }
+    const account = await this.sessions.findAccountForLogin(identity.subject, identity.email, identity.emailVerified);
     if (!account || account.state === 'blocked') {
       await this.audit.record({
         action: 'auth.sign_in',
@@ -99,16 +129,31 @@ export class AuthController {
       return res.redirect(302, '/login?error=no_account');
     }
 
-    await this.sessions.markSignedIn(account.id, identity.subject);
-    const trusted = await this.sessions.isTrustedDevice(account.id, req.cookies?.[this.env.DEVICE_COOKIE_NAME]);
-    const session = await this.sessions.create({
-      userId: account.id,
-      authVersion: account.authVersion,
-      mfaPassed: trusted,
-      idToken: identity.idToken,
-      ip: req.ip ?? null,
-      userAgent: req.get('user-agent') ?? null,
-    });
+    if (account.state === 'inactive') return res.redirect(302, '/login?error=account_inactive');
+    if (
+      account.credentialsChangedAt &&
+      identity.authTime.getTime() < Math.floor(account.credentialsChangedAt.getTime() / 1000) * 1000
+    ) {
+      return res.redirect(302, '/login?error=session_expired');
+    }
+    const current = await this.sessions.markSignedIn(account.id, identity.subject);
+    if (!current) return res.redirect(302, '/login?error=no_account');
+    let session: Awaited<ReturnType<SessionService['create']>>;
+    try {
+      session = await this.sessions.create({
+        userId: account.id,
+        authVersion: current.authVersion,
+        deviceToken: req.cookies?.[this.env.DEVICE_COOKIE_NAME],
+        idToken: identity.idToken,
+        idpSessionId: identity.sessionId,
+        idpAuthTime: identity.authTime,
+        ip: req.ip ?? null,
+        userAgent: req.get('user-agent') ?? null,
+      });
+    } catch (error) {
+      if (error instanceof ProblemException) return res.redirect(302, '/login?error=session_expired');
+      throw error;
+    }
     await this.audit.record({
       userId: account.id,
       organizationId: account.organizationId,
@@ -123,7 +168,8 @@ export class AuthController {
       ...this.sessions.cookieBase,
       maxAge: ABSOLUTE_TIMEOUT_MS,
     });
-    const next = trusted ? flow.r : `/auth/verify?returnTo=${encodeURIComponent(flow.r)}`;
+    const returnTo = postLoginPath(current.role, flow.r);
+    const next = session.mfaPassed ? returnTo : `/auth/verify?returnTo=${encodeURIComponent(returnTo)}`;
     return res.redirect(302, next);
   }
 
@@ -134,6 +180,8 @@ export class AuthController {
     return {
       user: auth.user,
       gates: { mfa: auth.mfaPassed, responsibility: auth.responsibilityAccepted },
+      homePath: roleHome(auth.user.role),
+      otpDelivery: otpDeliveryFor(this.env, auth.user),
     };
   }
 
@@ -142,13 +190,31 @@ export class AuthController {
   @AllowResponsibilityPending()
   @Post('otp/send')
   @HttpCode(202)
-  async sendOtp(@Auth() auth: AuthContext) {
-    if (auth.mfaPassed) return { sent: false, reason: 'not_required' };
-    const code = await this.sessions.issueOtp(auth.sessionId);
-    if (!code) return { sent: false, reason: 'too_soon' };
+  async sendOtp(@Auth() auth: AuthContext, @Req() req: Request) {
+    if (auth.mfaPassed) return { sent: false, reason: 'not_required', retryAfter: 0 };
+    await this.rates.enforce('otp-send-ip', req.ip ?? 'unknown', 120, 3600);
+    await this.rates.enforce('otp-send-user', auth.user.id, 60, 3600);
+    const issued = await this.sessions.issueOtp(auth.sessionId, auth.user.id);
+    if (!issued.issued) return { sent: false, reason: issued.reason, retryAfter: issued.retryAfter };
+    if (issued.delivery === 'development_code')
+      return {
+        sent: false,
+        reason: 'development_code',
+        retryAfter: issued.retryAfter,
+        expiresAt: issued.expiresAt.toISOString(),
+      };
     // NOT-02: на языке учётной записи; отправляется сразу, без очереди — пользователь ждёт код.
-    await this.mail.send('NOT-02', auth.user.email, auth.user.locale, { code, minutes: OTP_TTL_MS / 60_000 });
-    return { sent: true };
+    try {
+      await this.mail.send('NOT-02', auth.user.email, auth.user.locale, {
+        code: issued.code,
+        minutes: OTP_TTL_MS / 60_000,
+      });
+    } catch {
+      await this.sessions.discardUndeliveredOtp(issued.id, auth.user.id);
+      this.logger.warn('OTP email delivery failed');
+      throw new ProblemException(503, 'mail_unavailable', 'Не удалось отправить письмо. Попробуйте снова.');
+    }
+    return { sent: true, retryAfter: issued.retryAfter, expiresAt: issued.expiresAt.toISOString() };
   }
 
   @AllowMfaPending()
@@ -162,10 +228,12 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const { code } = parseOrThrow(z.object({ code: z.string().regex(/^\d{6}$/) }), body);
-    const result = await this.sessions.verifyOtp(auth.sessionId, code);
+    await this.rates.enforce('otp-verify-user', auth.user.id, 60, 3600);
+    const result = await this.sessions.verifyOtp(auth.sessionId, auth.user.id, code);
     if (result !== 'ok') throw new ProblemException(400, `otp_${result}`, 'Код не принят');
     // Устройство запоминается на 30 дней (AUTH-03).
-    const device = await this.sessions.trustDevice(auth.user.id);
+    const device = await this.sessions.trustDevice(auth.user.id, auth.sessionId);
+    if (!device) throw new ProblemException(401, 'session_expired', 'Войдите снова');
     res.cookie(this.env.DEVICE_COOKIE_NAME, device.token, {
       ...this.sessions.cookieBase,
       maxAge: TRUSTED_DEVICE_MS,
@@ -205,7 +273,15 @@ export class AuthController {
   @Post('logout')
   @HttpCode(200)
   async logout(@Auth() auth: AuthContext, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const idToken = await this.sessions.destroy(auth.sessionId);
+    const idToken = await this.sessions.logoutToken(auth.sessionId);
+    try {
+      // RP logout runs on the server: ID tokens never enter a browser response or URL.
+      await this.oidc.logout(idToken);
+    } catch {
+      // Preserve the local session so the user can retry an unavailable IdP logout.
+      throw new ProblemException(503, 'logout_unavailable', 'Не удалось завершить выход. Попробуйте снова.');
+    }
+    await this.sessions.destroy(auth.sessionId);
     res.clearCookie(this.env.SESSION_COOKIE_NAME, this.sessions.cookieBase);
     await this.audit.record({
       userId: auth.user.id,
@@ -216,6 +292,6 @@ export class AuthController {
       isAccountEvent: true,
       ip: req.ip ?? null,
     });
-    return { redirectTo: await this.oidc.endSessionUrl(idToken) };
+    return { redirectTo: '/login?logged_out=1' };
   }
 }

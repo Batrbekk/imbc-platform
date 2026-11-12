@@ -8,16 +8,22 @@ import { ENV, type Env } from './config/env.js';
 import { DatabaseModule } from './database/database.module.js';
 import { InfraModule } from './infra/infra.module.js';
 import { MailService } from './mail/mail.service.js';
+import { AccountsController } from './modules/admin/accounts.controller.js';
+import { AccountsService } from './modules/admin/accounts.service.js';
 import { AuthController } from './modules/auth/auth.controller.js';
 import { SessionGuard } from './modules/auth/guards.js';
 import { KeycloakAdminService } from './modules/auth/keycloak-admin.service.js';
 import { OidcService } from './modules/auth/oidc.service.js';
 import { SessionService } from './modules/auth/session.service.js';
+import { AuthRateLimitService } from './modules/auth/rate-limit.service.js';
 import { CatalogController } from './modules/catalog/catalog.controller.js';
 import { CatalogService } from './modules/catalog/catalog.service.js';
 import { HealthController } from './modules/health/health.controller.js';
+import { ProfilesController } from './modules/profiles/profiles.controller.js';
 import { ProfilesService } from './modules/profiles/profiles.service.js';
 import { RegistrationController } from './modules/registration/registration.controller.js';
+import { ReviewsController } from './modules/reviews/reviews.controller.js';
+import { ReviewsService } from './modules/reviews/reviews.service.js';
 
 @Module({
   imports: [
@@ -38,13 +44,24 @@ import { RegistrationController } from './modules/registration/registration.cont
     InfraModule,
     AuditModule,
   ],
-  controllers: [HealthController, AuthController, RegistrationController, CatalogController],
+  controllers: [
+    HealthController,
+    AuthController,
+    RegistrationController,
+    CatalogController,
+    ProfilesController,
+    ReviewsController,
+    AccountsController,
+  ],
   providers: [
     OidcService,
     SessionService,
+    AuthRateLimitService,
     KeycloakAdminService,
     ProfilesService,
     CatalogService,
+    ReviewsService,
+    AccountsService,
     MailService,
     { provide: APP_GUARD, useClass: SessionGuard },
     { provide: APP_FILTER, useClass: ProblemDetailsFilter },

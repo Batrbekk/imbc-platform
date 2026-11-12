@@ -8,6 +8,7 @@ import { DatabaseModule } from '../database/database.module.js';
 import { InfraModule, QUEUE } from '../infra/infra.module.js';
 import { MailService } from '../mail/mail.service.js';
 import { KeycloakAdminService } from '../modules/auth/keycloak-admin.service.js';
+import { SessionService } from '../modules/auth/session.service.js';
 import { PLATFORM_TZ, QUEUES, type QueueName, SCHEDULES } from '../jobs/queues.js';
 import { JobHandlers } from './handlers.service.js';
 
@@ -27,7 +28,7 @@ import { JobHandlers } from './handlers.service.js';
     InfraModule,
     AuditModule,
   ],
-  providers: [JobHandlers, MailService, KeycloakAdminService],
+  providers: [JobHandlers, MailService, KeycloakAdminService, SessionService],
 })
 export class WorkerModule implements OnApplicationBootstrap {
   private readonly logger = new Logger('Worker');
@@ -42,6 +43,8 @@ export class WorkerModule implements OnApplicationBootstrap {
     const routes: Record<QueueName, (data: never) => Promise<void>> = {
       [QUEUES.scanFile]: (d) => h.scanFile(d),
       [QUEUES.sendNotification]: (d) => h.sendNotification(d),
+      [QUEUES.sendPasswordEmail]: (d) => h.sendPasswordEmail(d),
+      [QUEUES.cleanupIdentity]: (d) => h.cleanupIdentity(d),
       [QUEUES.certificateExpiry]: () => h.certificateExpiry(),
       [QUEUES.purgeSessions]: () => h.purgeSessions(),
       [QUEUES.purgeExportFiles]: () => h.purgeExportFiles(),
@@ -56,7 +59,11 @@ export class WorkerModule implements OnApplicationBootstrap {
     };
 
     for (const [queue, run] of Object.entries(routes) as [QueueName, (data: never) => Promise<void>][]) {
-      await this.boss.createQueue(queue, { retryLimit: 5, retryBackoff: true, retryDelay: 30 });
+      await this.boss.createQueue(queue, {
+        retryLimit: queue === QUEUES.sendPasswordEmail || queue === QUEUES.cleanupIdentity ? 10 : 5,
+        retryBackoff: true,
+        retryDelay: 30,
+      });
       await this.boss.work(queue, async (jobs) => {
         for (const job of jobs) await run(job.data as never);
       });

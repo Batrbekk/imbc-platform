@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import * as client from 'openid-client';
+import { createRemoteJWKSet, customFetch, jwtVerify, type JWTVerifyGetKey } from 'jose';
 import { ENV, type Env } from '../../config/env.js';
 
 /**
@@ -10,6 +11,7 @@ import { ENV, type Env } from '../../config/env.js';
 @Injectable()
 export class OidcService {
   private config?: Promise<client.Configuration>;
+  private logoutKeys?: JWTVerifyGetKey;
 
   constructor(@Inject(ENV) private readonly env: Env) {}
 
@@ -54,7 +56,12 @@ export class OidcService {
     };
   }
 
-  async authorizationUrl(params: { state: string; codeChallenge: string; locale: string }): Promise<URL> {
+  async authorizationUrl(params: {
+    state: string;
+    codeChallenge: string;
+    locale: string;
+    prompt?: 'login';
+  }): Promise<URL> {
     return client.buildAuthorizationUrl(await this.configuration(), {
       redirect_uri: this.redirectUri,
       scope: 'openid email profile',
@@ -62,6 +69,8 @@ export class OidcService {
       code_challenge_method: 'S256',
       state: params.state,
       ui_locales: params.locale,
+      max_age: '43200',
+      ...(params.prompt ? { prompt: params.prompt } : {}),
     });
   }
 
@@ -75,15 +84,97 @@ export class OidcService {
     return {
       subject: claims.sub,
       email: typeof claims.email === 'string' ? claims.email : null,
+      emailVerified: claims.email_verified === true,
       name: typeof claims.name === 'string' ? claims.name : null,
       idToken: tokens.id_token ?? null,
+      sessionId: typeof claims.sid === 'string' ? claims.sid : null,
+      authTime: new Date((typeof claims.auth_time === 'number' ? claims.auth_time : 0) * 1000),
     };
   }
 
-  async endSessionUrl(idTokenHint: string | null): Promise<string> {
-    const params: Record<string, string> = { post_logout_redirect_uri: this.env.PUBLIC_URL };
-    if (idTokenHint) params.id_token_hint = idTokenHint;
-    return client.buildEndSessionUrl(await this.configuration(), params).toString();
+  /** Keycloak supports direct reset entry; return starts a fresh PKCE login. */
+  passwordResetUrl(locale: string): URL {
+    const issuer = new URL(this.env.OIDC_ISSUER);
+    const url = new URL(`${issuer.pathname}/login-actions/reset-credentials`, issuer.origin);
+    url.search = new URLSearchParams({
+      client_id: this.env.OIDC_CLIENT_ID,
+      redirect_uri: new URL('/api/auth/login', this.env.PUBLIC_URL).toString(),
+      kc_locale: locale,
+    }).toString();
+    return url;
+  }
+
+  /** Verify Keycloak's signed OIDC Back-Channel Logout token, never a browser token. */
+  async verifyLogoutToken(token: string): Promise<{ jti: string; iat: number; sid?: string; sub?: string }> {
+    if (!this.logoutKeys) {
+      const metadata = (await this.configuration()).serverMetadata();
+      if (!metadata.jwks_uri) throw new Error('OIDC provider has no JWKS endpoint');
+      const fetchInternal = this.internalFetch();
+      this.logoutKeys = createRemoteJWKSet(new URL(metadata.jwks_uri), {
+        [customFetch]: (url, options) =>
+          fetchInternal(String(url), {
+            ...options,
+            body: undefined,
+            headers: Object.fromEntries(options.headers.entries()),
+          }),
+        timeoutDuration: 5000,
+      });
+    }
+    const { payload } = await jwtVerify(token, this.logoutKeys, {
+      issuer: this.env.OIDC_ISSUER,
+      audience: this.env.OIDC_CLIENT_ID,
+      algorithms: ['RS256', 'PS256', 'ES256'],
+      requiredClaims: ['iat', 'jti'],
+      maxTokenAge: '5 minutes',
+      clockTolerance: 30,
+    });
+    const events = payload.events as Record<string, unknown> | undefined;
+    const logoutEvent = events?.['http://schemas.openid.net/event/backchannel-logout'];
+    if (
+      typeof payload.jti !== 'string' ||
+      !payload.jti ||
+      'nonce' in payload ||
+      typeof logoutEvent !== 'object' ||
+      logoutEvent === null ||
+      Array.isArray(logoutEvent) ||
+      Object.keys(logoutEvent).length !== 0 ||
+      (!payload.sid && !payload.sub) ||
+      (payload.sid !== undefined && (typeof payload.sid !== 'string' || !payload.sid)) ||
+      (payload.sub !== undefined && (typeof payload.sub !== 'string' || !payload.sub))
+    ) {
+      throw new Error('Invalid logout token claims');
+    }
+    return {
+      jti: payload.jti,
+      iat: payload.iat!,
+      ...(typeof payload.sid === 'string' ? { sid: payload.sid } : {}),
+      ...(payload.sub ? { sub: payload.sub } : {}),
+    };
+  }
+
+  async logout(idTokenHint: string | null): Promise<void> {
+    if (!idTokenHint) throw new Error('Session has no ID token for RP logout');
+    const endpoint = (await this.configuration()).serverMetadata().end_session_endpoint;
+    if (!endpoint) throw new Error('OIDC provider has no logout endpoint');
+    const response = await this.internalFetch()(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        id_token_hint: idTokenHint,
+        client_id: this.env.OIDC_CLIENT_ID,
+        post_logout_redirect_uri: this.env.PUBLIC_URL,
+      }).toString(),
+      redirect: 'manual',
+      signal: AbortSignal.timeout(10000),
+    });
+    const location = response.headers.get('location');
+    if (
+      ![302, 303].includes(response.status) ||
+      !location ||
+      new URL(location).origin !== new URL(this.env.PUBLIC_URL).origin
+    ) {
+      throw new Error('OIDC logout did not confirm completion');
+    }
   }
 
   static newPkce() {
