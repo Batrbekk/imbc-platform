@@ -16,7 +16,7 @@ export const forecastTexts = defineDictionary({
     versions: "Versions",
     publishTitle: "Publish {file}?",
     publishDescription:
-      "The version becomes visible to manufacturers and replaces the previous one for them. IMBC keeps earlier versions. Rows with problems are not published.",
+      "The version becomes visible to manufacturers and replaces the previous one for them. IMBC keeps earlier versions. In this prototype, rows from the problem report are not shown to manufacturers.",
     published: "Published the demand forecast {file}",
   },
   ru: {
@@ -34,7 +34,7 @@ export const forecastTexts = defineDictionary({
     versions: "Версии",
     publishTitle: "Опубликовать {file}?",
     publishDescription:
-      "Версия станет видна производителям и заменит для них прежнюю. Прежние версии IMBC хранит. Строки с ошибками не публикуются.",
+      "Версия станет видна производителям и заменит для них прежнюю. Прежние версии IMBC хранит. В прототипе строки из отчёта об ошибках производителям не показываются.",
     published: "Опубликован прогноз спроса {file}",
   },
   kk: {
@@ -52,7 +52,7 @@ export const forecastTexts = defineDictionary({
     versions: "Нұсқалар",
     publishTitle: "{file} жариялау керек пе?",
     publishDescription:
-      "Нұсқа өндірушілерге көрінеді және олар үшін бұрынғысын ауыстырады. IMBC бұрынғы нұсқаларды сақтайды. Қатесі бар жолдар жарияланбайды.",
+      "Нұсқа өндірушілерге көрінеді және олар үшін бұрынғысын ауыстырады. IMBC бұрынғы нұсқаларды сақтайды. Прототипте қателер есебіндегі жолдар өндірушілерге көрсетілмейді.",
     published: "Сұраныс болжамы жарияланды: {file}",
   },
 });

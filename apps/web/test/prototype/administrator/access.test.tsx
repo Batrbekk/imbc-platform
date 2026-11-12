@@ -107,9 +107,10 @@ describe("кабинет администратора", () => {
     }
   });
 
-  it("почта сеанса не из демо-данных не попадает в записи модуля", async () => {
+  it("почта и имя сеанса не из демо-данных не попадают в хранилище и на экраны", async () => {
     const email = "someone@real.example";
-    const { user, state } = renderCabinet("/proto/administrator/api", { role: "administrator", email });
+    const fullName = "Настоящий Человек";
+    const { user, state } = renderCabinet("/proto/administrator/api", { role: "administrator", email, fullName });
     await user.click(await screen.findByRole("button", { name: "Issue credentials" }));
     const dialog = await screen.findByRole("alertdialog");
     await user.click(within(dialog).getByRole("radio", { name: "Оператор В (демо)" }));
@@ -117,16 +118,25 @@ describe("кабинет администратора", () => {
     await waitFor(() => expect(state().apiCredentials.at(-1)?.operatorOrgId).toBe("org-operator-c"));
     expect(state().apiCredentials.at(-1)?.issuedBy).toBe("acc-admin");
 
-    // Записи модуля (всё, кроме actor событий журнала — его пишет общий слой) без почты сеанса.
-    const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY)!) as Record<string, unknown> & {
-      audit: { actor: unknown }[];
-    };
-    const { audit, ...records } = stored;
-    expect(JSON.stringify(records)).not.toContain(email);
-    expect(JSON.stringify(audit.map((event) => ({ ...event, actor: null })))).not.toContain(email);
-    // Журнал показывает автора по ключу демо-аккаунта, не почту сеанса.
+    // Всё сохранённое состояние, включая журнал и его actor.
+    const stored = window.localStorage.getItem(STORAGE_KEY)!;
+    expect(stored).not.toContain(email);
+    expect(stored).not.toContain(fullName);
+    expect(state().audit.at(-1)?.actor).toMatchObject({ accountId: "acc-admin", email: "admin@imbc.local" });
+
     await user.click(screen.getByRole("link", { name: "Audit log" }));
     await screen.findByRole("heading", { level: 1, name: "Audit log" });
     expect(within(screen.getByRole("table")).queryByText(email)).toBeNull();
+    expect(within(screen.getByRole("table")).queryByText(fullName)).toBeNull();
+  });
+
+  it("сеанс не из демо-данных не блокирует аккаунт, от имени которого действует (ADM-02)", async () => {
+    renderCabinet("/proto/administrator/organizations?type=imbc", {
+      role: "administrator",
+      email: "someone@real.example",
+    });
+    const row = (await screen.findAllByText("admin@imbc.local")).map((c) => c.closest("tr")).find(Boolean)!;
+    expect(within(row).getByText("Your account")).toBeTruthy();
+    expect(within(row).queryByRole("button", { name: "Block" })).toBeNull();
   });
 });

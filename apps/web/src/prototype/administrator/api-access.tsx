@@ -11,9 +11,9 @@ import { ConfirmAction, ProtoPage } from "@/prototype/components";
 import type { ApiCredential } from "@/prototype/data";
 import { localized, useDictionary } from "@/prototype/i18n";
 import { accountName, organizationName } from "@/prototype/rules";
-import { newId, nowIso, useProto, useProtoUpdate } from "@/prototype/store";
+import { newId, nowIso, useProto } from "@/prototype/store";
 
-import { useAdminAccountId } from "./actor";
+import { useAdminAccountId, useGuardedUpdate } from "./actor";
 import { apiAccessTexts } from "./api-access-texts";
 import { ChoiceField } from "./fields";
 import { texts } from "./texts";
@@ -31,7 +31,7 @@ export function ApiAccessScreen() {
   const t = useDictionary(apiAccessTexts);
   const admin = useDictionary(texts);
   const format = useFormat();
-  const update = useProtoUpdate();
+  const update = useGuardedUpdate();
   const adminId = useAdminAccountId();
   const state = useProto();
   const operators = state.organizations.filter((o) => o.type === "operator");
@@ -45,13 +45,15 @@ export function ApiAccessScreen() {
     const org = organizationName(state, orgId);
     const sequence = state.apiCredentials.filter((c) => c.operatorOrgId === orgId).length + 1;
     const clientId = `demo-client-${orgId.replace(/^org-/, "")}-${String(sequence).padStart(4, "0")}`;
-    update(
+    const issued = update(
       {
         action: "api_credential.issue",
         subject: { type: "api_credential", id, label: org },
         summary: localized(apiAccessTexts, "issuedAudit"),
       },
       (draft) => {
+        // Организацию могли удалить сбросом в другой вкладке: доступ только существующему оператору (OPR-38).
+        if (!draft.organizations.some((o) => o.id === orgId && o.type === "operator")) return false;
         draft.apiCredentials.push({
           id,
           operatorOrgId: orgId,
@@ -62,9 +64,10 @@ export function ApiAccessScreen() {
           revokedAt: null,
           revokedBy: null,
         });
+        return true;
       },
     );
-    setShown({ org, clientId, key });
+    if (issued) setShown({ org, clientId, key });
   };
 
   const revoke = (credential: ApiCredential) =>
@@ -79,9 +82,11 @@ export function ApiAccessScreen() {
         summary: localized(apiAccessTexts, "revokedAudit"),
       },
       (draft) => {
-        const target = draft.apiCredentials.find((c) => c.id === credential.id)!;
+        const target = draft.apiCredentials.find((c) => c.id === credential.id);
+        if (!target || target.revokedAt) return false;
         target.revokedAt = nowIso();
         target.revokedBy = adminId;
+        return true;
       },
     );
 

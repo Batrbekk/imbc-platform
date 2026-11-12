@@ -14,6 +14,7 @@ export const ndaTexts = defineDictionary({
     versionTaken: "This version already exists.",
     summary: "What changed",
     published: "Published NDA version {version}",
+    noVersions: "No NDA version has been published yet.",
   },
   ru: {
     title: "Версии NDA",
@@ -28,6 +29,7 @@ export const ndaTexts = defineDictionary({
     versionTaken: "Такая версия уже есть.",
     summary: "Что изменилось",
     published: "Опубликована версия NDA {version}",
+    noVersions: "Версий NDA ещё не опубликовано.",
   },
   kk: {
     title: "NDA нұсқалары",
@@ -42,5 +44,6 @@ export const ndaTexts = defineDictionary({
     versionTaken: "Мұндай нұсқа бар.",
     summary: "Не өзгерді",
     published: "NDA {version} нұсқасы жарияланды",
+    noVersions: "NDA нұсқалары әлі жарияланбаған.",
   },
 });

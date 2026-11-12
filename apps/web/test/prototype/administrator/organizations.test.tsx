@@ -155,4 +155,19 @@ describe("организации и аккаунты (ADM-01…ADM-06)", () => {
     );
     expect(state().audit.at(-1)).toMatchObject({ action: "organization.unmark_major" });
   });
+
+  it("смена почты на тот же адрес не подтверждается (ADM-05)", async () => {
+    const { user, state } = renderCabinet(`${URL}?type=manufacturer`, { role: "administrator" });
+    const before = state().audit.length;
+    await user.click(
+      within(await rowOf("account@company5.demo.local")).getByRole("button", { name: "Change login email" }),
+    );
+    const dialog = await screen.findByRole("alertdialog");
+    await user.type(within(dialog).getByRole("textbox", { name: "New login email" }), "ACCOUNT@company5.demo.local");
+    expect(within(dialog).getByText("This is the current login email.")).toBeTruthy();
+    expect((within(dialog).getByRole("button", { name: "Change login email" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(state().audit).toHaveLength(before);
+  });
 });

@@ -39,6 +39,7 @@ export const organizationsTexts = defineDictionary({
     changeEmailDescription:
       "A manufacturer organisation has exactly one account. It signs in with a company mailbox, not a person’s address.",
     newEmail: "New login email",
+    emailSame: "This is the current login email.",
     emailChanged: "Changed the login email from {from} to {to}",
     manufacturersTitle: "Manufacturer accounts",
     manufacturersDescription:
@@ -84,6 +85,7 @@ export const organizationsTexts = defineDictionary({
     changeEmailDescription:
       "У организации производителя ровно один аккаунт. Он входит с почтового ящика компании, а не с адреса человека.",
     newEmail: "Новая почта для входа",
+    emailSame: "Это текущая почта для входа.",
     emailChanged: "Почта для входа изменена: {from} → {to}",
     manufacturersTitle: "Аккаунты производителей",
     manufacturersDescription:
@@ -129,6 +131,7 @@ export const organizationsTexts = defineDictionary({
     changeEmailDescription:
       "Өндіруші ұйымында бір ғана аккаунт бар. Ол адамның емес, компанияның пошта жәшігімен кіреді.",
     newEmail: "Жаңа кіру поштасы",
+    emailSame: "Бұл — қазіргі кіру поштасы.",
     emailChanged: "Кіру поштасы өзгертілді: {from} → {to}",
     manufacturersTitle: "Өндірушілер аккаунттары",
     manufacturersDescription:

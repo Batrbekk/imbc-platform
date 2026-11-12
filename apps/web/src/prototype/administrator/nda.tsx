@@ -2,6 +2,7 @@
 import { useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
 import { ConfirmAction, ProtoPage } from "@/prototype/components";
 import { localized, useDictionary } from "@/prototype/i18n";
 import { accountName, currentNda } from "@/prototype/rules";
@@ -21,11 +22,19 @@ export function NdaScreen() {
         <AlertTitle>{t("effectTitle")}</AlertTitle>
         <AlertDescription>{t("effect")}</AlertDescription>
       </Alert>
-      <NdaVersionsView
-        versions={state.ndaVersions}
-        currentId={currentNda(state).id}
-        accountName={(id) => accountName(state, id)}
-      />
+      {state.ndaVersions.length === 0 ? (
+        <Empty className="border">
+          <EmptyHeader>
+            <EmptyDescription>{t("noVersions")}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : (
+        <NdaVersionsView
+          versions={state.ndaVersions}
+          currentId={currentNda(state).id}
+          accountName={(id) => accountName(state, id)}
+        />
+      )}
     </ProtoPage>
   );
 }

@@ -123,4 +123,26 @@ describe("файлы STR и KTRE (ADM-15, FC-08)", () => {
     expect(await screen.findByRole("region", { name: "Реагенты буровые" })).toBeTruthy();
     expect(state().techFiles.at(-1)).toMatchObject({ group: "D", kind: "str", tnved: "3824999609" });
   });
+
+  it("тот же продукт и вид файла — замена существующего, а не вторая запись (ADM-15)", async () => {
+    const { user, state } = renderCabinet("/proto/administrator/tech-files", { role: "administrator" });
+    const before = state().techFiles.length;
+    await user.click(await screen.findByRole("button", { name: "Add product" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("radio", { name: "Group B" }));
+    await user.type(within(dialog).getByRole("textbox", { name: "Product" }), "Краны шаровые DN50");
+    await user.type(within(dialog).getByRole("textbox", { name: "TN VED code" }), "8481805190");
+    await user.upload(
+      within(dialog).getByLabelText("PDF file"),
+      new File(["x"], "str-valves-v2.pdf", { type: "application/pdf" }),
+    );
+    expect(
+      within(dialog).getByText(/already has an STR file \(str-8481805190.pdf\): it will be replaced/),
+    ).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "Replace existing file" }));
+
+    await waitFor(() => expect(state().techFiles.find((f) => f.id === "tf-2")?.file.name).toBe("str-valves-v2.pdf"));
+    expect(state().techFiles).toHaveLength(before);
+    expect(state().audit.at(-1)).toMatchObject({ action: "tech_file.replace" });
+  });
 });

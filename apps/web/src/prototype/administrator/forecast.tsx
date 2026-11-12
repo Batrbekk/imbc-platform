@@ -8,9 +8,9 @@ import { ConfirmAction, FileRow, ProtoPage } from "@/prototype/components";
 import type { FileRef, ForecastVersion, ProtoState } from "@/prototype/data";
 import { localized, useDictionary } from "@/prototype/i18n";
 import { accountName, publishedForecast } from "@/prototype/rules";
-import { newId, nowIso, useProto, useProtoUpdate } from "@/prototype/store";
+import { newId, nowIso, useProto } from "@/prototype/store";
 
-import { useAdminAccountId } from "./actor";
+import { useAdminAccountId, useGuardedUpdate } from "./actor";
 import { forecastTexts } from "./forecast-texts";
 import { ForecastLinesView, ForecastProblemsView, ForecastVersionsView, sharedTexts } from "./shared";
 
@@ -28,7 +28,7 @@ function sampleLines(state: ProtoState) {
 export function ForecastScreen() {
   const t = useDictionary(forecastTexts);
   const shared = useDictionary(sharedTexts);
-  const update = useProtoUpdate();
+  const update = useGuardedUpdate();
   const adminId = useAdminAccountId();
   const state = useProto();
   const [params, setParams] = useSearchParams();
@@ -71,6 +71,7 @@ export function ForecastScreen() {
           problems: structuredClone(problems),
         });
         draft.forecastLines.push(...lines.map((line, i) => ({ ...line, id: `${id}-l${i + 1}`, versionId: id })));
+        return true;
       },
     );
     setParams({ version: id }, { replace: true });
@@ -84,15 +85,17 @@ export function ForecastScreen() {
         summary: localized(forecastTexts, "published", { file: version.fileName }),
       },
       (draft) => {
+        const target = draft.forecastVersions.find((v) => v.id === version.id);
+        if (!target || target.publishedAt) return false;
         // У версии из демо-данных без строк производители увидели бы пустую таблицу: берутся строки прежней.
         if (!draft.forecastLines.some((l) => l.versionId === version.id)) {
           draft.forecastLines.push(
             ...sampleLines(draft).map((line, i) => ({ ...line, id: `${version.id}-l${i + 1}`, versionId: version.id })),
           );
         }
-        const target = draft.forecastVersions.find((v) => v.id === version.id)!;
         target.publishedAt = nowIso();
         target.publishedBy = adminId;
+        return true;
       },
     );
 
