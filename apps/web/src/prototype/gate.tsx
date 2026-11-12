@@ -30,8 +30,9 @@ export function PrototypeGate() {
   if (!isRole(role)) return <ProtoNotFound />;
   if (role !== me.user.role) return <Navigate to={authDestination(me)} replace />;
   return (
-    // Новый адрес — новая попытка: ошибка одного экрана не держит остальные.
-    <ProtoBoundary key={pathname} fallback={(retry) => <ProtoScreenError retry={retry} />}>
+    // Новый адрес снимает сбой экрана, но не перемонтирует дерево: layout-маршруты модуля сохраняют
+    // своё состояние. Устаревший чанк уходит к RouteError — одна перезагрузка, как у страниц.
+    <ProtoBoundary resetKey={pathname} chunkError="rethrow" fallback={(retry) => <ProtoScreenError retry={retry} />}>
       <Suspense fallback={<Skeleton className="h-40 w-full" />}>
         <CabinetRoutes role={role} />
       </Suspense>

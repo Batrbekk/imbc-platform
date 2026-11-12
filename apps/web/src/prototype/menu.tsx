@@ -1,5 +1,5 @@
 import type { Role } from "@imbc/contracts";
-import { Suspense, use } from "react";
+import { Suspense, use, useEffect } from "react";
 import { Link, useLocation } from "react-router";
 
 import {
@@ -11,19 +11,21 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 
-import { ProtoBoundary } from "./boundary";
+import { clearReloadFlag } from "@/lib/reload-guard";
+
+import { PROTOTYPE_RELOAD, ProtoBoundary } from "./boundary";
 import { useProtoLocale } from "./i18n";
 import { useCommonTexts } from "./labels";
 import { loadCabinet } from "./registry";
 
 /**
  * Группа «Прототип» под готовыми пунктами меню: пункты модуля роли сеанса. Модуль без пунктов
- * (наблюдатель) группы не показывает. Модуль не загрузился или подпись бросила — группы нет,
- * готовые пункты меню и страница роли не задеты.
+ * (наблюдатель) группы не показывает. Подпись бросила или модуль не загрузился — группы нет,
+ * готовые пункты меню и страница роли не задеты; устаревший чанк — одна перезагрузка страницы.
  */
 export function PrototypeMenu({ role }: { role: Role }) {
   return (
-    <ProtoBoundary key={role} fallback={() => null}>
+    <ProtoBoundary key={role} chunkError="reload" fallback={() => null}>
       <Suspense fallback={null}>
         <MenuGroup role={role} />
       </Suspense>
@@ -33,6 +35,8 @@ export function PrototypeMenu({ role }: { role: Role }) {
 
 function MenuGroup({ role }: { role: Role }) {
   const cabinet = use(loadCabinet(role));
+  // Модуль загрузился: следующий устаревший чанк снова может перезагрузить страницу один раз.
+  useEffect(() => clearReloadFlag(PROTOTYPE_RELOAD), []);
   const { pathname } = useLocation();
   const locale = useProtoLocale();
   const t = useCommonTexts();

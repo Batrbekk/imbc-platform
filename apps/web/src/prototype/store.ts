@@ -138,10 +138,10 @@ const PERSONA_BY_ROLE: Record<Role, string> = {
  * никуда не возвращаются; `accountId` — всегда ключ существующего демо-аккаунта.
  */
 export function actorFor(state: ProtoState, user: { email: string; fullName: string | null; role: Role }): ProtoActor {
-  const email = user.email.toLowerCase();
+  const email = user.email.trim().toLowerCase();
   const persona = PERSONA_BY_ROLE[user.role];
   const account =
-    state.accounts.find((a) => a.role === user.role && a.email.toLowerCase() === email) ??
+    state.accounts.find((a) => a.role === user.role && a.email.trim().toLowerCase() === email) ??
     state.accounts.find((a) => a.id === persona) ??
     // Персона удалена из состояния — исходная запись того же аккаунта.
     seedAccounts.find((a) => a.id === persona)!;

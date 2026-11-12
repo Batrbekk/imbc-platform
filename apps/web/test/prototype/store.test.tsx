@@ -190,6 +190,10 @@ describe("хранилище прототипа", () => {
       role: "operator",
       organizationId: "org-operator-demo",
     });
+    // Пробелы по краям адреса сеанса не мешают найти демо-аккаунт.
+    expect(
+      actorFor(state, { email: "  arman.bekov@operator.demo.local\t", fullName: null, role: "operator" }).accountId,
+    ).toBe("acc-operator-2");
     // Адрес демо-аккаунта другой роли — персона своей роли.
     expect(actorFor(state, { email: "expert@imbc.local", fullName: null, role: "director" }).accountId).toBe(
       "acc-director",

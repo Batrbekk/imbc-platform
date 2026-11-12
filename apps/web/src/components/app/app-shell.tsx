@@ -32,6 +32,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { ApiError } from "@/lib/api";
+import { isChunkLoadError, reloadOnce } from "@/lib/reload-guard";
 import { authDestination, useLogout, useMe } from "@/lib/session";
 
 /**
@@ -40,9 +41,16 @@ import { authDestination, useLogout, useMe } from "@/lib/session";
  */
 const PrototypeMenu =
   import.meta.env.VITE_PROTOTYPE_CABINETS === "true"
-    ? // Не загрузился чанк меню — группы нет, а не экран ошибки на каждой готовой странице.
+    ? // Не загрузился чанк меню — группы нет, а не экран ошибки на каждой готовой странице;
+      // устаревший чанк (вкладка старше выката) — одна перезагрузка, как у ленивых страниц.
       lazy<ComponentType<{ role: Role }>>(() =>
-        import("@/prototype/menu").then((m) => ({ default: m.PrototypeMenu })).catch(() => ({ default: () => null })),
+        import("@/prototype/menu")
+          .then((m) => ({ default: m.PrototypeMenu }))
+          .catch((error: unknown) => {
+            // Флаг — PROTOTYPE_RELOAD из prototype/boundary.tsx (статически не импортируется).
+            if (isChunkLoadError(error)) reloadOnce("imbc:prototype-reload");
+            return { default: () => null };
+          }),
       )
     : null;
 
