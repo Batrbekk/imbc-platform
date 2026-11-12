@@ -185,18 +185,21 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     expect(await screen.findByRole("heading", { name: kk.adminAccounts.title })).toBeTruthy();
   });
 
-  it.each(ROLES)("%s со входа на / попадает на стартовую страницу роли и видит её первым пунктом меню (OPR-31)", async (role) => {
-    const api = stubWorkspace(me(role));
-    const { router } = renderRoute("/");
+  it.each(ROLES)(
+    "%s со входа на / попадает на стартовую страницу роли и видит её первым пунктом меню (OPR-31)",
+    async (role) => {
+      const api = stubWorkspace(me(role));
+      const { router } = renderRoute("/");
 
-    await waitFor(() => expect(router.state.location.pathname).toBe(HOME[role]));
-    expect(HOME[role]).toBe(roleHome(role));
-    await screen.findAllByText(`${role}@${role}.local`);
-    const first = screen.getAllByRole("link").find((link) => link.dataset.sidebar === "menu-button")!;
-    expect(first.getAttribute("href")).toBe(HOME[role]);
-    expect(first.hasAttribute("data-active")).toBe(true);
-    await expectStartRequestsOnly(api, role);
-  });
+      await waitFor(() => expect(router.state.location.pathname).toBe(HOME[role]));
+      expect(HOME[role]).toBe(roleHome(role));
+      await screen.findAllByText(`${role}@${role}.local`);
+      const first = screen.getAllByRole("link").find((link) => link.dataset.sidebar === "menu-button")!;
+      expect(first.getAttribute("href")).toBe(HOME[role]);
+      expect(first.hasAttribute("data-active")).toBe(true);
+      await expectStartRequestsOnly(api, role);
+    },
+  );
 
   it("производитель на /catalog/ уходит на /profile: завершающий / не обходит шлюз роли", async () => {
     const api = stubWorkspace(me("manufacturer"));
@@ -252,7 +255,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
 
     // «Мой аккаунт» по-прежнему открыт администратору; подсвечен только он.
     await user.click(menu()[1]!);
-    expect(router.state.location.pathname).toBe("/account");
+    await waitFor(() => expect(router.state.location.pathname).toBe("/account"));
     expect(await screen.findByRole("heading", { name: en.account.title })).toBeTruthy();
     expect(menu().map((link) => link.hasAttribute("data-active"))).toEqual([false, true]);
   });
@@ -532,9 +535,9 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     await user.click(footer.closest("button")!);
 
     await waitFor(() => expect(leaveApp).toHaveBeenCalledWith("/kc/realms/imbc/protocol/openid-connect/logout?x=1"));
-    expect(
-      api.mock.calls.some(([url, init]) => String(url) === "/api/auth/logout" && init?.method === "POST"),
-    ).toBe(true);
+    expect(api.mock.calls.some(([url, init]) => String(url) === "/api/auth/logout" && init?.method === "POST")).toBe(
+      true,
+    );
   });
 
   it("сбой выхода — сообщение в подвале меню", async () => {
