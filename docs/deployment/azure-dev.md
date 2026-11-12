@@ -329,64 +329,84 @@ curl --fail --show-error https://imbc-dev-e1cde8dd.polandcentral.cloudapp.azure.
 
 ## Чтение Adata (IMBC-07, EXT-02)
 
-Каждое чтение — настоящий платный запрос: одна единица квоты заказчика (3 000 БИН в месяц). Предел стенда по умолчанию — **1** запрос за период (`ADATA_MONTHLY_LIMIT` в `compose.azure.yaml`). Токен `ADATA_API_TOKEN` получает только сервис `worker`, из серверной `.env`; без него попытки заканчиваются `not_configured`.
+Каждое чтение — настоящий платный запрос: одна единица квоты заказчика (3 000 БИН в месяц). На стенде чтение **закрыто по умолчанию**: `ADATA_MONTHLY_LIMIT` в `compose.azure.yaml` — `0`, попытки заканчиваются `quota_exhausted` без запроса. Владелец открывает его на одно чтение строкой в серверной `.env` и закрывает сразу после — порядок ниже обязателен. Токен `ADATA_API_TOKEN` получает только сервис `worker`, из серверной `.env`; без него попытки заканчиваются `not_configured`.
 
 ### Что запускает чтение
 
-Аккаунт с ролью `manufacturer`, у организации есть БИН, профиль `source = 'manual'`, `status = 'draft'`, попытки `profile_created` ещё нет. Чтение ставится при любом входе такого аккаунта и по событию пароля, которое увидел `keycloak-events`. Первый запуск `keycloak-events` после старта читает события с `auth_sync_state.checked_at` минус пять минут; если строки курсора нет — за 30 дней назад. Регистрация и повтор письма чтение не запускают.
+Аккаунт с ролью `manufacturer`, у организации есть БИН, профиль `source = 'manual'`, `status = 'draft'`, попытки `profile_created` ещё нет. Чтение ставится при любом входе такого аккаунта и по событию пароля, которое увидел `keycloak-events`. Попытку в `quota_exhausted` или `not_configured` любой следующий вход и событие пароля ставят снова. Первый запуск `keycloak-events` после старта читает события с `auth_sync_state.checked_at` минус пять минут; если строки курсора нет — за 30 дней назад. Регистрация и повтор письма чтение не запускают.
 
-### Перед первым выкатом с токеном
-
-```bash
-./infrastructure/azure/deploy.sh ssh
-cd /home/imbc/imbc-platform
-sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
-  select checked_at from auth_sync_state where name = 'keycloak-events';"
-sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
-  select count(*) from user_accounts a
-  join organizations o on o.id = a.organization_id
-  join manufacturer_profiles p on p.organization_id = o.id
-  where a.role = 'manufacturer' and o.bin is not null and p.source = 'manual' and p.status = 'draft'
-    and not exists (
-      select 1 from external_check c
-      join external_check_attempt t on t.external_check_id = c.id
-      where c.profile_id = p.id and c.connector = 'adata' and t.trigger = 'profile_created');"
-```
-
-Первый запрос показывает, с какого момента будут прочитаны события пароля (нет строки — 30 дней). Второй — сколько производителей запустят чтение при входе или по событию. При пределе 1 запрос сделает первый из них; остальные получат `quota_exhausted`. До выката этой версии таблиц `external_check` и `external_check_attempt` ещё нет, и второй запрос падает с «relation does not exist»: выполните его без части `and not exists (…)` — попыток ещё нет ни у одного профиля. Полный запрос — для последующих выкатов.
+Стенд публичный: зарегистрироваться с любым БИН с верным контрольным разрядом и задать пароль может кто угодно. Пока предел больше нуля, единицу израсходует первый такой производитель, а не обязательно владелец; 4-го числа (Asia/Almaty) начинается новый период, и при открытом пределе единица снова доступна.
 
 ### Токен не печатать
 
 Не выполняйте `docker compose config` без `-q`, `docker inspect` контейнера `worker`, `docker compose exec worker env` и `printenv`: все они выводят значение токена.
 
-### Во время чтения
+### Порядок одного чтения
 
-Чтение длится до 2,5 минуты (Get Request, опрос до 120 секунд, последняя проверка). В это время не перезапускайте `worker` и не выкатывайте: рестарт во время первого запроса закрывает попытку как `unavailable` (`interrupted`), единица квоты уже израсходована, а `unavailable` для этого профиля окончательно.
+Все команды — на VM в `/home/imbc/imbc-platform` (`./infrastructure/azure/deploy.sh ssh`), в bash.
 
-### После чтения
+1. **Перед чтением.** Проверить курсор событий и число производителей, которые займут единицу, как только чтение откроется:
 
-```bash
-sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
-  select period_start, used from adata_allowance;"
-sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
-  select id, state, failure, requested_at, request_sent_at, completed_at
-  from external_check_attempt where request_sent_at is not null;"
-sudo docker compose -f compose.yaml -f compose.azure.yaml logs worker | grep 'adata attempt'
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
+     select checked_at from auth_sync_state where name = 'keycloak-events';"
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
+     select count(*) from user_accounts a
+     join organizations o on o.id = a.organization_id
+     join manufacturer_profiles p on p.organization_id = o.id
+     where a.role = 'manufacturer' and o.bin is not null and p.source = 'manual' and p.status = 'draft'
+       and not exists (
+         select 1 from external_check c
+         join external_check_attempt t on t.external_check_id = c.id
+         where c.profile_id = p.id and c.connector = 'adata' and t.trigger = 'profile_created'
+           and t.state not in ('quota_exhausted', 'not_configured'));"
+   ```
+
+   Первый запрос показывает, с какого момента будут прочитаны события пароля (нет строки — 30 дней). Второй — сколько производителей с Draft-профилем без попытки или с попыткой `quota_exhausted` / `not_configured` есть сейчас; каждый из них займёт единицу при входе или по событию пароля. Число должно быть **0** (аккаунт, который владелец сейчас зарегистрирует, ещё не существует). Если не 0 — не открывать, решение за владельцем. До выката этой версии таблиц `external_check` и `external_check_attempt` ещё нет, и второй запрос падает с «relation does not exist»: выполните его без части `and not exists (…)` — попыток ещё нет ни у одного профиля.
+
+2. **Открыть.** Добавить в серверную `.env` строку `ADATA_MONTHLY_LIMIT=1` и пересоздать worker:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml up -d worker
+   sudo docker compose -f compose.yaml -f compose.azure.yaml ps worker
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T worker node -e "console.log((process.env.ADATA_API_TOKEN ?? '').length)"
+   ```
+
+   `ps` должен показать `healthy`: неверное значение переменной останавливает worker при старте, а с ним отзыв сеансов при смене пароля и письма установки пароля. Последняя команда печатает только длину токена — она должна совпасть с известной владельцу; значение не выводится.
+
+3. **Чтение.** Владелец регистрируется с БИН, устанавливает пароль, входит и открывает `/profile`. Чтение длится до 2,5 минуты (Get Request, опрос до 120 секунд, последняя проверка). Пока состояние не конечное, не перезапускайте `worker` и не выкатывайте: рестарт во время первого запроса закрывает попытку как `unavailable` (`interrupted`), единица уже израсходована, а `unavailable` для профиля окончательно.
+
+4. **Закрыть.** После `received` (или любого конечного состояния) удалить строку `ADATA_MONTHLY_LIMIT=1` из серверной `.env` — вернётся предел по умолчанию 0 — и снова выполнить `sudo docker compose -f compose.yaml -f compose.azure.yaml up -d worker` и `sudo docker compose -f compose.yaml -f compose.azure.yaml ps worker` (`healthy`). Иначе 4-го числа единица снова станет доступна и её израсходует следующий вошедший производитель с Draft-профилем без решения владельца.
+
+5. **Проверки после чтения.**
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
+     select period_start, used from adata_allowance;"
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
+     select id, state, failure, requested_at, request_sent_at, completed_at
+     from external_check_attempt where request_sent_at is not null;"
+   sudo docker compose -f compose.yaml -f compose.azure.yaml logs worker | grep 'adata attempt'
+   t=$(sudo sed -n 's/^ADATA_API_TOKEN=//p' .env | tr -d '\r"'"'"' '); echo "длина ${#t}"; [ ${#t} -ge 20 ] && sudo docker compose -f compose.yaml -f compose.azure.yaml logs --no-color worker api | grep -cF -f <(printf '%s\n' "$t"); unset t
+   ```
+
+   Ожидается: `used = 1`, одна попытка с `request_sent_at` и `state = received`, в журнале worker строка `adata attempt <id>: received`. Последняя команда убирает из значения кавычки, `\r` и пробелы, печатает только длину (она должна совпасть с известной владельцу), при длине меньше 20 не запускается, а образец передаёт через дескриптор файла — его нет ни в списке процессов, ни в истории; ожидаемый результат — `0`. Форму токена в %-кодировке эта проверка не находит: её проверяет тест утечки задания (`apps/api/test/adata-prefill.integration.test.ts`). БИН, значения ответа и адрес Adata в журнал не пишутся.
+
+### Предел и периоды
+
+Период сбрасывается 4-го числа (Asia/Almaty). При пределе 0 ни один вход и ни одно событие ничего не расходуют. Больше одного чтения за раз — только решением владельца: строка `ADATA_MONTHLY_LIMIT=<n>` (не больше 3000) в серверной `.env` и `sudo docker compose -f compose.yaml -f compose.azure.yaml up -d worker`. Попытки в `quota_exhausted` и `not_configured` ставятся снова при следующем входе, поэтому открытый предел расходуют следующие вошедшие производители с Draft-профилем; после чтения предел закрывается, как в шаге 4.
+
+### Повтор неудачного чтения
+
+`unavailable` для профиля окончательно, а БИН на платформе уникален: повтор — второй платный запрос по тому же БИН, только по новому явному «да» владельца. Вернуть попытку:
+
+```sql
+UPDATE external_check_attempt
+SET state = 'not_configured', request_sent_at = NULL, poll_token = NULL, failure = NULL, completed_at = now()
+WHERE id = '<id>' AND state = 'unavailable';
 ```
 
-Ожидается: `used = 1`, одна попытка с `request_sent_at` и `state = received`, в журнале worker строка `adata attempt <id>: received`. БИН, значения ответа и адрес Adata в журнал не пишутся.
-
-Предел действует на период: 4-го числа (Asia/Almaty) предел по умолчанию 1 снова доступен, и его израсходует первый вошедший производитель с Draft-профилем, у которого попытка в `quota_exhausted` или `not_configured` (или новый зарегистрированный). Чтобы чтения не было без решения владельца, добавьте в серверную `.env` строку `ADATA_MONTHLY_LIMIT=0` и выполните `sudo docker compose -f compose.yaml -f compose.azure.yaml up -d worker`: при пределе 0 попытки заканчиваются `quota_exhausted` без запроса.
-
-### Поднять предел
-
-Добавьте в серверную `.env` строку `ADATA_MONTHLY_LIMIT=<n>` (не больше 3000) и перезапустите worker:
-
-```bash
-sudo docker compose -f compose.yaml -f compose.azure.yaml up -d worker
-```
-
-Период сбрасывается 4-го числа (Asia/Almaty). Попытки в `quota_exhausted` и `not_configured` ставятся снова при следующем входе производителя, поэтому поднятый предел расходуют следующие вошедшие производители с Draft-профилем.
+Следующий вход владельца ставит её снова (`requeued`); задание берёт её только в `queued` с `request_sent_at IS NULL`. В текущем периоде единица уже израсходована: откройте предел на единицу больше `used` из `adata_allowance` (например `ADATA_MONTHLY_LIMIT=2` при `used = 1`) по шагам 2–5.
 
 ### Ручное восстановление попытки
 
