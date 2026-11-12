@@ -14,7 +14,9 @@ import {
   POLICY_MATRIX,
   type PolicyMatrix,
   ORGANIZATION_TYPES,
+  ownAdataReadSchema,
   ownProfileSchema,
+  PREFILL_FIELDS,
   PROFILE_TIERS,
   ROLES,
   UPDATE_STATUSES,
@@ -177,6 +179,43 @@ describe('свой профиль производителя (MAN-41, MAN-46, IM
     expect(ownProfileSchema.parse(draft)).toEqual(draft);
     expect(ownProfileSchema.safeParse({ ...verified, tier: 'tier_3' }).success).toBe(false);
     expect(ownProfileSchema.safeParse({ ...verified, completenessPct: 101 }).success).toBe(false);
+  });
+});
+
+describe('чтение Adata для производителя (MAN-06, MAN-07, IMBC-07)', () => {
+  const received = {
+    state: 'received',
+    requestedAt: '2026-11-12T10:00:00.000Z',
+    readAt: '2026-11-12T10:01:00.000Z',
+    fields: [
+      {
+        field: 'activity',
+        source: 'adata',
+        readAt: '2026-11-12T10:01:00.000Z',
+        items: [{ value: '25110', label: 'Производство строительных металлических конструкций' }],
+      },
+    ],
+  };
+
+  it('данные Adata: лишний ключ ответа отклоняется (strict), пустой items отклоняется', () => {
+    expect(ownAdataReadSchema.safeParse(received).success).toBe(true);
+    expect(ownAdataReadSchema.safeParse({ ...received, value: {} }).success).toBe(false);
+    const empty = { ...received, fields: [{ ...received.fields[0], items: [] }] };
+    expect(ownAdataReadSchema.safeParse(empty).success).toBe(false);
+  });
+
+  it('девять полей Adata в порядке показа (MAN-06, MAN-07)', () => {
+    expect(PREFILL_FIELDS).toEqual([
+      'legal_name',
+      'activity',
+      'company_phone',
+      'company_email',
+      'legal_address',
+      'director_full_name',
+      'state_registered_on',
+      'legal_form',
+      'shareholders',
+    ]);
   });
 });
 
