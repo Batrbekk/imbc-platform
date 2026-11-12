@@ -37,6 +37,11 @@ describe("authDestination", () => {
       "/catalog?q=steel&page=2#results",
     );
     expect(authDestination({ user: { role: "operator" } }, "/catalog/123")).toBe("/catalog/123");
+    // Вложенный и закодированный путь каталога для роли без права — стартовая страница.
+    expect(authDestination({ user: { role: "manufacturer" } }, "/catalog/123")).toBe("/profile");
+    expect(authDestination({ user: { role: "administrator" } }, "/catalog/123")).toBe("/account");
+    expect(authDestination({ user: { role: "manufacturer" } }, "/%63atalog")).toBe("/profile");
+    expect(authDestination({ user: { role: "manufacturer" } }, "/catalogue")).toBe("/catalogue");
     expect(authDestination({ user: { role: "manufacturer" } }, "/account")).toBe("/account");
   });
 

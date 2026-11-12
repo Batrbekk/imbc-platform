@@ -1,10 +1,13 @@
 // Оболочка рабочих страниц: интерфейс прячет недоступное, решает сервер (GEN-08, GEN-10).
 import { can, type Dashboard, ROLES, roleHome } from "@imbc/contracts";
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { useEffect } from "react";
+import type { NonIndexRouteObject, RouteObject } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { leaveApp } from "@/lib/leave-app";
 import type { Me } from "@/lib/session";
+import { routes } from "@/router";
 
 import en from "../messages/en.json";
 import kk from "../messages/kk.json";
@@ -45,6 +48,36 @@ function me(role: Me["user"]["role"], gates: Me["gates"] = { mfa: true, responsi
 }
 
 const EMPTY_PAGE = { items: [], total: 0, page: 1, pageSize: 25 };
+
+/** Страница компании под /catalog/:id (её добавит следующий этап): открывшись, она запросила бы API. */
+function CompanyProbe() {
+  useEffect(() => {
+    void fetch("/api/v1/catalog/123");
+  }, []);
+  return <h1>company</h1>;
+}
+
+/** Настоящие корень и оболочка (их lazy из router.tsx) со страницей /catalog/:id и стартовыми страницами. */
+function withCompanyPage(): RouteObject[] {
+  const root = routes[0] as NonIndexRouteObject;
+  const shell = root.children!.find((route) => route.lazy && route.children)!;
+  const pages = shell.children!.filter((route) => route.path !== "catalog");
+  return [
+    {
+      ...root,
+      children: [
+        {
+          ...shell,
+          children: [{ path: "catalog/:id", caseSensitive: true, element: <CompanyProbe /> }, ...pages],
+        } as RouteObject,
+        ...root.children!.filter((route) => route.path === "*"),
+      ],
+    },
+  ];
+}
+
+const apiCalls = (api: ReturnType<typeof stubApi>) =>
+  api.mock.calls.map(([url]) => String(url)).filter((url) => url.startsWith("/api/v1/"));
 const DASHBOARD: Dashboard = {
   total: 0,
   byRegion: [],
@@ -148,6 +181,38 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     ({ router } = renderRoute("/catalog/"));
     expect(await screen.findByRole("heading", { name: kk.catalog.title })).toBeTruthy();
     expect(router.state.location.pathname).toBe("/catalog/");
+  });
+
+  it("вложенный путь каталога закрыт для роли без каталога: производитель и администратор — на стартовую", async () => {
+    for (const role of ["manufacturer", "administrator"] as const) {
+      const api = stubWorkspace(me(role));
+      const { router } = renderRoute("/catalog/123", { routes: withCompanyPage() });
+
+      await waitFor(() => expect(router.state.location.pathname).toBe(HOME[role]));
+      await screen.findAllByText(`${role}@${role}.local`);
+      expect(screen.queryByRole("heading", { name: "company" })).toBeNull();
+      expect(apiCalls(api)).toEqual([]);
+      cleanup();
+    }
+  });
+
+  it("оператор открывает вложенный путь каталога: адрес сохраняется", async () => {
+    const api = stubWorkspace(me("operator"));
+    const { router } = renderRoute("/catalog/123?tab=docs", { routes: withCompanyPage() });
+
+    expect(await screen.findByRole("heading", { name: "company" })).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/catalog/123");
+    expect(router.state.location.search).toBe("?tab=docs");
+    expect(apiCalls(api)).toEqual(["/api/v1/catalog/123"]);
+  });
+
+  it("закодированный путь /%63atalog не открывает каталог производителю", async () => {
+    const api = stubWorkspace(me("manufacturer"));
+    const { router } = renderRoute("/%63atalog");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/profile"));
+    expect(await screen.findByText(kk.profile.welcome)).toBeTruthy();
+    expect(apiCalls(api)).toEqual([]);
   });
 
   it("маршруты чувствительны к регистру: /CATALOG — «не найдено», без оболочки и без поиска", async () => {

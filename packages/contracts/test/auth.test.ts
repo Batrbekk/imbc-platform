@@ -67,7 +67,7 @@ describe('страница после входа: destinationFor', () => {
   it.each(ROLES)('страница по праву матрицы: %s на /catalog, /dashboard, /profile', (role) => {
     for (const [path, action] of guarded) {
       const allowed = can(role, action) !== null;
-      for (const saved of [path, `${path}?q=steel&page=2#results`, `${path}/`, `${path}//`])
+      for (const saved of [path, `${path}?q=steel&page=2#results`, `${path}/`, `${path}//`, `${path}/123?tab=docs`])
         expect(destinationFor(role, saved), saved).toBe(allowed ? saved : roleHome(role));
     }
   });
@@ -79,11 +79,18 @@ describe('страница после входа: destinationFor', () => {
       );
   });
 
-  it('путь сравнивается точно: вложенные и похожие адреса сохраняются, их разбирает маршрутизатор', () => {
+  it('страница сравнивается по сегментам: вложенный путь — та же страница, похожее имя — нет', () => {
+    // Роль с правом сохраняет вложенный адрес (страница компании под /catalog/:id).
     expect(destinationFor('operator', '/catalog/123')).toBe('/catalog/123');
     expect(destinationFor('expert', '/catalog/123?tab=docs')).toBe('/catalog/123?tab=docs');
+    // Роль без права уходит на стартовую страницу и с вложенного адреса.
+    expect(destinationFor('manufacturer', '/catalog/123')).toBe('/profile');
+    expect(destinationFor('administrator', '/catalog/123')).toBe('/account');
+    expect(destinationFor('expert', '/dashboard/x')).toBe('/catalog');
+    expect(destinationFor('operator', '/profile/edit')).toBe('/dashboard');
+    // Другое имя страницы — не каталог и не дашборд: его разбирает маршрутизатор («не найдено»).
     expect(destinationFor('manufacturer', '/catalogue')).toBe('/catalogue');
-    expect(destinationFor('expert', '/dashboard/x')).toBe('/dashboard/x');
+    expect(destinationFor('expert', '/dashboards')).toBe('/dashboards');
     // Регистр не меняется: маршруты SPA чувствительны к регистру, /CATALOG — «не найдено».
     expect(destinationFor('manufacturer', '/CATALOG')).toBe('/CATALOG');
     expect(destinationFor('operator', '/account')).toBe('/account');
@@ -116,6 +123,34 @@ describe('страница после входа: destinationFor', () => {
     { pathname: '/catalog' },
   ])('внешний или небезопасный адрес %s ведёт на стартовую страницу', (saved) => {
     for (const role of ROLES) expect(destinationFor(role, saved), role).toBe(roleHome(role));
+  });
+
+  it('путь сравнивается декодированным, как его сопоставляет React Router; адрес возвращается как был', () => {
+    expect(destinationFor('manufacturer', '/%63atalog')).toBe('/profile');
+    expect(destinationFor('administrator', '/%63atalog/123')).toBe('/account');
+    expect(destinationFor('expert', '/%64ashboard')).toBe('/catalog');
+    expect(destinationFor('operator', '/%70rofile')).toBe('/dashboard');
+    expect(destinationFor('operator', '/%6Cogin')).toBe('/dashboard');
+    // Роль с правом получает исходный адрес без перекодирования.
+    expect(destinationFor('operator', '/%63atalog?q=%D1%82')).toBe('/%63atalog?q=%D1%82');
+  });
+
+  it('декодирование однократное и посегментное: двойное кодирование и закодированный слеш — не каталог', () => {
+    expect(destinationFor('manufacturer', '/%2563atalog')).toBe('/%2563atalog');
+    expect(destinationFor('manufacturer', '/catalog%2F123')).toBe('/catalog%2F123');
+    // Закодированный слеш не превращает локальный путь во внешний адрес.
+    for (const role of ROLES) {
+      const target = destinationFor(role, '/%2F%2Fevil.example');
+      expect(target, role).toBe('/%2F%2Fevil.example');
+      expect(new URL(target, 'https://imbc.invalid').origin, role).toBe('https://imbc.invalid');
+    }
+  });
+
+  it('битая кодировка не роняет правило: путь сравнивается как есть', () => {
+    expect(() => destinationFor('manufacturer', '/%E0%A4%A')).not.toThrow();
+    expect(destinationFor('manufacturer', '/%E0%A4%A')).toBe('/%E0%A4%A');
+    expect(destinationFor('manufacturer', '/catalog/%E0%A4%A')).toBe('/profile');
+    expect(destinationFor('operator', '/catalog/%E0%A4%A')).toBe('/catalog/%E0%A4%A');
   });
 
   it('адрес нормализуется так же, как в safeReturnTo', () => {

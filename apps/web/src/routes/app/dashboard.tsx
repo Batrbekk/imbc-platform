@@ -12,10 +12,16 @@ import { api } from "@/lib/api";
 import { serializeCatalog } from "@/lib/catalog-params";
 
 /**
+ * Ответ дашборда. Пока при выкате ещё отвечает API прежней версии, поля `tier` может не быть:
+ * тогда плиток тира нет, а остальные показываются (дашборд — стартовая страница трёх ролей, OPR-31).
+ */
+type DashboardAnswer = Omit<Dashboard, "tier"> & Partial<Pick<Dashboard, "tier">>;
+
+/**
  * Плитки счётчиков (OPR-32). Плитка со ссылкой открывает каталог с тем же фильтром (OPR-35);
  * у счётчиков актуальности фильтра в каталоге нет. Скелет загрузки — по числу плиток.
  */
-const TILES: { label: string; value: (data: Dashboard) => number; href?: string }[] = [
+const TILES: { label: string; value: (data: DashboardAnswer) => number | undefined; href?: string }[] = [
   { label: "total", value: (d) => d.total, href: "/catalog" },
   { label: "siteSurveyed", value: (d) => d.siteSurveyed, href: `/catalog${serializeCatalog({ surveyed: true })}` },
   {
@@ -24,8 +30,8 @@ const TILES: { label: string; value: (data: Dashboard) => number; href?: string 
     href: `/catalog${serializeCatalog({ unifiedRegister: true })}`,
   },
   // Тир профиля (IMBC-19, IMBC-20, IMBC-22).
-  { label: "tier1", value: (d) => d.tier.tier_1, href: `/catalog${serializeCatalog({ tier: ["tier_1"] })}` },
-  { label: "tier2", value: (d) => d.tier.tier_2, href: `/catalog${serializeCatalog({ tier: ["tier_2"] })}` },
+  { label: "tier1", value: (d) => d.tier?.tier_1, href: `/catalog${serializeCatalog({ tier: ["tier_1"] })}` },
+  { label: "tier2", value: (d) => d.tier?.tier_2, href: `/catalog${serializeCatalog({ tier: ["tier_2"] })}` },
   { label: "active", value: (d) => d.updateStatus.active },
   { label: "outdated", value: (d) => d.updateStatus.outdated },
   { label: "unresponsive", value: (d) => d.updateStatus.unresponsive },
@@ -49,7 +55,7 @@ function DashboardView() {
   const format = useFormat();
   const { data, isError, refetch } = useQuery({
     queryKey: ["dashboard"],
-    queryFn: () => api<Dashboard>("/v1/dashboard"),
+    queryFn: () => api<DashboardAnswer>("/v1/dashboard"),
   });
 
   // Сбой запроса — тот же блок с повтором, что в каталоге, а не вечный skeleton (OPR-08).
@@ -79,11 +85,13 @@ function DashboardView() {
     <div className="flex flex-col gap-4">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {TILES.map((tile) => {
+          const value = tile.value(data);
+          if (value === undefined) return null;
           const card = (
             <Card className="h-full transition-colors hover:border-primary/40">
               <CardHeader>
                 <CardDescription>{t(tile.label)}</CardDescription>
-                <CardTitle className="text-3xl tabular-nums">{format.number(tile.value(data))}</CardTitle>
+                <CardTitle className="text-3xl tabular-nums">{format.number(value)}</CardTitle>
               </CardHeader>
             </Card>
           );

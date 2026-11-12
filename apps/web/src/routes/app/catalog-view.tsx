@@ -235,9 +235,10 @@ export function CatalogView() {
                   ))}
                 </TableCell>
                 <TableCell className="text-xs">{c.certificateTypes.join(", ") || "—"}</TableCell>
-                {/* Тир — у каждой строки, и у unresponsive тоже (OPR-06, IMBC-22). */}
+                {/* Тир — у каждой строки, и у unresponsive тоже (OPR-06, IMBC-22). Короткая подпись не
+                    расширяет таблицу; полная — в фильтре. */}
                 <TableCell>
-                  <Badge variant="secondary">{t(`tierValue.${c.tier}`)}</Badge>
+                  <Badge variant="secondary">{t(`tierShort.${c.tier}`)}</Badge>
                 </TableCell>
                 <TableCell className="text-xs">{format.date(c.verifiedAt)}</TableCell>
                 <TableCell>

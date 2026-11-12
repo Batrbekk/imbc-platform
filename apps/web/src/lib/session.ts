@@ -18,6 +18,7 @@ export interface Me {
     locale: string;
   };
   gates: { mfa: boolean; responsibility: boolean };
+  /** Только для сведения: web его не читает, правило страницы после входа — `destinationFor` из @imbc/contracts. */
   homePath: string;
   otpDelivery?: "email" | "development_code";
 }

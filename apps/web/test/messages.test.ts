@@ -53,6 +53,8 @@ describe("файлы переводов", () => {
         "catalog.tier",
         "catalog.tierValue.tier_1",
         "catalog.tierValue.tier_2",
+        "catalog.tierShort.tier_1",
+        "catalog.tierShort.tier_2",
         "catalog.columns.tier",
         "dashboard.tier1",
         "dashboard.tier2",

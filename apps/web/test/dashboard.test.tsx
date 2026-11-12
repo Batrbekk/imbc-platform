@@ -80,6 +80,21 @@ describe("дашборд (OPR-32, OPR-35)", () => {
     expect(within(tier).getByText("1")).toBeTruthy();
   });
 
+  it("ответ прежней версии API без tier: плиток тира нет, остальные на месте, без экрана ошибки", async () => {
+    const older: Partial<Dashboard> = { ...DASHBOARD };
+    delete older.tier;
+    stubApi({ "GET /api/auth/me": { body: OBSERVER }, "GET /api/v1/dashboard": { body: older } });
+    renderRoute("/dashboard", { locale: "en" });
+
+    const total = (await screen.findByText(en.dashboard.total)).closest("a")!;
+    expect(total.getAttribute("href")).toBe("/catalog");
+    expect(screen.getByText(en.dashboard.siteSurveyed)).toBeTruthy();
+    expect(screen.getByText(en.dashboard.unresponsive)).toBeTruthy();
+    expect(screen.queryByText(en.dashboard.tier1)).toBeNull();
+    expect(screen.queryByText(en.dashboard.tier2)).toBeNull();
+    expect(screen.queryByRole("heading", { name: en.routeError.title })).toBeNull();
+  });
+
   it("пока счётчики грузятся — скелет по числу плиток", async () => {
     let reply: ((response: Response) => void) | undefined;
     stubApi({

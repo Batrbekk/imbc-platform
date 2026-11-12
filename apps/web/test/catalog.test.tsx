@@ -396,9 +396,11 @@ describe("каталог (OPR-04, OPR-05)", () => {
       const cells = within(screen.getByText(name).closest("tr")!).getAllByRole("cell");
       return cells[headers.indexOf(ru.catalog.columns.tier)];
     };
-    expect(tierCell("ТОО Сталь")?.textContent).toBe(ru.catalog.tierValue.tier_1);
+    // В колонке — короткая подпись, длинная остаётся в фильтре.
+    expect(tierCell("ТОО Сталь")?.textContent).toBe(ru.catalog.tierShort.tier_1);
     const unresponsive = tierCell("ТОО Труба")!;
-    expect(unresponsive.textContent).toBe(ru.catalog.tierValue.tier_2);
+    expect(unresponsive.textContent).toBe(ru.catalog.tierShort.tier_2);
+    expect(screen.queryByText(ru.catalog.tierValue.tier_2)).toBeNull();
     expect(unresponsive.querySelector('[data-slot="badge"]')).toBeTruthy();
     expect(within(screen.getByText("ТОО Труба").closest("tr")!).getByText(ru.catalog.status.unresponsive)).toBeTruthy();
   });

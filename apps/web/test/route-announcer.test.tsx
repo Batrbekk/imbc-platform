@@ -1,6 +1,6 @@
 // Смена страницы объявляется экранному диктору: фокус после перехода остаётся на ссылке меню,
 // поэтому заголовок новой страницы зачитывает вежливая live-область корня маршрутов.
-import { screen, waitFor } from "@testing-library/react";
+import { act, cleanup, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Me } from "@/lib/session";
@@ -84,6 +84,32 @@ describe("объявление смены страницы", () => {
     await router.navigate("/fourth-missing-page");
     await waitFor(() => expect(seen).toEqual(["", title, "", title]));
     observer.disconnect();
+  });
+
+  it("заголовок пишется через паузу; при размонтировании отложенная запись снимается", async () => {
+    const { router } = renderRoute("/no-such-page", { locale: "ru" });
+    expect(await screen.findByRole("heading", { name: ru.notFound.title })).toBeTruthy();
+    const title = `${ru.notFound.title} · ${ru.common.appName}`;
+    const region = announcer();
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await act(() => router.navigate("/another-missing-page"));
+      expect(region.textContent).toBe("");
+      act(() => vi.advanceTimersByTime(100));
+      expect(region.textContent).toBe(title);
+
+      // Следующий переход очищает область; до записи корень снимается — запись не случится.
+      await act(() => router.navigate("/third-missing-page"));
+      expect(region.textContent).toBe("");
+      expect(vi.getTimerCount()).toBe(1);
+      cleanup();
+      expect(vi.getTimerCount()).toBe(0);
+      vi.advanceTimersByTime(1000);
+      expect(region.textContent).toBe("");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("смена только query string (фильтры каталога) не объявляется", async () => {

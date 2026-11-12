@@ -124,6 +124,10 @@
       "tier_1": "Tier 1 — verified",
       "tier_2": "Tier 2 — site surveyed"
     },
+    "tierShort": {
+      "tier_1": "Tier 1",
+      "tier_2": "Tier 2"
+    },
     "surveyed": "Site survey",
     "unifiedRegister": "In the unified register",
     "tnved": "HS (TN VED) code",
