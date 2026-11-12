@@ -39,10 +39,11 @@ export const organizations = pgTable(
       .on(t.type)
       .where(sql`${t.type} = 'imbc'`),
     // Не в DBML: администратор не создаёт второго оператора или наблюдателя с тем же именем (ADM-03).
-    // Производителей различает БИН, их названия могут совпадать.
+    // Условие — тип, а не пустой БИН: связь БИН с типом схема не проверяет. Производителей различает
+    // БИН (у мигрированного его может не быть), их названия могут совпадать.
     uniqueIndex('organizations_name_uq')
       .on(t.type, sql`lower(${t.name})`)
-      .where(sql`${t.bin} is null`),
+      .where(sql`${t.type} <> 'manufacturer'`),
     check('organizations_mailbox_imbc_ck', sql`${t.notificationMailbox} is null or ${t.type} = 'imbc'`),
   ],
 );
@@ -120,6 +121,7 @@ export const ndaVersion = pgTable(
   },
   (t) => [
     uniqueIndex('nda_version_number_uq').on(t.versionNumber),
+    // Частичный уникальный индекс не откладывается: смена текущей версии — два UPDATE (снять, затем поставить).
     uniqueIndex('nda_version_current_uq')
       .on(t.isCurrent)
       .where(sql`${t.isCurrent}`),

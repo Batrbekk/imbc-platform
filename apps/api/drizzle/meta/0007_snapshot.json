@@ -1677,7 +1677,7 @@
             }
           ],
           "isUnique": true,
-          "where": "\"organizations\".\"bin\" is null",
+          "where": "\"organizations\".\"type\" <> 'manufacturer'",
           "concurrently": false,
           "method": "btree",
           "with": {}

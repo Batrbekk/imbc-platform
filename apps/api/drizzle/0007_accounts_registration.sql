@@ -32,7 +32,7 @@ CREATE UNIQUE INDEX "nda_version_current_uq" ON "nda_version" USING btree ("is_c
 CREATE UNIQUE INDEX "nda_acceptance_uq" ON "nda_acceptance" USING btree ("profile_id","nda_version_id");--> statement-breakpoint
 ALTER TABLE "user_accounts" ADD CONSTRAINT "user_accounts_registration_nda_version_id_nda_version_id_fk" FOREIGN KEY ("registration_nda_version_id") REFERENCES "public"."nda_version"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "organizations_imbc_uq" ON "organizations" USING btree ("type") WHERE "organizations"."type" = 'imbc';--> statement-breakpoint
-CREATE UNIQUE INDEX "organizations_name_uq" ON "organizations" USING btree ("type",lower("name")) WHERE "organizations"."bin" is null;--> statement-breakpoint
+CREATE UNIQUE INDEX "organizations_name_uq" ON "organizations" USING btree ("type",lower("name")) WHERE "organizations"."type" <> 'manufacturer';--> statement-breakpoint
 CREATE UNIQUE INDEX "user_accounts_manufacturer_org_uq" ON "user_accounts" USING btree ("organization_id") WHERE "user_accounts"."role" = 'manufacturer';--> statement-breakpoint
 ALTER TABLE "organizations" ADD CONSTRAINT "organizations_mailbox_imbc_ck" CHECK ("organizations"."notification_mailbox" is null or "organizations"."type" = 'imbc');--> statement-breakpoint
 ALTER TABLE "user_accounts" ADD CONSTRAINT "user_accounts_registration_nda_ck" CHECK (num_nulls("user_accounts"."registration_nda_version_id", "user_accounts"."registration_nda_accepted_at", "user_accounts"."registration_ip") in (0, 3));

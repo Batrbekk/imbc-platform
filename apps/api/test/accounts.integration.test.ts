@@ -40,7 +40,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('организации и ак�
 
   it('18 организаций, 6 аккаунтов, last sign-in null у невошедших (ADM-02)', async () => {
     const { organizations } = await accounts.list();
-    // 15 организаций seed и NCOC, TCO, KPO из 0008 (GEN-05); IMBC из 0008 seed находит по имени.
+    // 15 организаций seed и NCOC, TCO, KPO из 0008 (GEN-05); IMBC из 0008 seed находит по типу.
     expect(organizations).toHaveLength(18);
     expect(organizations).toHaveLength(await count('organizations'));
     const all = organizations.flatMap((o) => o.accounts);

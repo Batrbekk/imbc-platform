@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
+import { applyAppRoleGrants } from './app-role.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = process.env.MIGRATIONS_DIR ?? resolve(here, '../../drizzle');
@@ -21,15 +22,9 @@ async function main(): Promise<void> {
     await pool.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
     await migrate(drizzle(pool), { migrationsFolder });
 
-    // Журнал аудита (AUD-02) и принятия NDA (FC-02, DBML: append-only) — только добавление:
-    // у роли приложения нет UPDATE/DELETE.
+    // Права роли приложения; журнал аудита и принятия NDA — только добавление (app-role.ts).
     const appRole = process.env.DB_APP_ROLE;
-    if (appRole) {
-      const role = pg.escapeIdentifier(appRole);
-      await pool.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${role}`);
-      await pool.query(`REVOKE UPDATE, DELETE, TRUNCATE ON audit_entries FROM ${role}`);
-      await pool.query(`REVOKE UPDATE, DELETE, TRUNCATE ON nda_acceptance FROM ${role}`);
-    }
+    if (appRole) await applyAppRoleGrants(pool, appRole);
     console.log('Миграции применены');
   } finally {
     await pool.end();

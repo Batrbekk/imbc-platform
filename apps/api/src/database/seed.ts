@@ -184,10 +184,16 @@ export async function seedDemo(pool: pg.Pool): Promise<void> {
       ['operator', 'Оператор (демо)', 'operator'],
       ['observer', 'Наблюдатель (демо)', 'observer'],
     ] as const) {
+      // Ключи уникальных индексов: IMBC одна (organizations_imbc_uq) — по типу, даже если её переименовали;
+      // оператор и наблюдатель — по типу и имени без учёта регистра (organizations_name_uq).
       const existing = await tx
         .select({ id: organizations.id })
         .from(organizations)
-        .where(sql`${organizations.name} = ${name}`);
+        .where(
+          type === 'imbc'
+            ? sql`${organizations.type} = 'imbc'`
+            : sql`${organizations.type} = ${type} and lower(${organizations.name}) = lower(${name})`,
+        );
       orgIds[key] =
         existing[0]?.id ??
         (

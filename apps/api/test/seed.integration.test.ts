@@ -47,7 +47,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
     await seedDemo(pool);
 
     expect(await counts()).toEqual(first);
-    // 15 организаций seed и NCOC, TCO, KPO из 0008; IMBC из 0008 seed находит по имени.
+    // 15 организаций seed и NCOC, TCO, KPO из 0008; IMBC из 0008 seed находит по типу.
     expect(first).toEqual({ organizations: 18, accounts: 6, visible: 8 });
     expect((await accounts()).map((a) => a.email)).toEqual(['observer@observer.local']);
   });
@@ -78,6 +78,25 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
     await pool.query("insert into nda_version (version_number, body, is_current) values (2, 'IMBC', true)");
     await seedDemo(pool);
     expect((await versions()).map((v) => v.version)).toEqual([2]);
+  });
+
+  it('seed не создаёт вторую IMBC, если существующая названа иначе', async () => {
+    // Организация IMBC одна (organizations_imbc_uq); seed ищет её по типу, а не по имени.
+    await pool.query("update organizations set name = 'IMBC Kazakhstan' where type = 'imbc'");
+    await seedDemo(pool);
+    const imbc = await pool.query<{ id: string; name: string }>(
+      "select id, name from organizations where type = 'imbc'",
+    );
+    expect(imbc.rows.map((r) => r.name)).toEqual(['IMBC Kazakhstan']);
+    const staff = await pool.query<{ email: string; organization_id: string }>(
+      `select email, organization_id from user_accounts where role in ('expert', 'administrator', 'director') order by email`,
+    );
+    expect(staff.rows).toEqual(
+      ['admin@imbc.local', 'director@imbc.local', 'expert@imbc.local'].map((email) => ({
+        email,
+        organization_id: imbc.rows[0]!.id,
+      })),
+    );
   });
 
   it('card каждой видимой строки проходит companyCardDataSchema, focal point есть у семи из восьми', async () => {

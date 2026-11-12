@@ -77,7 +77,7 @@ flowchart LR
 | Права — одна матрица ролей и действий из раздела 4 спецификации, общая для API и UI (GEN-10) | `packages/contracts/src/policy.ts`, `SessionGuard` |
 | Поиск каталога, страница компании и все показатели дашборда читают только проекцию видимых профилей `catalog_visible`, отдельного счётчика нет: unresponsive входит в выдачу и в счётчики (UPD-04, OPR-33). Собственный профиль производителя берёт из неё только тир своей строки. Выгрузки и pull API ещё не реализованы (§10) | `catalog.service.ts`, `profiles.service.ts`, `schema/platform.ts` |
 | Файл недоступен, пока ClamAV не признал его чистым (DATA-07) | `worker/handlers.service.ts → scanFile` |
-| Журнал аудита только дополняется: у роли приложения нет UPDATE/DELETE (AUD-02) | `database/migrate.ts`, `infrastructure/postgres/init.sql` |
+| Журнал аудита и принятия NDA только дополняются: у роли приложения нет UPDATE/DELETE (AUD-02, FC-02) | `database/app-role.ts` (вызывает `migrate.ts`), `infrastructure/postgres/init.sql` |
 | Уведомления `send-notification` дедуплицируются по событию и адресу (NOT-20, ADR-22) | `notifications_sent` + `sendNotification` |
 | Все расписания — по Asia/Almaty, независимо от часового пояса сервера | `jobs/queues.ts` |
 

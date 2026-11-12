@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { applyAppRoleGrants } from '../src/database/app-role.js';
 import { migrateThrough, openTestPool, resetDatabase } from './support/database.js';
 
 const MIGRATIONS = fileURLToPath(new URL('../drizzle', import.meta.url));
@@ -99,6 +100,51 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('этап 1: миграции 00
     'registration_heard_about_us',
     'inactive_since',
   ];
+
+  describe('база 0005 с данными прежней версии', () => {
+    const before: Record<string, Record<string, unknown>> = {};
+    const ids = { organization: '', account: '', profile: '', check: '', attempt: '' };
+
+    beforeAll(async () => {
+      // На стенде 0006–0008 применяются одной транзакцией поверх 0005 с данными.
+      await resetDatabase(pool);
+      await migrateThrough(pool, '0005_adata_prefill');
+      Object.assign(ids, await previousRegistration('240100000111'));
+      // Чтение Adata прежней версии: проверка и её попытка.
+      ids.check = (
+        await pool.query<{ id: string }>(
+          "insert into external_check (profile_id, organization_id, connector) values ($1, $2, 'adata') returning id",
+          [ids.profile, ids.organization],
+        )
+      ).rows[0]!.id;
+      ids.attempt = (
+        await pool.query<{ id: string }>(
+          "insert into external_check_attempt (external_check_id, trigger, state, bin, is_test_data) values ($1, 'profile_created', 'received', '240100000111', true) returning id",
+          [ids.check],
+        )
+      ).rows[0]!.id;
+      await pool.query('update external_check set latest_attempt_id = $2 where id = $1', [ids.check, ids.attempt]);
+      before.organization = await row('organizations', ids.organization);
+      before.account = await row('user_accounts', ids.account);
+      before.profile = await row('manufacturer_profiles', ids.profile);
+      before.check = await row('external_check', ids.check);
+      before.attempt = await row('external_check_attempt', ids.attempt);
+      await migrateThrough(pool);
+    }, 60000);
+
+    it('0006–0008 одной пачкой на базе 0005 с данными прежней версии: строки и id целы (NFR-06)', async () => {
+      const journal = await pool.query('select count(*)::int as n from drizzle.__drizzle_migrations');
+      expect(journal.rows).toEqual([{ n: 9 }]);
+      expect(await row('organizations', ids.organization, ['notification_mailbox'])).toEqual(before.organization);
+      expect(await row('user_accounts', ids.account, NEW_ACCOUNT_COLUMNS)).toEqual(before.account);
+      expect(await row('manufacturer_profiles', ids.profile)).toEqual(before.profile);
+      expect(await row('external_check', ids.check)).toEqual(before.check);
+      expect(await row('external_check_attempt', ids.attempt)).toEqual(before.attempt);
+      const account = await row('user_accounts', ids.account);
+      for (const column of NEW_ACCOUNT_COLUMNS) expect(account[column], column).toBeNull();
+      expect((await row('organizations', ids.organization)).notification_mailbox).toBeNull();
+    });
+  });
 
   describe('база 0006 с данными предыдущей версии', () => {
     const before: Record<string, Record<string, unknown>> = {};
@@ -217,6 +263,63 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('этап 1: миграции 00
       expect(same.rows).toEqual([{ n: 2 }]);
     });
 
+    it('оператор с БИН и тем же именем — тоже 23505; два производителя без БИН с одним названием — можно', async () => {
+      // Уникальность названия — по типу организации, а не по отсутствию БИН.
+      await expect(organization('operator', 'Tco', '240100000211')).rejects.toMatchObject(
+        refusal('23505', 'organizations_name_uq'),
+      );
+      await organization('manufacturer', 'ТОО «Без БИН»');
+      await organization('manufacturer', 'тоо «без бин»');
+      const same = await pool.query("select count(*)::int as n from organizations where lower(name) = 'тоо «без бин»'");
+      expect(same.rows).toEqual([{ n: 2 }]);
+    });
+
+    it('роль приложения: на nda_acceptance и audit_entries нет UPDATE, DELETE и TRUNCATE, INSERT и SELECT есть; на обычной таблице UPDATE есть (FC-02, AUD-01)', async () => {
+      const ROLE = 'imbc_grants_test';
+      /** Роль кластера удаляется вместе с правами, даже если тест упал. */
+      const dropRole = () =>
+        pool.query(`DO $$ BEGIN
+          IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${ROLE}') THEN
+            REVOKE ALL ON ALL TABLES IN SCHEMA public FROM ${ROLE};
+            DROP ROLE ${ROLE};
+          END IF;
+        END $$`);
+      const privileges = async () =>
+        (
+          await pool.query<{ t: string; p: string; ok: boolean }>(
+            `select t, p, has_table_privilege($1, t, p) as ok
+             from unnest(array['nda_acceptance', 'audit_entries', 'user_accounts']) t,
+                  unnest(array['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE']) p
+             order by t, p`,
+            [ROLE],
+          )
+        ).rows;
+      const allowed = (rows: Awaited<ReturnType<typeof privileges>>, table: string) =>
+        rows
+          .filter((r) => r.t === table && r.ok)
+          .map((r) => r.p)
+          .sort();
+
+      await dropRole();
+      await pool.query(`CREATE ROLE ${ROLE} NOLOGIN`);
+      try {
+        await applyAppRoleGrants(pool, ROLE);
+        const first = await privileges();
+        // Только добавление: журнал аудита (AUD-02) и принятия NDA (DBML: append-only).
+        expect(allowed(first, 'nda_acceptance')).toEqual(['INSERT', 'SELECT']);
+        expect(allowed(first, 'audit_entries')).toEqual(['INSERT', 'SELECT']);
+        expect(allowed(first, 'user_accounts')).toEqual(['DELETE', 'INSERT', 'SELECT', 'UPDATE']);
+
+        // Повторный вызов (каждый выкат) даёт те же права.
+        await applyAppRoleGrants(pool, ROLE);
+        expect(await privileges()).toEqual(first);
+      } finally {
+        await dropRole();
+      }
+      const left = await pool.query('select count(*)::int as n from pg_roles where rolname = $1', [ROLE]);
+      expect(left.rows).toEqual([{ n: 0 }]);
+    });
+
     it('ящик только у организации IMBC; принятие NDA у аккаунта — всё или ничего — 23514', async () => {
       await pool.query("update organizations set notification_mailbox = 'imbc@imbc.local' where id = $1", [imbc]);
       const operator = await organization('operator', 'Оператор с ящиком');
@@ -290,6 +393,35 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('этап 1: миграции 00
         { type: 'operator', name: 'NCOC', major: true },
         { type: 'operator', name: 'TCO', major: true },
       ]);
+
+      // Производитель с названием NCOC не получает отметку major, а NCOC-оператор вставляется рядом;
+      // оператор KPO с БИН — тот же оператор: отметку получает, второй KPO не вставляется.
+      await resetDatabase(pool);
+      await migrateThrough(pool, BEFORE);
+      const maker = (
+        await pool.query<{ id: string }>(
+          "insert into organizations (type, name, bin) values ('manufacturer', 'NCOC', '240100000401') returning id",
+        )
+      ).rows[0]!.id;
+      const kpo = (
+        await pool.query<{ id: string }>(
+          "insert into organizations (type, name, bin) values ('operator', 'KPO', '240100000402') returning id",
+        )
+      ).rows[0]!.id;
+      await migrateThrough(pool);
+      const withMaker = await reference();
+      expect(shape(withMaker)).toEqual([
+        { type: 'imbc', name: 'IMBC', major: false },
+        { type: 'operator', name: 'KPO', major: true },
+        { type: 'operator', name: 'NCOC', major: true },
+        { type: 'operator', name: 'TCO', major: true },
+      ]);
+      expect(withMaker.find((o) => o.name === 'KPO')!.id).toBe(kpo);
+      const makerRow = await pool.query(
+        'select type, name, is_major_operator as major from organizations where id = $1',
+        [maker],
+      );
+      expect(makerRow.rows).toEqual([{ type: 'manufacturer', name: 'NCOC', major: false }]);
 
       // База стенда: IMBC и демо-оператор из seed, оператор `ncoc` без отметки.
       await resetDatabase(pool);
