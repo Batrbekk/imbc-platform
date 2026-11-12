@@ -4,11 +4,59 @@
 import { cleanup, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import type { AuditEvent, ProtoState } from "@/prototype/data";
 import { STORAGE_KEY } from "@/prototype/store";
 
 import { renderCabinet } from "../support";
 
 vi.mock("@/lib/leave-app", () => ({ leaveApp: vi.fn(), reloadApp: vi.fn() }));
+
+type Actor = AuditEvent["actor"];
+const expert: Actor = {
+  accountId: "acc-expert",
+  email: "expert@imbc.local",
+  name: "Эксперт IMBC",
+  role: "expert",
+  organizationId: "org-imbc",
+};
+const manufacturer = (organizationId: string): Actor => ({
+  accountId: "acc-manufacturer",
+  email: "manufacturer@demo.local",
+  name: "—",
+  role: "manufacturer",
+  organizationId,
+});
+const phrase = (en: string): AuditEvent["summary"] => ({ en, ru: en, kk: en });
+
+/** События, которые пишут кабинеты SME и производителя, — с объектами разного вида. */
+function addEvents(draft: ProtoState) {
+  const at = "2026-11-12T12:00:00+05:00";
+  const add = (action: string, actor: Actor, subject: AuditEvent["subject"], summary: string) =>
+    draft.audit.push({ id: `t-${draft.audit.length}`, at, actor, action, subject, summary: phrase(summary) });
+  add("profile.submit_result", expert, { type: "profile", id: "p03", label: "result-a" }, "Review result: Verified");
+  add("profile.submit_result", expert, { type: "profile", id: "p04", label: "result-b" }, "Review result: Returned");
+  add("section.save", manufacturer("org-m01"), { type: "section", id: "p01:main", label: "section-subject" }, "Saved");
+  add("document.verify", expert, { type: "document", id: "p02-cert1", label: "document-subject" }, "Doc verified");
+  add(
+    "tier_record.request",
+    manufacturer("org-m01"),
+    { type: "tier_record", id: "p03-pl1", label: "product-subject" },
+    "AGAR asked",
+  );
+  add("nda.accept", manufacturer("org-m02"), { type: "nda", id: "nda-2", label: "nda-subject" }, "NDA 2.0 accepted");
+  add(
+    "notification.read",
+    manufacturer("org-m05"),
+    { type: "notification", id: "n-01", label: "notification-subject" },
+    "Read",
+  );
+  add(
+    "reference.add",
+    { ...expert, role: "administrator", accountId: "acc-admin" },
+    { type: "reference", id: "regions", label: "reference-subject" },
+    "Added",
+  );
+}
 
 const rows = () => {
   const table = screen.getByRole("columnheader", { name: "What changed" }).closest("table")!;
@@ -103,5 +151,37 @@ describe("журнал аудита директора", () => {
       },
     });
     expect(await screen.findByText("The audit log has no events yet.")).toBeTruthy();
+  });
+
+  it("ссылки на досье: секция, документ, продукт, принятие NDA и письмо ведут к своему профилю", async () => {
+    renderCabinet("/proto/director/audit", { role: "director", prepare: addEvents });
+    await screen.findByRole("heading", { level: 1, name: "Audit log" });
+    const href = (label: string) =>
+      screen.getByRole("link", { name: `Open the dossier: ${label}` }).getAttribute("href");
+    expect(href("section-subject")).toBe("/proto/director/profiles/p01");
+    expect(href("document-subject")).toBe("/proto/director/profiles/p02");
+    // Ключ продукта важнее организации того, кто действовал.
+    expect(href("product-subject")).toBe("/proto/director/profiles/p03");
+    expect(href("nda-subject")).toBe("/proto/director/profiles/p02");
+    expect(href("notification-subject")).toBe("/proto/director/profiles/p01");
+    // Объект без профиля — без ссылки.
+    expect(screen.getByText("reference-subject")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Open the dossier: reference-subject" })).toBeNull();
+  });
+
+  it("действие с разными фразами подписано нейтрально; варианты — по алфавиту подписи", async () => {
+    const { user } = renderCabinet("/proto/director/audit", { role: "director", prepare: addEvents });
+    await screen.findByRole("heading", { level: 1, name: "Audit log" });
+    await user.click(screen.getByRole("combobox", { name: "Action" }));
+    const options = (await screen.findAllByRole("option")).map((o) => o.textContent ?? "");
+    expect(options).toContain("Review result submitted · profile.submit_result");
+    expect(options.some((o) => o.startsWith("Review result: "))).toBe(false);
+    // Одна фраза у всех событий кода — подпись по ней.
+    expect(options).toContain("Saved · section.save");
+    const labels = options.slice(1);
+    expect(labels).toEqual([...labels].sort((a, b) => a.localeCompare(b)));
+    await user.click(screen.getByRole("option", { name: "Review result submitted · profile.submit_result" }));
+    // Выбран код целиком: и Verified, и Returned.
+    expect(rows()).toHaveLength(2);
   });
 });

@@ -29,7 +29,10 @@ export function ReferencesScreen() {
   const listId = pick(ids, params.get("list"), first);
   const list = state.referenceLists.find((l) => l.id === listId);
   const current = currentNda(state);
-  const acceptances = state.profiles.filter((p) => p.nda !== null).sort((a, b) => b.nda!.at.localeCompare(a.nda!.at));
+  // Профиль без поля `nda` (другая форма сохранённых данных) в список не попадает.
+  const acceptances = state.profiles
+    .flatMap((p) => (p.nda != null && typeof p.nda.at === "string" ? [{ p, nda: p.nda }] : []))
+    .sort((a, b) => b.nda.at.localeCompare(a.nda.at));
 
   return (
     <ProtoPage hideReset title={t("referencesTitle")} description={t("referencesHint")}>
@@ -83,8 +86,8 @@ export function ReferencesScreen() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {acceptances.map((p) => {
-                    const version = state.ndaVersions.find((v) => v.id === p.nda!.versionId);
+                  {acceptances.map(({ p, nda }) => {
+                    const version = state.ndaVersions.find((v) => v.id === nda.versionId);
                     return (
                       <TableRow key={p.id}>
                         <TableCell className="whitespace-normal">
@@ -94,8 +97,8 @@ export function ReferencesScreen() {
                         </TableCell>
                         <TableCell className="whitespace-normal">
                           <span className="inline-flex flex-wrap items-center gap-2">
-                            NDA {version?.version ?? p.nda!.versionId}
-                            {p.nda!.versionId === current.id ? (
+                            NDA {version?.version ?? nda.versionId}
+                            {nda.versionId === current.id ? (
                               <Badge variant="secondary">{t("current")}</Badge>
                             ) : (
                               <>
@@ -105,8 +108,8 @@ export function ReferencesScreen() {
                             )}
                           </span>
                         </TableCell>
-                        <TableCell>{format.dateTime(p.nda!.at)}</TableCell>
-                        <TableCell className="font-mono text-xs">{p.nda!.ip}</TableCell>
+                        <TableCell>{format.dateTime(nda.at)}</TableCell>
+                        <TableCell className="font-mono text-xs">{nda.ip}</TableCell>
                       </TableRow>
                     );
                   })}

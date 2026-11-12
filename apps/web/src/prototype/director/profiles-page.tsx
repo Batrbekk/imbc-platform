@@ -12,15 +12,14 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useFormat } from "@/i18n/format";
 import { DueDiligenceBadge, ProfileStatusBadge, ProtoPage, TierBadge, UpdateStatusBadge } from "@/prototype/components";
-import type { ProtoProfile } from "@/prototype/data";
-import { useDictionary } from "@/prototype/i18n";
+import { useDictionary, useProtoLocale } from "@/prototype/i18n";
 import { useCommonTexts } from "@/prototype/labels";
 import { accountName, ddResult, isVisible, profileTier, tier3ProductIds, worksWithCount } from "@/prototype/rules";
 import { useProto } from "@/prototype/store";
 
 import { FilterSelect } from "./filter-select";
 import { ALL, dossierPath, pick, useAddress } from "./paths";
-import { downloadCsv, profilesCsv } from "./profiles-csv";
+import { csvFileName, downloadCsv, profilesCsv } from "./profiles-csv";
 import { texts } from "./texts";
 
 const STATUS_FILTERS = [ALL, ...PROFILE_STATUSES, "pending_changes"] as const;
@@ -35,6 +34,7 @@ export function ProfilesScreen() {
   const common = useCommonTexts();
   const format = useFormat();
   const state = useProto();
+  const locale = useProtoLocale();
   const { params, set, clear } = useAddress();
 
   const query = params.get("q") ?? "";
@@ -79,20 +79,8 @@ export function ProfilesScreen() {
   }));
   const visibleItems = VISIBLE_FILTERS.map((value) => ({ value, label: value === ALL ? all : t(value) }));
 
-  const exportCsv = () => {
-    const content = profilesCsv(state, rows, {
-      column: (column) => t(`csv.${column}`),
-      status: (p: ProtoProfile) => common(`profileStatus.${p.status}`),
-      updateStatus: (p: ProtoProfile) => (p.updateStatus ? common(`updateStatus.${p.updateStatus}`) : ""),
-      tier: (p: ProtoProfile) => {
-        const value = profileTier(state, p);
-        return value ? common(`tier.${value}`) : "";
-      },
-      yes: t("yes"),
-      no: t("no"),
-    });
-    downloadCsv(`imbc-profiles-${new Date().toISOString().slice(0, 10)}.csv`, content);
-  };
+  const exportCsv = () => downloadCsv(csvFileName(), profilesCsv(state, rows, locale));
+  const majors = state.organizations.filter((o) => o.majorOperator).length;
 
   return (
     <ProtoPage
@@ -189,7 +177,9 @@ export function ProfilesScreen() {
                       </Badge>
                     )}
                   </TableCell>
-                  <TableCell>{t("ofThree", { count: format.number(worksWithCount(state, p.id)) })}</TableCell>
+                  <TableCell>
+                    {t("ofMajors", { count: format.number(worksWithCount(state, p.id)), total: format.number(majors) })}
+                  </TableCell>
                   <TableCell className={p.assignedExpertId ? undefined : "text-muted-foreground"}>
                     {p.assignedExpertId ? accountName(state, p.assignedExpertId) : t("unassigned")}
                   </TableCell>

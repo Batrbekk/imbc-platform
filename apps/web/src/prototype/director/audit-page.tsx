@@ -10,44 +10,21 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useFormat } from "@/i18n/format";
 import { ProtoPage } from "@/prototype/components";
-import type { AuditEvent, ProtoState } from "@/prototype/data";
+import type { AuditEvent } from "@/prototype/data";
 import { useDictionary, useProtoLocale } from "@/prototype/i18n";
 import { useCommonTexts } from "@/prototype/labels";
-import { accountName, organizationName, profileById } from "@/prototype/rules";
+import { accountName, organizationName } from "@/prototype/rules";
 import { useProto } from "@/prototype/store";
 
+import { subjectProfileId } from "./audit-subject";
 import { auditTexts } from "./audit-texts";
 import { FilterSelect } from "./filter-select";
 import { ALL, almatyDay, dossierPath, pick, useAddress } from "./paths";
 
 const FILTER_KEYS = ["who", "role", "org", "object", "action", "q", "from", "to"] as const;
-const SUBJECT_KEYS = new Set<string>(Object.keys(auditTexts.en));
+const TEXT_KEYS = new Set<string>(Object.keys(auditTexts.en));
+type TextKey = keyof (typeof auditTexts)["en"];
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
-
-/**
- * Профиль, к которому относится объект события: сам профиль или запись с `profileId` (отметка, заметка,
- * запрос, site survey…). Так из журнала открывается досье; запись могла исчезнуть после сброса — тогда без ссылки.
- */
-function subjectProfileId(state: ProtoState, id: string): string | null {
-  if (profileById(state, id)) return id;
-  const sets: { id: string; profileId: string | null }[][] = [
-    state.worksWithMarks,
-    state.visitMarks,
-    state.operatorNotes,
-    state.operatorRequests,
-    state.imbcRequests,
-    state.siteSurveys,
-    state.siteSurveyRequests,
-    state.tierRecords,
-    state.imbcNotes,
-    state.externalChecks,
-  ];
-  for (const set of sets) {
-    const profileId = set.find((r) => r.id === id)?.profileId ?? null;
-    if (profileId && profileById(state, profileId)) return profileId;
-  }
-  return null;
-}
 
 const distinct = <T,>(values: (T | null)[]): T[] => [...new Set(values.filter((v): v is T => v !== null))];
 
@@ -61,8 +38,7 @@ export function AuditScreen() {
 
   // Новые события — сверху; журнал общий для всех ролей этого браузера.
   const events = [...state.audit].reverse();
-  const subjectLabel = (type: string) =>
-    SUBJECT_KEYS.has(`subject.${type}`) ? t(`subject.${type}` as Parameters<typeof t>[0]) : type;
+  const subjectLabel = (type: string) => (TEXT_KEYS.has(`subject.${type}`) ? t(`subject.${type}` as TextKey) : type);
   const roleLabel = (role: Role) => common(`role.${role}`);
   const actorName = (e: AuditEvent) =>
     e.actor.accountId ? accountName(state, e.actor.accountId) : roleLabel(e.actor.role);
@@ -119,12 +95,19 @@ export function AuditScreen() {
       .map((type) => ({ value: type, label: subjectLabel(type) }))
       .sort((a, b) => a.label.localeCompare(b.label)),
   ];
+  // Фраза события — подпись варианта, только если у всех событий кода она одна на этом языке
+  // (у `profile.submit_result` она разная: Verified или Returned); иначе — нейтральная подпись кода или сам код.
+  const actionLabel = (code: string) => {
+    const phrases = new Set(events.filter((e) => e.action === code).map((e) => e.summary[locale] ?? e.summary.en));
+    const label =
+      phrases.size === 1 ? [...phrases][0]! : TEXT_KEYS.has(`action.${code}`) ? t(`action.${code}` as TextKey) : code;
+    return label === code ? code : `${label} · ${code}`;
+  };
   const actionItems = [
     { value: ALL, label: allLabel },
-    ...actions.map((code) => ({
-      value: code,
-      label: `${events.find((e) => e.action === code)!.summary[locale] ?? code} · ${code}`,
-    })),
+    ...actions
+      .map((code) => ({ value: code, label: actionLabel(code) }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
   ];
 
   return (
@@ -200,7 +183,7 @@ export function AuditScreen() {
             </TableHeader>
             <TableBody>
               {shown.map((e) => {
-                const profileId = subjectProfileId(state, e.subject.id);
+                const profileId = subjectProfileId(state, e);
                 return (
                   <TableRow key={e.id}>
                     <TableCell className="text-xs">{format.dateTime(e.at)}</TableCell>
