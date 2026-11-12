@@ -1,18 +1,30 @@
 import {
   catalogFilterSchema,
   catalogItemSchema,
+  companyPageSchema,
   computeBinCheckDigit,
   dashboardSchema,
   normalizeCompanyName,
+  ROLES,
   type UpdateStatus,
 } from '@imbc/contracts';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import type pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ProblemException } from '../src/common/problem.js';
 import type { Database } from '../src/database/database.module.js';
 import * as schema from '../src/database/schema/index.js';
 import { CatalogService } from '../src/modules/catalog/catalog.service.js';
 import { migrateThrough, openTestPool, resetDatabase } from './support/database.js';
+
+/** Контактное лицо «Альфы» в card: его видят роли с focal_point.read, наблюдатель — нет (GEN-13). */
+const FOCAL_POINT = {
+  fullName: 'Айгерим Сапарова',
+  position: 'Коммерческий директор',
+  email: 'focal@alfa.demo.local',
+  phone: '+7 701 000 00 01',
+};
 
 /**
  * Семь видимых профилей проекции. Названия и даты подобраны так, что без правила UPD-04 unresponsive шли бы первыми.
@@ -56,6 +68,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('каталог и дашбор�
   let catalog: CatalogService;
   /** profile_id каждой строки COMPANIES, в том же порядке. */
   const profileIds: string[] = [];
+  /** Верифицированный профиль, которого нет в проекции. */
+  let outsideId: string;
 
   async function manufacturer(seed: number, name: string, status: UpdateStatus, verifiedAt: Date, id?: string) {
     const [org] = await db
@@ -110,7 +124,24 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('каталог и дашбор�
       });
     }
     // Верифицированный unresponsive-профиль, которого нет в проекции: каталог и дашборд его не видят.
-    await manufacturer(COMPANIES.length + 1, 'Вне проекции', 'unresponsive', new Date());
+    outsideId = (await manufacturer(COMPANIES.length + 1, 'Вне проекции', 'unresponsive', new Date())).profile.id;
+    // Страница компании: у «Альфы» card нынешней формы и сертификаты, у «Гаммы» card прежней формы
+    // ({ demo: true }), у остальных — пустой card.
+    await db
+      .update(schema.catalogVisible)
+      .set({
+        card: { companyPhone: '+7 700 000 00 01', companyEmail: 'info@alfa.demo.local', focalPoint: FOCAL_POINT },
+        certificateTypes: ['ISO 9001', 'API 6D'],
+        certificatesValidUntil: { 'ISO 9001': '2027-11-12' },
+        tnvedCodes: ['7308909809'],
+        mainTnved: '7308909809',
+        headcountTotal: 240,
+      })
+      .where(eq(schema.catalogVisible.profileId, idOf('Альфа')));
+    await db
+      .update(schema.catalogVisible)
+      .set({ card: { demo: true } })
+      .where(eq(schema.catalogVisible.profileId, idOf('Гамма')));
   }, 60000);
 
   beforeEach(() => {
@@ -271,6 +302,59 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('каталог и дашбор�
     const [key, value, ...ttl] = valkey.set.mock.calls[0]!;
     expect([key, ...ttl]).toEqual(['dashboard:v2', 'EX', 60]);
     expect(JSON.parse(value as string)).toEqual(d);
+  });
+
+  /** Код ошибки страницы компании или 'ok'. */
+  const companyError = async (profileId: string, role: (typeof ROLES)[number]) => {
+    try {
+      await catalog.company(profileId, role);
+      return 'ok';
+    } catch (error) {
+      return error instanceof ProblemException
+        ? { status: error.getStatus(), code: error.code, title: error.title }
+        : error;
+    }
+  };
+
+  it('страница компании читает проекцию: профиль вне catalog_visible — 404, unresponsive — 200 (UPD-04)', async () => {
+    const missing = { status: 404, code: 'not_found', title: 'Компания не найдена' };
+    for (const role of ROLES) {
+      // Тот же ответ, что и для несуществующего id: о профиле вне проекции ничего не сказано.
+      expect(await companyError(outsideId, role), role).toEqual(missing);
+      expect(await companyError('00000000-0000-4000-8000-0000000000ff', role), role).toEqual(missing);
+    }
+    const page = companyPageSchema.parse(await catalog.company(idOf('Яяя'), 'observer'));
+    expect(page).toMatchObject({ profileId: idOf('Яяя'), nameRu: 'Яяя', updateStatus: 'unresponsive', tier: 'tier_1' });
+  });
+
+  it('наблюдателю сервис не отдаёт focalPoint, оператору отдаёт', async () => {
+    const observer = await catalog.company(idOf('Альфа'), 'observer');
+    expect(Object.keys(observer)).not.toContain('focalPoint');
+    expect(JSON.stringify(observer)).not.toContain(FOCAL_POINT.email);
+    expect(observer).toMatchObject({ companyPhone: '+7 700 000 00 01', companyEmail: 'info@alfa.demo.local' });
+
+    for (const role of ['operator', 'expert', 'director'] as const)
+      expect((await catalog.company(idOf('Альфа'), role)).focalPoint, role).toEqual(FOCAL_POINT);
+
+    const operator = companyPageSchema.parse(await catalog.company(idOf('Альфа'), 'operator'));
+    expect(operator).toMatchObject({
+      tier: 'tier_2',
+      tnvedCodes: ['7308909809'],
+      mainTnved: '7308909809',
+      headcountTotal: 240,
+      // Дата — из certificates_valid_until по типу; без даты — null.
+      certificates: [
+        { type: 'ISO 9001', validUntil: '2027-11-12' },
+        { type: 'API 6D', validUntil: null },
+      ],
+    });
+  });
+
+  it('card старой формы — контакты null, ответ проходит companyPageSchema', async () => {
+    for (const name of ['Гамма', 'Бета']) {
+      const page = companyPageSchema.parse(await catalog.company(idOf(name), 'operator'));
+      expect(page, name).toMatchObject({ companyPhone: null, companyEmail: null, focalPoint: null });
+    }
   });
 
   it('кеш dashboard:v2 верной формы отдаётся без запроса к базе', async () => {

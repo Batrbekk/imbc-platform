@@ -3,7 +3,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { cn } from "cn";
 import { CheckIcon, ChevronsUpDownIcon, LinkIcon, SearchIcon, XIcon } from "lucide-react";
 import { createLoader, debounce, useQueryStates } from "nuqs";
-import { useLocation } from "react-router";
+import { Link, useLocation } from "react-router";
 import { toast } from "sonner";
 import { useTranslations } from "use-intl";
 
@@ -222,7 +222,14 @@ export function CatalogView() {
             {result.data?.items.map((c) => (
               <TableRow key={c.profileId}>
                 <TableCell>
-                  <div className="font-medium">{c.nameRu}</div>
+                  {/* Строка открывает страницу компании; «Назад» на ней вернёт эти фильтры (OPR-06). */}
+                  <Link
+                    to={`/companies/${c.profileId}`}
+                    state={{ from: search }}
+                    className="font-medium underline-offset-4 hover:underline"
+                  >
+                    {c.nameRu}
+                  </Link>
                   <div className="text-xs text-muted-foreground">{c.nameEn}</div>
                 </TableCell>
                 <TableCell className="font-mono text-xs">{c.bin}</TableCell>

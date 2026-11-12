@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { companyCardDataSchema } from '@imbc/contracts';
 import type pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { seedDemo } from '../src/database/seed.js';
@@ -119,6 +120,32 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
     expect(await counts()).toEqual(first);
     expect(first).toEqual({ organizations: 11, accounts: 6, visible: 8 });
     expect((await accounts()).map((a) => a.email)).toEqual(['observer@observer.local']);
+  });
+
+  it('card каждой видимой строки проходит companyCardDataSchema, focal point есть у семи из восьми', async () => {
+    const cards = async () =>
+      (
+        await pool.query<{ name: string; card: unknown }>(
+          'select name_ru as name, card from catalog_visible order by name_ru',
+        )
+      ).rows;
+
+    for (const run of ['первый', 'повторный']) {
+      await seedDemo(pool);
+      const rows = await cards();
+      expect(rows, run).toHaveLength(8);
+      const parsed = rows.map((r) => ({ name: r.name, card: companyCardDataSchema.parse(r.card) }));
+      expect(
+        parsed.filter((r) => r.card.focalPoint === null).map((r) => r.name),
+        run,
+      ).toEqual(['ТОО «Тест Химия»']);
+      expect(
+        parsed.every((r) => r.card.companyPhone && r.card.companyEmail?.endsWith('.demo.local')),
+        run,
+      ).toBe(true);
+      // Стенд после прежней версии: строки уже есть с card = { demo: true }; повторный запуск их перезаписывает.
+      await pool.query(`update catalog_visible set card = '{"demo": true}'::jsonb`);
+    }
   });
 
   it('статус актуальности профиля и его строки в проекции совпадают после первого и повторного запуска (UPD-04, UPD-06)', async () => {

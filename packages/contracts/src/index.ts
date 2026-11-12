@@ -2,5 +2,6 @@ export * from './enums.js';
 export * from './bin.js';
 export * from './normalize.js';
 export * from './catalog.js';
+export * from './company.js';
 export * from './policy.js';
 export * from './auth.js';

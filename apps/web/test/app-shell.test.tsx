@@ -49,7 +49,7 @@ function me(role: Me["user"]["role"], gates: Me["gates"] = { mfa: true, responsi
 
 const EMPTY_PAGE = { items: [], total: 0, page: 1, pageSize: 25 };
 
-/** Страница компании под /catalog/:id (её добавит следующий этап): открывшись, она запросила бы API. */
+/** Вложенная страница под /catalog/:id: открывшись, она запросила бы API. */
 function CompanyProbe() {
   useEffect(() => {
     void fetch("/api/v1/catalog/123");
@@ -191,6 +191,18 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
       await waitFor(() => expect(router.state.location.pathname).toBe(HOME[role]));
       await screen.findAllByText(`${role}@${role}.local`);
       expect(screen.queryByRole("heading", { name: "company" })).toBeNull();
+      expect(apiCalls(api)).toEqual([]);
+      cleanup();
+    }
+  });
+
+  it("производитель на /companies/x уходит на /profile, администратор — на /account", async () => {
+    for (const role of ["manufacturer", "administrator"] as const) {
+      const api = stubWorkspace(me(role));
+      const { router } = renderRoute("/companies/00000000-0000-4000-8000-000000000010?x=1");
+
+      await waitFor(() => expect(router.state.location.pathname).toBe(role === "manufacturer" ? "/profile" : "/account"));
+      await screen.findAllByText(`${role}@${role}.local`);
       expect(apiCalls(api)).toEqual([]);
       cleanup();
     }

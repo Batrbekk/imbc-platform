@@ -61,6 +61,12 @@ export const routes: RouteObject[] = [
             lazy: lazyPage(() => import("@/routes/app/catalog"), (m) => m.CatalogPage),
           },
           {
+            // Страница компании из каталога (OPR-06, OPR-09); заголовок вкладки — название компании.
+            path: "companies/:profileId",
+            handle: { title: "company.title" } satisfies AppRouteHandle,
+            lazy: lazyPage(() => import("@/routes/app/company"), (m) => m.CompanyPage),
+          },
+          {
             path: "dashboard",
             handle: { title: "dashboard.title" } satisfies AppRouteHandle,
             lazy: lazyPage(() => import("@/routes/app/dashboard"), (m) => m.DashboardPage),

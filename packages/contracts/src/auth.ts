@@ -46,6 +46,7 @@ export function roleHome(role: Role): string {
 /** Страницы с правом в матрице: роль без права уходит на свою стартовую страницу (GEN-08). */
 const GUARDED_PAGES = new Map<string, Action>([
   ['/catalog', 'catalog.search'],
+  ['/companies', 'catalog.search'],
   ['/dashboard', 'dashboard.read'],
   ['/profile', 'profile.edit'],
 ]);

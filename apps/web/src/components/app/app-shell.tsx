@@ -85,9 +85,17 @@ export function AppShell() {
 
   const role = me.data.user.role;
   // Дашборд — первым: это стартовая страница оператора, наблюдателя и директора (OPR-31).
-  const items = [
+  // `active` — начала адресов, на которых пункт подсвечен; по умолчанию — его href.
+  const items: { href: string; label: string; icon: typeof SearchIcon; show: boolean; active?: string[] }[] = [
     { href: "/dashboard", label: t("nav.dashboard"), icon: LayoutDashboardIcon, show: !!can(role, "dashboard.read") },
-    { href: "/catalog", label: t("nav.catalog"), icon: SearchIcon, show: !!can(role, "catalog.search") },
+    {
+      href: "/catalog",
+      label: t("nav.catalog"),
+      icon: SearchIcon,
+      show: !!can(role, "catalog.search"),
+      // Страница компании открывается из каталога.
+      active: ["/catalog", "/companies"],
+    },
     { href: "/profile", label: t("nav.profile"), icon: BuildingIcon, show: !!can(role, "profile.edit") },
     { href: "/account", label: t("nav.account"), icon: UserRoundIcon, show: true },
   ].filter((i) => i.show);
@@ -111,7 +119,7 @@ export function AppShell() {
                 <SidebarMenuItem key={i.href}>
                   <SidebarMenuButton
                     render={<Link to={i.href} />}
-                    isActive={pathname.startsWith(i.href)}
+                    isActive={(i.active ?? [i.href]).some((prefix) => pathname.startsWith(prefix))}
                     tooltip={i.label}
                   >
                     <i.icon />

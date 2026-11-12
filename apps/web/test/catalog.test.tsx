@@ -1,5 +1,11 @@
 // Каталог: фильтры в адресе страницы уходят в API в формате catalogFilterSchema (OPR-04, OPR-05).
-import { type CatalogItem, catalogFilterSchema, type CatalogPage, type Dashboard } from "@imbc/contracts";
+import {
+  type CatalogItem,
+  catalogFilterSchema,
+  type CatalogPage,
+  type CompanyPage,
+  type Dashboard,
+} from "@imbc/contracts";
 import { screen, waitFor, within } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, describe, expect, it, type Mock, vi } from "vitest";
@@ -417,6 +423,41 @@ describe("каталог (OPR-04, OPR-05)", () => {
     const skeleton = document.querySelector('[data-slot="skeleton"]')!.closest("td")!;
     expect(skeleton.colSpan).toBe(headers.length);
     expect(headers.map((h) => h.textContent)).toContain(en.catalog.columns.tier);
+  });
+
+  it("ссылка из строки каталога ведёт на /companies/:id, «Назад» возвращает фильтры (OPR-06)", async () => {
+    const company: CompanyPage = {
+      ...ITEM,
+      tnvedCodes: ["7208"],
+      headcountTotal: null,
+      certificates: [{ type: "ST-KZ", validUntil: null }],
+      unifiedRegister: false,
+      verifiedAt: "2026-11-11T20:00:00Z",
+      companyPhone: null,
+      companyEmail: null,
+      focalPoint: null,
+    };
+    const api = stubApi({
+      "GET /api/auth/me": { body: OPERATOR },
+      "GET /api/v1/catalog/search": () => Response.json({ items: [ITEM], total: 1, page: 1, pageSize: 25 }),
+      "GET /api/v1/dashboard": { body: DASHBOARD },
+      [`GET /api/v1/catalog/companies/${ITEM.profileId}`]: { body: company },
+    });
+    const { router, user } = renderRoute("/catalog?region=KZ-ATY&sort=verified_at", { locale: "en" });
+
+    const link = await screen.findByRole("link", { name: ITEM.nameRu });
+    expect(link.getAttribute("href")).toBe(`/companies/${ITEM.profileId}`);
+    await user.click(link);
+
+    expect(await screen.findByRole("heading", { level: 1, name: ITEM.nameEn })).toBeTruthy();
+    expect(router.state.location.pathname).toBe(`/companies/${ITEM.profileId}`);
+    const back = screen.getByRole("link", { name: en.company.back });
+    expect(back.getAttribute("href")).toBe("/catalog?region=KZ-ATY&sort=verified_at");
+
+    await user.click(back);
+    expect(await screen.findByRole("heading", { name: en.catalog.title })).toBeTruthy();
+    expect(router.state.location.search).toBe("?region=KZ-ATY&sort=verified_at");
+    await waitFor(() => expect(searches(api).at(-1)).toBe("/api/v1/catalog/search?region=KZ-ATY&sort=verified_at"));
   });
 
   it("регионы фильтра — из дашборда, по алфавиту до справочника регионов (ADM-08)", async () => {

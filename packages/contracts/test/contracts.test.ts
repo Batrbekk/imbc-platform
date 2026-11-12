@@ -6,6 +6,8 @@ import {
   catalogFilterToSearchParams,
   catalogItemSchema,
   checkBin,
+  companyCardDataSchema,
+  companyPageSchema,
   computeBinCheckDigit,
   dashboardSchema,
   normalizeCompanyName,
@@ -115,6 +117,42 @@ describe('строка результата каталога (OPR-06)', () => {
     expect(() => catalogItemSchema.parse({ ...item, updateStatus: 'active' })).toThrow();
     expect(() => catalogItemSchema.parse({ ...item, tier: 'tier_3', updateStatus: 'active' })).toThrow();
     expect(() => catalogItemSchema.parse({ ...item, tier: 'tier_1', updateStatus: 'inactive' })).toThrow();
+  });
+});
+
+describe('страница компании (OPR-09, OPR-10, GEN-13)', () => {
+  const page = {
+    profileId: '00000000-0000-4000-8000-000000000001',
+    bin: '240100000001',
+    nameEn: 'Test LLP',
+    nameRu: 'ТОО «Тест»',
+    region: 'KZ-ATY',
+    commodityGroups: ['A'],
+    tnvedCodes: ['7308909809'],
+    mainTnved: '7308909809',
+    headcountTotal: 240,
+    certificates: [{ type: 'ISO 9001', validUntil: '2027-11-12' }],
+    siteSurveyed: true,
+    tier: 'tier_2',
+    unifiedRegister: false,
+    worksWithCount: 1,
+    updateStatus: 'active',
+    pendingChanges: false,
+    verifiedAt: '2026-11-03T10:00:00.000Z',
+    companyPhone: '+7 700 000 00 01',
+    companyEmail: 'info@company1.demo.local',
+  };
+
+  it('страница компании: focalPoint необязателен, card без полей отклоняется', () => {
+    const observer = companyPageSchema.parse(page);
+    expect('focalPoint' in observer).toBe(false);
+    const focalPoint = { fullName: 'Айгерим Сапарова', position: 'Директор', email: 'f@x.local', phone: '+7' };
+    expect(companyPageSchema.parse({ ...page, focalPoint }).focalPoint).toEqual(focalPoint);
+    expect(companyPageSchema.parse({ ...page, focalPoint: null }).focalPoint).toBeNull();
+    expect(companyCardDataSchema.safeParse({ demo: true }).success).toBe(false);
+    expect(companyCardDataSchema.safeParse({ companyPhone: null, companyEmail: null, focalPoint: null }).success).toBe(
+      true,
+    );
   });
 });
 

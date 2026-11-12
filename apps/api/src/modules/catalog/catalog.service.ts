@@ -1,14 +1,21 @@
 import {
+  can,
   type CatalogFilter,
   type CatalogPage,
+  type CompanyCardData,
+  type CompanyPage,
+  companyCardDataSchema,
   type Dashboard,
   dashboardSchema,
   normalizeCompanyName,
+  type Role,
   type Scope,
 } from '@imbc/contracts';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, arrayOverlaps, asc, desc, eq, gte, inArray, lte, type SQL, sql } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
+import { z } from 'zod';
+import { ProblemException } from '../../common/problem.js';
 import { DB, type Database } from '../../database/database.module.js';
 import { catalogVisible } from '../../database/schema/index.js';
 import { VALKEY } from '../../infra/infra.module.js';
@@ -17,6 +24,17 @@ const t = catalogVisible;
 const DASHBOARD_TTL_S = 60;
 /** v2: счётчики по статусу актуальности v1.3 (UPD-06). Кеш прежней формы (dashboard:v1) не читается. */
 const DASHBOARD_CACHE_KEY = 'dashboard:v2';
+
+/** card прежней формы (например, `{ demo: true }`) — контактов нет. */
+const NO_CONTACTS: CompanyCardData = { companyPhone: null, companyEmail: null, focalPoint: null };
+const isoDate = z.iso.date();
+
+/** Дата сертификата из certificates_valid_until (тип → дата); нет записи или не дата — null. */
+function validUntil(dates: unknown, type: string): string | null {
+  if (dates === null || typeof dates !== 'object' || Array.isArray(dates)) return null;
+  const value: unknown = (dates as Record<string, unknown>)[type];
+  return isoDate.safeParse(value).success ? (value as string) : null;
+}
 
 /** Запись кеша дашборда, если она разбирается и проходит dashboardSchema; иначе null — считаем заново. */
 function cachedDashboard(raw: string | null): Dashboard | null {
@@ -142,6 +160,54 @@ export class CatalogService {
       page: f.page,
       pageSize: f.pageSize,
     };
+  }
+
+  /**
+   * Страница компании (OPR-09, OPR-10, OPR-11). При любом scope строка ищется только в проекции:
+   * профиль вне неё (не Verified, due diligence red) — тот же 404, что и несуществующий id.
+   * Внутренней проекции для scope `all` пока нет (см. search). Ключ focalPoint есть в ответе только
+   * у роли с focal_point.read: наблюдатель его не получает (GEN-13).
+   */
+  async company(profileId: string, role: Role): Promise<CompanyPage> {
+    const [row] = await this.db
+      .select({
+        profileId: t.profileId,
+        bin: t.bin,
+        nameEn: t.nameEn,
+        nameRu: t.nameRu,
+        region: t.region,
+        commodityGroups: t.commodityGroups,
+        tnvedCodes: t.tnvedCodes,
+        mainTnved: t.mainTnved,
+        headcountTotal: t.headcountTotal,
+        certificateTypes: t.certificateTypes,
+        certificatesValidUntil: t.certificatesValidUntil,
+        siteSurveyed: t.siteSurveyed,
+        tier: t.tier,
+        unifiedRegister: t.unifiedRegister,
+        worksWithCount: t.worksWithCount,
+        updateStatus: t.updateStatus,
+        pendingChanges: t.pendingChanges,
+        verifiedAt: t.verifiedAt,
+        card: t.card,
+      })
+      .from(t)
+      .where(eq(t.profileId, profileId))
+      .limit(1);
+    if (!row) throw new ProblemException(404, 'not_found', 'Компания не найдена');
+
+    const { certificateTypes, certificatesValidUntil, verifiedAt, card, ...fields } = row;
+    const parsed = companyCardDataSchema.safeParse(card);
+    const contacts = parsed.success ? parsed.data : NO_CONTACTS;
+    const page: CompanyPage = {
+      ...fields,
+      certificates: certificateTypes.map((type) => ({ type, validUntil: validUntil(certificatesValidUntil, type) })),
+      verifiedAt: verifiedAt.toISOString(),
+      companyPhone: contacts.companyPhone,
+      companyEmail: contacts.companyEmail,
+    };
+    if (can(role, 'focal_point.read')) page.focalPoint = contacts.focalPoint;
+    return page;
   }
 
   /**

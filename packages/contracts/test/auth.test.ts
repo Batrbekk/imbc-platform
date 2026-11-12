@@ -79,8 +79,20 @@ describe('страница после входа: destinationFor', () => {
       );
   });
 
+  it('/companies/<id>: открыт ролям с catalog.search, производитель и администратор уходят на стартовую (GEN-08)', () => {
+    for (const role of ROLES) {
+      const allowed = can(role, 'catalog.search') !== null;
+      for (const saved of ['/companies/x?y', '/companies', '/companies/'])
+        expect(destinationFor(role, saved), `${role} ${saved}`).toBe(allowed ? saved : roleHome(role));
+    }
+    expect(destinationFor('manufacturer', '/companies/x?y')).toBe('/profile');
+    expect(destinationFor('administrator', '/companies/x?y')).toBe('/account');
+    // Путь сравнивается декодированным, как у роутера.
+    expect(destinationFor('manufacturer', '/%63ompanies/x')).toBe('/profile');
+  });
+
   it('страница сравнивается по сегментам: вложенный путь — та же страница, похожее имя — нет', () => {
-    // Роль с правом сохраняет вложенный адрес (страница компании под /catalog/:id).
+    // Роль с правом сохраняет вложенный адрес каталога.
     expect(destinationFor('operator', '/catalog/123')).toBe('/catalog/123');
     expect(destinationFor('expert', '/catalog/123?tab=docs')).toBe('/catalog/123?tab=docs');
     // Роль без права уходит на стартовую страницу и с вложенного адреса.

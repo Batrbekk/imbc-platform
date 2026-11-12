@@ -5,6 +5,7 @@
  */
 import { pathToFileURL } from 'node:url';
 import {
+  type CompanyCardData,
   computeBinCheckDigit,
   normalizeCompanyName,
   type CommodityGroup,
@@ -50,6 +51,8 @@ const COMPANIES: {
   headcount: number;
   /** Статус актуальности: unresponsive тоже в каталоге и на дашборде, ниже остальных (UPD-04, OPR-33). */
   updateStatus: UpdateStatus;
+  /** ФИО вымышленного контактного лица (focal point); null — пустое состояние страницы компании. */
+  focalPoint: string | null;
 }[] = [
   {
     ru: 'ТОО «Демо Металл Конструкция»',
@@ -61,6 +64,7 @@ const COMPANIES: {
     surveyed: true,
     headcount: 240,
     updateStatus: 'active',
+    focalPoint: 'Айгерим Сапарова',
   },
   {
     ru: 'ТОО «Каспий Демо Сервис»',
@@ -72,6 +76,7 @@ const COMPANIES: {
     surveyed: true,
     headcount: 410,
     updateStatus: 'active',
+    focalPoint: 'Ерлан Жумабеков',
   },
   {
     ru: 'АО «Пример Кабель»',
@@ -83,6 +88,7 @@ const COMPANIES: {
     surveyed: false,
     headcount: 120,
     updateStatus: 'active',
+    focalPoint: 'Динара Абенова',
   },
   {
     ru: 'ТОО «Тест Химия»',
@@ -94,6 +100,7 @@ const COMPANIES: {
     surveyed: false,
     headcount: 65,
     updateStatus: 'unresponsive',
+    focalPoint: null,
   },
   {
     ru: 'ТОО «Образец Спецодежда»',
@@ -105,6 +112,7 @@ const COMPANIES: {
     surveyed: true,
     headcount: 90,
     updateStatus: 'active',
+    focalPoint: 'Нурлан Сейткали',
   },
   {
     ru: 'ТОО «Демо Насос Завод»',
@@ -116,6 +124,7 @@ const COMPANIES: {
     surveyed: true,
     headcount: 310,
     updateStatus: 'active',
+    focalPoint: 'Асель Тулегенова',
   },
   {
     ru: 'ТОО «Степь Пластик»',
@@ -127,6 +136,7 @@ const COMPANIES: {
     surveyed: false,
     headcount: 45,
     updateStatus: 'outdated',
+    focalPoint: 'Бауыржан Оспанов',
   },
   {
     ru: 'ТОО «Атырау Демо Арматура»',
@@ -138,6 +148,7 @@ const COMPANIES: {
     surveyed: true,
     headcount: 180,
     updateStatus: 'active',
+    focalPoint: 'Гульнара Ахметова',
   },
 ];
 
@@ -210,8 +221,22 @@ export async function seedDemo(pool: pg.Pool): Promise<void> {
         unifiedRegister: i % 3 === 0,
         updateStatus: c.updateStatus,
         verifiedAt,
-        card: { demo: true },
+        // Префилл и контактное лицо страницы компании (OPR-09); форма — companyCardDataSchema.
+        card: {
+          companyPhone: `+7 700 000 00 0${i + 1}`,
+          companyEmail: `info@company${i + 1}.demo.local`,
+          focalPoint:
+            c.focalPoint === null
+              ? null
+              : {
+                  fullName: c.focalPoint,
+                  position: 'Коммерческий директор',
+                  email: `focal@company${i + 1}.demo.local`,
+                  phone: `+7 701 000 00 0${i + 1}`,
+                },
+        } satisfies CompanyCardData,
       };
+      // set: row — и card: на стенде строки уже есть с card прежней формы ({ demo: true }).
       await tx.insert(catalogVisible).values(row).onConflictDoUpdate({ target: catalogVisible.profileId, set: row });
     }
 
