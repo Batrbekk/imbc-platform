@@ -5,11 +5,15 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module.js';
 import { configureHttp } from './common/http.js';
-import { ENV, type Env } from './config/env.js';
+import { loadEnv } from './config/env.js';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
-  const env = app.get<Env>(ENV);
+  // Конфигурация до сборки модулей: от флага PROTOTYPE_CABINETS зависит, есть ли модуль прототипа.
+  const env = loadEnv();
+  const app = await NestFactory.create<NestExpressApplication>(
+    AppModule.register({ prototypeCabinets: env.PROTOTYPE_CABINETS }),
+    { bufferLogs: true },
+  );
 
   app.useLogger(app.get(Logger));
   configureHttp(app, env);

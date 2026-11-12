@@ -123,9 +123,14 @@ export function setProtoState(next: ProtoState): void {
   apply({ apply: () => next });
 }
 
-/** «Сбросить демо-данные»: исходные данные во всех ролях (в общем режиме — у всех). В журнал не пишется. */
+/**
+ * «Сбросить демо-данные»: исходные данные во всех ролях (в общем режиме — у всех). В журнал не пишется.
+ * Действие подтверждённое, поэтому в общем режиме доходит до сервера всегда — и поверх документа
+ * более новой схемы (`force`, `remote.ts`).
+ */
 export function resetProto(): void {
-  setProtoState(createInitialState());
+  const initial = createInitialState();
+  apply({ apply: () => initial, force: true });
 }
 
 function subscribe(listener: () => void) {

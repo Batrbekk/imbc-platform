@@ -13,6 +13,7 @@ import { clearReloadFlag } from "@/lib/reload-guard";
 import { authDestination, useMe } from "@/lib/session";
 
 import { PROTOTYPE_RELOAD, ProtoBoundary } from "./boundary";
+import { ConfirmAction } from "./components/confirm-action";
 import { useCommonTexts } from "./labels";
 import { loadCabinet } from "./registry";
 import { dismissSyncNotice, useSyncStatus } from "./remote";
@@ -54,8 +55,9 @@ export function PrototypeGate() {
 }
 
 /**
- * Связь с сервером стенда в общем режиме: «не сохранено, повторяем», устаревшая вкладка, правка не
- * применена. В локальном режиме и при нормальной связи — ничего.
+ * Связь с сервером стенда в общем режиме: «не сохранено, повторяем», устаревшая вкладка (с кнопкой
+ * сброса демо-данных для всех), правка не применена или отклонена. В локальном режиме и при нормальной
+ * связи — ничего.
  */
 function SyncNotice() {
   const t = useCommonTexts();
@@ -68,12 +70,31 @@ function SyncNotice() {
         ? t("syncDropped")
         : status.notice === "conflict"
           ? t("syncConflict")
-          : null;
+          : status.notice === "rejected"
+            ? t("syncRejected")
+            : null;
   if (!message) return null;
   const dismissible = !status.outdated && !status.offline;
   return (
     <Alert className="mx-auto mb-4 max-w-7xl">
-      <AlertDescription className="text-foreground">{message}</AlertDescription>
+      <AlertDescription className="text-foreground">
+        {message}
+        {status.outdated && (
+          // Перезагрузка не помогает, если документ сервера записан более новой (или откатанной) сборкой:
+          // сброс демо-данных для всех — выход из интерфейса, тот же, что на каждой странице.
+          <div className="mt-2">
+            <ConfirmAction
+              variant="outline"
+              size="sm"
+              label={t("resetForEveryone")}
+              title={t("resetTitle")}
+              description={t("resetDescriptionShared")}
+              confirmLabel={t("reset")}
+              onConfirm={resetProto}
+            />
+          </div>
+        )}
+      </AlertDescription>
       {dismissible && (
         <AlertAction>
           <Button size="sm" variant="outline" onClick={dismissSyncNotice}>

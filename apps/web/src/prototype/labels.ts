@@ -14,9 +14,11 @@ export const commonTexts = defineDictionary({
       "All users of the stand return to the initial demo data. Changes made in the demo are lost.",
     syncOffline: "Not saved: no connection to the stand. Your changes are kept in this browser; retrying.",
     syncOutdated:
-      "The demo data on the stand is from a newer version of the platform. Reload the page: changes made here are not saved.",
+      "The demo data on the stand is from a newer version of the platform. Reload the page: changes made here are not saved. If reloading does not help, reset the demo data for everyone.",
     syncDropped:
       "Your last change was not applied: another user changed or removed this record first. The screen shows the current data.",
+    syncRejected: "Your last change was not saved: the stand rejected it. The screen shows the current data.",
+    resetForEveryone: "Reset demo data for everyone",
     syncConflict:
       "Your last change was not saved: the demo data kept changing while it was being saved. The screen shows the current data.",
     dismiss: "Close",
@@ -116,9 +118,11 @@ export const commonTexts = defineDictionary({
       "Все пользователи стенда вернутся к исходным демо-данным. Изменения, сделанные на показе, пропадут.",
     syncOffline: "Не сохранено: нет связи со стендом. Изменения сохранены в этом браузере; повторяем.",
     syncOutdated:
-      "Демо-данные на стенде — от более новой версии платформы. Перезагрузите страницу: изменения здесь не сохраняются.",
+      "Демо-данные на стенде — от более новой версии платформы. Перезагрузите страницу: изменения здесь не сохраняются. Если перезагрузка не помогла, сбросьте демо-данные для всех.",
     syncDropped:
       "Последнее изменение не применено: другой пользователь раньше изменил или удалил эту запись. На экране — текущие данные.",
+    syncRejected: "Последнее изменение не сохранено: стенд его отклонил. На экране — текущие данные.",
+    resetForEveryone: "Сбросить демо-данные для всех",
     syncConflict:
       "Последнее изменение не сохранено: демо-данные менялись, пока оно сохранялось. На экране — текущие данные.",
     dismiss: "Закрыть",
@@ -219,9 +223,11 @@ export const commonTexts = defineDictionary({
       "Стендтің барлық пайдаланушылары бастапқы демо-деректерге оралады. Көрсетілімдегі өзгерістер жойылады.",
     syncOffline: "Сақталмады: стендпен байланыс жоқ. Өзгерістер осы браузерде сақталған; қайталап жатырмыз.",
     syncOutdated:
-      "Стендтегі демо-деректер платформаның жаңа нұсқасынан. Бетті қайта жүктеңіз: мұндағы өзгерістер сақталмайды.",
+      "Стендтегі демо-деректер платформаның жаңа нұсқасынан. Бетті қайта жүктеңіз: мұндағы өзгерістер сақталмайды. Қайта жүктеу көмектеспесе, демо-деректерді барлығы үшін қалпына келтіріңіз.",
     syncDropped:
       "Соңғы өзгеріс қолданылмады: бұл жазбаны басқа пайдаланушы бұрын өзгертті немесе жойды. Экранда — ағымдағы деректер.",
+    syncRejected: "Соңғы өзгеріс сақталмады: стенд оны қабылдамады. Экранда — ағымдағы деректер.",
+    resetForEveryone: "Демо-деректерді барлығы үшін қалпына келтіру",
     syncConflict:
       "Соңғы өзгеріс сақталмады: ол сақталып жатқанда демо-деректер өзгеріп отырды. Экранда — ағымдағы деректер.",
     dismiss: "Жабу",

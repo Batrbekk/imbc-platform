@@ -58,12 +58,18 @@ export function sessionFor(role: Role, email = SESSION_EMAIL[role], fullName: st
 }
 
 /**
- * Запросы к /api/v1: экраны прототипа их не делают (берут данные из хранилища). Проверка режима
- * хранилища при открытии кабинета (`GET /api/v1/prototype/state`, `remote.ts`) — не запрос экрана.
+ * Запросы к /api/v1: экраны прототипа их не делают (берут данные из хранилища). Не считается только
+ * первый `GET /api/v1/prototype/state` — проверка режима хранилища при открытии кабинета (`remote.ts`);
+ * в локальном режиме других запросов хранилища нет, а второй такой GET или любой PUT считаются.
  */
 export function apiV1Calls(api: Mock<typeof fetch>): string[] {
+  let probe = false;
   return api.mock.calls
-    .filter(([url, init]) => !(String(url) === PROTOTYPE_STATE_URL && (init?.method ?? "GET") === "GET"))
+    .filter(([url, init]) => {
+      if (probe || String(url) !== PROTOTYPE_STATE_URL || (init?.method ?? "GET") !== "GET") return true;
+      probe = true;
+      return false;
+    })
     .map(([url]) => String(url))
     .filter((url) => url.includes("/api/v1/"));
 }

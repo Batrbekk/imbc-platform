@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { type DynamicModule, Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 import { AuditModule } from './common/audit.service.js';
@@ -44,7 +44,6 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     DatabaseModule,
     InfraModule,
     AuditModule,
-    PrototypeModule,
   ],
   controllers: [
     HealthController,
@@ -69,4 +68,12 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     { provide: APP_FILTER, useClass: ProblemDetailsFilter },
   ],
 })
-export class AppModule {}
+export class AppModule {
+  /**
+   * Модуль общего состояния прототипа кабинетов — только при `PROTOTYPE_CABINETS=true`: без флага
+   * адрес `/api/v1/prototype/state` — обычный неизвестный маршрут (и в OpenAPI его нет).
+   */
+  static register(options: { prototypeCabinets: boolean }): DynamicModule {
+    return { module: AppModule, imports: options.prototypeCabinets ? [PrototypeModule] : [] };
+  }
+}

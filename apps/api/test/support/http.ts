@@ -79,7 +79,7 @@ export async function startHttp(options: {
   })(HttpStandModule);
 
   const app = await NestFactory.create<NestExpressApplication>(HttpStandModule, { logger: false });
-  configureHttp(app, { PROTOTYPE_CABINETS: env.PROTOTYPE_CABINETS === true });
+  configureHttp(app, { PROTOTYPE_CABINETS: env.PROTOTYPE_CABINETS === true, SESSION_COOKIE_NAME: COOKIE });
   await app.listen(0, '127.0.0.1');
   const base = await app.getUrl();
 
