@@ -16,7 +16,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { createdAt, id, updatedAt } from './_shared.js';
-import { organizations, userAccounts } from './access.js';
+import { ndaVersion, organizations, userAccounts } from './access.js';
 import {
   capacityUnit,
   commodityGroup,
@@ -60,6 +60,26 @@ export const manufacturerProfiles = pgTable(
     uniqueIndex('manufacturer_profiles_org_uq').on(t.organizationId),
     index('manufacturer_profiles_status_idx').on(t.status),
   ],
+);
+
+/**
+ * Принятие NDA профилем (DBML `nda_acceptance`, FC-02): время, версия и IP-адрес; ФИО и должности нет.
+ * Только добавление: у роли приложения нет UPDATE и DELETE (`migrate.ts`).
+ */
+export const ndaAcceptance = pgTable(
+  'nda_acceptance',
+  {
+    id: id(),
+    profileId: uuid('profile_id')
+      .notNull()
+      .references(() => manufacturerProfiles.id),
+    ndaVersionId: uuid('nda_version_id')
+      .notNull()
+      .references(() => ndaVersion.id),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }).notNull(),
+    ipAddress: text('ip_address').notNull(),
+  },
+  (t) => [uniqueIndex('nda_acceptance_uq').on(t.profileId, t.ndaVersionId)],
 );
 
 /**

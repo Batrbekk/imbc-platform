@@ -18,7 +18,18 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import * as schema from './schema/index.js';
 
-const { organizations, userAccounts, manufacturerProfiles, catalogVisible } = schema;
+const { organizations, userAccounts, manufacturerProfiles, catalogVisible, ndaVersion } = schema;
+
+/**
+ * Версия 1 NDA на стенде — явная заглушка на трёх языках (FC-02, Р-5): текст NDA предоставит IMBC,
+ * и он придёт миграцией следующей версией. Миграция заглушку не кладёт — иначе она попала бы в продакшен.
+ */
+export const NDA_PLACEHOLDER_BODY = [
+  'УАҚЫТША МӘТІН — ЗАҢДЫҚ ҚҰЖАТ ЕМЕС. Платформаның құпияны жария етпеу туралы келісімінің (NDA) мәтінін IMBC ұсынады. Бұл мәтін тек сынақ стендіне арналған, оған сүйенуге болмайды.',
+  'ВРЕМЕННЫЙ ТЕКСТ — НЕ ЮРИДИЧЕСКИЙ ДОКУМЕНТ. Текст соглашения о неразглашении (NDA) платформы предоставит IMBC. Этот текст существует только для тестового стенда, полагаться на него нельзя.',
+  'PLACEHOLDER — NOT A LEGAL TEXT. IMBC will provide the text of the platform non-disclosure agreement (NDA). This text exists only for the test environment and must not be relied on.',
+].join('\n\n');
+const NDA_PUBLISHER_EMAIL = 'admin@imbc.local';
 
 function demoBin(seed: number): string {
   for (let i = 0; i < 100; i++) {
@@ -270,6 +281,18 @@ export async function seedDemo(pool: pg.Pool): Promise<void> {
           locale: 'ru',
         })
         .onConflictDoNothing();
+    }
+
+    // NDA: заглушка — только в пустую таблицу; версию, которая уже есть (текст IMBC), seed не трогает.
+    const [anyVersion] = await tx.select({ id: ndaVersion.id }).from(ndaVersion).limit(1);
+    if (!anyVersion) {
+      const [publisher] = await tx
+        .select({ id: userAccounts.id })
+        .from(userAccounts)
+        .where(sql`lower(${userAccounts.email}) = ${NDA_PUBLISHER_EMAIL}`);
+      await tx
+        .insert(ndaVersion)
+        .values({ versionNumber: 1, body: NDA_PLACEHOLDER_BODY, isCurrent: true, publishedBy: publisher!.id });
     }
 
     // Очередь SME. Статус, назначение и дата регистрации задаются при каждом запуске: строки

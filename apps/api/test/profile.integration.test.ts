@@ -224,7 +224,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('свой профиль про�
   });
 
   it('организация без профиля — 404 not_found', async () => {
-    const [org] = await db.insert(schema.organizations).values({ type: 'imbc', name: 'IMBC' }).returning();
+    // Организация IMBC (миграция 0008) профиля не имеет.
+    const [org] = await db.select().from(schema.organizations).where(eq(schema.organizations.type, 'imbc'));
 
     const error = await profiles.own(org!.id).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ProblemException);
@@ -313,7 +314,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('свой профиль про�
       expect(await profiles.ownAdata(empty.org.id)).toEqual(notRequested);
 
       // Организация без профиля — 404, как у своего профиля.
-      const [imbc] = await db.insert(schema.organizations).values({ type: 'imbc', name: 'IMBC Adata' }).returning();
+      const [imbc] = await db.select().from(schema.organizations).where(eq(schema.organizations.type, 'imbc'));
       const error = await profiles.ownAdata(imbc!.id).catch((e: unknown) => e);
       expect(error).toBeInstanceOf(ProblemException);
       expect((error as ProblemException).getStatus()).toBe(404);

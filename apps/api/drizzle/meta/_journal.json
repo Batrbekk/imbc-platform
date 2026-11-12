@@ -50,6 +50,20 @@
       "when": 1794494630449,
       "tag": "0006_spec_v13_contract",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794495800214,
+      "tag": "0007_accounts_registration",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794495804697,
+      "tag": "0008_reference_organizations",
+      "breakpoints": true
     }
   ]
 }

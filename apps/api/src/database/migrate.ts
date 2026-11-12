@@ -21,12 +21,14 @@ async function main(): Promise<void> {
     await pool.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
     await migrate(drizzle(pool), { migrationsFolder });
 
-    // Журнал аудита — только добавление (AUD-02): у роли приложения нет UPDATE/DELETE.
+    // Журнал аудита (AUD-02) и принятия NDA (FC-02, DBML: append-only) — только добавление:
+    // у роли приложения нет UPDATE/DELETE.
     const appRole = process.env.DB_APP_ROLE;
     if (appRole) {
       const role = pg.escapeIdentifier(appRole);
       await pool.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${role}`);
       await pool.query(`REVOKE UPDATE, DELETE, TRUNCATE ON audit_entries FROM ${role}`);
+      await pool.query(`REVOKE UPDATE, DELETE, TRUNCATE ON nda_acceptance FROM ${role}`);
     }
     console.log('Миграции применены');
   } finally {

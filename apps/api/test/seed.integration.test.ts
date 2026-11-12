@@ -1,7 +1,7 @@
 import { companyCardDataSchema } from '@imbc/contracts';
 import type pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { seedDemo } from '../src/database/seed.js';
+import { NDA_PLACEHOLDER_BODY, seedDemo } from '../src/database/seed.js';
 import { migrateThrough, openTestPool, resetDatabase } from './support/database.js';
 
 // Демо-аккаунт наблюдателя (GEN-06, раздел 3.1 v1.3) — observer@observer.local; прежний адрес
@@ -47,8 +47,37 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
     await seedDemo(pool);
 
     expect(await counts()).toEqual(first);
-    expect(first).toEqual({ organizations: 15, accounts: 6, visible: 8 });
+    // 15 организаций seed и NCOC, TCO, KPO из 0008; IMBC из 0008 seed находит по имени.
+    expect(first).toEqual({ organizations: 18, accounts: 6, visible: 8 });
     expect((await accounts()).map((a) => a.email)).toEqual(['observer@observer.local']);
+  });
+
+  it('seed: текущая NDA — версия 1, три абзаца заглушки (kk, ru, en), опубликовал admin@imbc.local; повторный запуск не создаёт вторую версию (FC-02, Р-5)', async () => {
+    const versions = async () =>
+      (
+        await pool.query<{ version: number; body: string; current: boolean; publisher: string | null }>(
+          `select v.version_number as version, v.body, v.is_current as current, a.email as publisher
+           from nda_version v left join user_accounts a on a.id = v.published_by order by v.version_number`,
+        )
+      ).rows;
+
+    await seedDemo(pool);
+    const first = await versions();
+    expect(first.map(({ body: _, ...v }) => v)).toEqual([{ version: 1, current: true, publisher: 'admin@imbc.local' }]);
+    expect(first[0]!.body).toBe(NDA_PLACEHOLDER_BODY);
+    expect(first[0]!.body.split('\n\n')).toEqual([
+      'УАҚЫТША МӘТІН — ЗАҢДЫҚ ҚҰЖАТ ЕМЕС. Платформаның құпияны жария етпеу туралы келісімінің (NDA) мәтінін IMBC ұсынады. Бұл мәтін тек сынақ стендіне арналған, оған сүйенуге болмайды.',
+      'ВРЕМЕННЫЙ ТЕКСТ — НЕ ЮРИДИЧЕСКИЙ ДОКУМЕНТ. Текст соглашения о неразглашении (NDA) платформы предоставит IMBC. Этот текст существует только для тестового стенда, полагаться на него нельзя.',
+      'PLACEHOLDER — NOT A LEGAL TEXT. IMBC will provide the text of the platform non-disclosure agreement (NDA). This text exists only for the test environment and must not be relied on.',
+    ]);
+
+    await seedDemo(pool);
+    expect(await versions()).toEqual(first);
+    // Версия уже есть (например, текст IMBC из миграции) — seed свою не добавляет.
+    await pool.query('delete from nda_version');
+    await pool.query("insert into nda_version (version_number, body, is_current) values (2, 'IMBC', true)");
+    await seedDemo(pool);
+    expect((await versions()).map((v) => v.version)).toEqual([2]);
   });
 
   it('card каждой видимой строки проходит companyCardDataSchema, focal point есть у семи из восьми', async () => {

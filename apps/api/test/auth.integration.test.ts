@@ -60,13 +60,15 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
   });
 
   async function account(state: 'active' | 'invited' | 'inactive' = 'active', bound = true, role: Role = 'operator') {
-    const [org] = await db
-      .insert(schema.organizations)
-      .values({
-        type: role === 'manufacturer' || role === 'operator' || role === 'observer' ? role : 'imbc',
-        name: 'Auth test',
-      })
-      .returning();
+    const type = role === 'manufacturer' || role === 'operator' || role === 'observer' ? role : 'imbc';
+    // Организация IMBC одна — из миграции 0008; у прочих имена разные (organizations_name_uq).
+    const [org] =
+      type === 'imbc'
+        ? await db.select().from(schema.organizations).where(eq(schema.organizations.type, 'imbc'))
+        : await db
+            .insert(schema.organizations)
+            .values({ type, name: `Auth test ${randomUUID()}` })
+            .returning();
     const [user] = await db
       .insert(schema.userAccounts)
       .values({
