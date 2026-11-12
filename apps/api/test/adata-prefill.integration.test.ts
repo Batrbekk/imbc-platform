@@ -250,6 +250,7 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
       rates,
       env,
       service as ManufacturerOnboardingService,
+      {} as never,
     );
     const flow = sign({ v: 'verifier', s: 'state', r: '/profile', exp: Date.now() + 60000 }, env.SESSION_SECRET);
     const req = {

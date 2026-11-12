@@ -191,6 +191,7 @@ describe.skipIf(!databaseUrl)(
         new AuthRateLimitService(db),
         env,
         onboarding as never,
+        {} as never,
       );
       const flow = sign({ v: 'verifier', s: 'state', r: '/profile', exp: Date.now() + 60000 }, env.SESSION_SECRET);
       const req = {

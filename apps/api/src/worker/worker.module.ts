@@ -15,6 +15,7 @@ import { SessionService } from '../modules/auth/session.service.js';
 import { ProfilesService } from '../modules/profiles/profiles.service.js';
 import { ManufacturerOnboardingService } from '../modules/registration/onboarding.service.js';
 import { ADATA_QUEUE_OPTIONS, PLATFORM_TZ, QUEUES, type QueueName, SCHEDULES } from '../jobs/queues.js';
+import { AccountInactivityJob } from './account-inactivity.job.js';
 import { ADATA_CLIENT_FACTORY, ADATA_TIMING, AdataPrefillJob, defaultAdataClientFactory } from './adata-prefill.job.js';
 import { JobHandlers } from './handlers.service.js';
 
@@ -43,6 +44,7 @@ import { JobHandlers } from './handlers.service.js';
     ProfilesService,
     ManufacturerOnboardingService,
     AdataPrefillJob,
+    AccountInactivityJob,
     { provide: ADATA_CLIENT_FACTORY, useValue: defaultAdataClientFactory },
     { provide: ADATA_TIMING, useValue: ADATA_DEFAULT_TIMING },
   ],
@@ -54,6 +56,7 @@ export class WorkerModule implements OnApplicationBootstrap {
     @Inject(QUEUE) private readonly boss: PgBoss,
     private readonly handlers: JobHandlers,
     private readonly adataPrefill: AdataPrefillJob,
+    private readonly inactivity: AccountInactivityJob,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -63,13 +66,18 @@ export class WorkerModule implements OnApplicationBootstrap {
       [QUEUES.sendNotification]: (d) => h.sendNotification(d),
       [QUEUES.sendPasswordEmail]: (d) => h.sendPasswordEmail(d),
       [QUEUES.cleanupIdentity]: (d) => h.cleanupIdentity(d),
+      // Очередь письма сброса создаётся раньше задания неактивности, которое её наполняет (AUTH-07).
+      [QUEUES.inactivityReset]: (d) => h.sendInactivityReset(d),
+      // Без аргумента: «сейчас» — часы worker; данные задания расписания в run не передаются.
+      [QUEUES.accountInactivity]: async () => {
+        await this.inactivity.run();
+      },
       [QUEUES.certificateExpiry]: () => h.certificateExpiry(),
       [QUEUES.purgeSessions]: () => h.purgeSessions(),
       [QUEUES.purgeExportFiles]: () => h.purgeExportFiles(),
       [QUEUES.refreshCatalog]: () => h.todo(QUEUES.refreshCatalog),
       [QUEUES.buildExport]: () => h.todo(QUEUES.buildExport),
       [QUEUES.updateStatus]: () => h.todo(QUEUES.updateStatus),
-      [QUEUES.accountInactivity]: () => h.todo(QUEUES.accountInactivity),
       [QUEUES.keycloakEvents]: () => h.keycloakEvents(),
       [QUEUES.activitySnapshotWeekly]: () => h.todo(QUEUES.activitySnapshotWeekly),
       [QUEUES.activitySnapshotMonthly]: () => h.todo(QUEUES.activitySnapshotMonthly),
@@ -84,7 +92,12 @@ export class WorkerModule implements OnApplicationBootstrap {
         queue === QUEUES.adataPrefill
           ? ADATA_QUEUE_OPTIONS
           : {
-              retryLimit: queue === QUEUES.sendPasswordEmail || queue === QUEUES.cleanupIdentity ? 10 : 5,
+              retryLimit:
+                queue === QUEUES.sendPasswordEmail ||
+                queue === QUEUES.cleanupIdentity ||
+                queue === QUEUES.inactivityReset
+                  ? 10
+                  : 5,
               retryBackoff: true,
               retryDelay: 30,
             },

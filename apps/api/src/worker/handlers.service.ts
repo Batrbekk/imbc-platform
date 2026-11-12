@@ -32,7 +32,7 @@ import { KeycloakAdminService } from '../modules/auth/keycloak-admin.service.js'
 import { SessionService } from '../modules/auth/session.service.js';
 import { sha256 } from '../modules/auth/crypto.js';
 import { ManufacturerOnboardingService } from '../modules/registration/onboarding.service.js';
-import type { IdentityJob, IdentitySyncJob, ScanFileJob, SendNotificationJob } from '../jobs/queues.js';
+import type { AccountJob, IdentityJob, IdentitySyncJob, ScanFileJob, SendNotificationJob } from '../jobs/queues.js';
 import { scanStream } from './clamd.js';
 
 type SecurityEvent = Awaited<ReturnType<KeycloakAdminService['securityEvents']>>[number];
@@ -165,6 +165,23 @@ export class JobHandlers {
     if (!account?.subject) return;
     await this.keycloak.updateUser(account.subject, { enabled: account.state !== 'blocked', email: account.email });
     if (logout) await this.keycloak.logoutUser(account.subject);
+  }
+
+  /**
+   * Аккаунт стал inactive (AUTH-07, NOT-26): Keycloak требует новый пароль, сеансы IdP завершаются, письмо
+   * NOT-01 ссылкой сброса (72 часа, AUTH-01) — на языке атрибута `locale` пользователя Keycloak. Пользователь
+   * остаётся включённым — иначе ссылка не сработает; вход отклоняет BFF по состоянию в БД. Аккаунт уже не
+   * inactive или без субъекта (seed до первого входа: письмо слать не через что) — выход. Повтор безвреден.
+   */
+  async sendInactivityReset({ accountId }: AccountJob): Promise<void> {
+    const [account] = await this.db
+      .select({ subject: userAccounts.idpSubject, state: userAccounts.state })
+      .from(userAccounts)
+      .where(eq(userAccounts.id, accountId));
+    if (account?.state !== 'inactive' || !account.subject) return;
+    await this.keycloak.updateUser(account.subject, { requiredActions: ['UPDATE_PASSWORD'] });
+    await this.keycloak.logoutUser(account.subject);
+    await this.keycloak.sendPasswordEmail(account.subject, ['UPDATE_PASSWORD']);
   }
 
   /** Файлы выгрузок хранятся 90 дней (OPR-23); запись о запуске остаётся. */

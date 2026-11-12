@@ -137,6 +137,7 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
       rates,
       configured,
       {} as never,
+      {} as never,
     );
     const auth = (await service.resolve(entry.token))!;
     expect(controller.me(auth).otpDelivery).toBe('development_code');
@@ -209,6 +210,7 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
       mail as never,
       rates,
       configured,
+      {} as never,
       {} as never,
     );
     const auth = (await service.resolve(entry.token))!;
@@ -354,6 +356,7 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
       { send: vi.fn().mockRejectedValue(new Error('SMTP unavailable')) } as never,
       rates,
       env,
+      {} as never,
       {} as never,
     );
     await expect(controller.sendOtp(auth, { ip: '127.0.0.2' } as never)).rejects.toMatchObject({
@@ -518,6 +521,7 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
       {} as never,
       rates,
       env,
+      {} as never,
       {} as never,
     );
     const response = { clearCookie: vi.fn() };

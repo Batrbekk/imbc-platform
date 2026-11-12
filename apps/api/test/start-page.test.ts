@@ -35,6 +35,7 @@ describe('стартовая страница на сервере (OPR-31, GEN-0
       {} as never,
       env,
       {} as never,
+      {} as never,
     );
     expect(controller.me(auth(role)).homePath).toBe(roleHome(role));
   });

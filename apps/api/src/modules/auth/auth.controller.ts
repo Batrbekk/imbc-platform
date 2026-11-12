@@ -12,6 +12,7 @@ import { sign, unsign } from './crypto.js';
 import { otpDeliveryFor } from './development-otp.js';
 import { postLoginPath } from './post-login.js';
 import { AllowMfaPending, AllowResponsibilityPending, Auth, Public, SignedBackchannel } from './guards.js';
+import { KeycloakAdminService } from './keycloak-admin.service.js';
 import { OidcService } from './oidc.service.js';
 import { ABSOLUTE_TIMEOUT_MS, OTP_TTL_MS, SessionService, TRUSTED_DEVICE_MS } from './session.service.js';
 import { AuthRateLimitService } from './rate-limit.service.js';
@@ -44,6 +45,7 @@ export class AuthController {
     private readonly rates: AuthRateLimitService,
     @Inject(ENV) private readonly env: Env,
     private readonly onboarding: ManufacturerOnboardingService,
+    private readonly keycloak: KeycloakAdminService,
   ) {}
 
   @Public()
@@ -131,7 +133,9 @@ export class AuthController {
       return res.redirect(302, '/login?error=no_account');
     }
 
-    if (account.state === 'inactive') return res.redirect(302, '/login?error=account_inactive');
+    // Неактивный (AUTH-07) входит, если пароль задан после перехода: событие Keycloak worker мог ещё не прочесть.
+    if (account.state === 'inactive' && !(await this.reactivatedByPassword(account.id, identity.subject)))
+      return res.redirect(302, '/login?error=account_inactive');
     if (
       account.credentialsChangedAt &&
       identity.authTime.getTime() < Math.floor(account.credentialsChangedAt.getTime() / 1000) * 1000
@@ -303,5 +307,19 @@ export class AuthController {
       ip: req.ip ?? null,
     });
     return { redirectTo: '/login?logged_out=1' };
+  }
+
+  /**
+   * Время текущего пароля спрашивается у Keycloak (`GET /users/{id}/credentials`); сбой запроса — как
+   * «пароль не обновлён»: при сомнении вход не пускает, человек видит, что аккаунт неактивен.
+   */
+  private async reactivatedByPassword(accountId: string, subject: string): Promise<boolean> {
+    try {
+      const passwordSetAt = await this.keycloak.passwordUpdatedAt(subject);
+      return passwordSetAt !== null && (await this.sessions.reactivateAfterReset(accountId, passwordSetAt, 'sign_in'));
+    } catch {
+      this.logger.warn('inactive account: password time or reactivation failed, sign-in refused');
+      return false;
+    }
   }
 }

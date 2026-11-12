@@ -166,7 +166,7 @@ describe.skipIf(!databaseUrl)('регистрация v1.3 и профиль п�
         idToken: null,
       })),
     };
-    const auth = new AuthController(oidc as never, sessions, audit, {} as never, rates, env, service);
+    const auth = new AuthController(oidc as never, sessions, audit, {} as never, rates, env, service, {} as never);
     const flow = sign({ v: 'verifier', s: 'state', r: '/profile', exp: Date.now() + 60000 }, env.SESSION_SECRET);
     const req = {
       cookies: { 'imbc-oidc-flow': flow },

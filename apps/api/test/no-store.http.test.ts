@@ -14,6 +14,7 @@ import { AuthController } from '../src/modules/auth/auth.controller.js';
 import type { AuthContext } from '../src/modules/auth/auth.types.js';
 import { SessionGuard } from '../src/modules/auth/guards.js';
 import { IdentityProvisioningService } from '../src/modules/auth/identity-provisioning.service.js';
+import { KeycloakAdminService } from '../src/modules/auth/keycloak-admin.service.js';
 import { OidcService } from '../src/modules/auth/oidc.service.js';
 import { AuthRateLimitService } from '../src/modules/auth/rate-limit.service.js';
 import { SessionService } from '../src/modules/auth/session.service.js';
@@ -54,6 +55,7 @@ const ndaQuery = { from: () => ({ where: async () => [{ version: 3, body: 'NDA (
     { provide: AuthRateLimitService, useValue: { enforce: vi.fn() } },
     { provide: ManufacturerOnboardingService, useValue: {} },
     { provide: IdentityProvisioningService, useValue: {} },
+    { provide: KeycloakAdminService, useValue: {} },
     { provide: DB, useValue: { select: () => ndaQuery } },
     { provide: QUEUE, useValue: {} },
     { provide: OidcService, useValue: { passwordResetUrl: () => new URL('https://id.example.test/reset') } },

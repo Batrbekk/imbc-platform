@@ -133,7 +133,7 @@
     "OPR-64": 1,
     "OPR-65": 1
   },
-  "apps/api/src/jobs/queues.ts": { "AUTH-30": 1, "GEN-30": 1, "OPR-74": 2, "REV-20": 1 },
+  "apps/api/src/jobs/queues.ts": { "GEN-30": 1, "OPR-74": 2, "REV-20": 1 },
   "apps/api/src/modules/catalog/catalog.service.ts": { "DATA-34": 1 },
   "apps/api/src/modules/profiles/profiles.service.ts": {
     "MAN-47": 1,
