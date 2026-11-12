@@ -14,6 +14,8 @@ import { accountName, organizationName } from "@/prototype/rules";
 import { useProto } from "@/prototype/store";
 
 import { auditTexts } from "./audit-texts";
+import { MIGRATION_SUBJECT } from "./migration-model";
+import { migrationTexts } from "./migration-texts";
 
 /** Виды объектов событий аккаунтов — те же, что отбирает `isAccountEvent`. */
 const SUBJECTS = ["account", "organization", "api_credential"] as const satisfies readonly AuditSubjectType[];
@@ -21,6 +23,7 @@ const FILTERS = ["all", ...SUBJECTS.filter((s) => ACCOUNT_EVENT_SUBJECTS.include
 
 export function AuditScreen() {
   const t = useDictionary(auditTexts);
+  const migration = useDictionary(migrationTexts);
   const common = useCommonTexts();
   const format = useFormat();
   const locale = useProtoLocale();
@@ -81,7 +84,9 @@ export function AuditScreen() {
                 </TableCell>
                 <TableCell>{organizationName(state, event.actor.organizationId)}</TableCell>
                 <TableCell className="min-w-56 whitespace-normal">{event.summary[locale]}</TableCell>
-                <TableCell className="break-all whitespace-normal">{event.subject.label}</TableCell>
+                <TableCell className="break-all whitespace-normal">
+                  {event.subject.id === MIGRATION_SUBJECT ? migration("subjectLabel") : event.subject.label}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>

@@ -11,8 +11,9 @@ import { ConfirmAction, ProfileStatusBadge, ProtoPage } from "@/prototype/compon
 import type { ProtoProfile, ProtoState } from "@/prototype/data";
 import { localized, useDictionary } from "@/prototype/i18n";
 import { accountName, organizationName } from "@/prototype/rules";
-import { useProto, useProtoUpdate } from "@/prototype/store";
+import { useProto } from "@/prototype/store";
 
+import { useGuardedUpdate } from "./actor";
 import { assignmentsTexts } from "./assignments-texts";
 import { ChoiceField } from "./fields";
 import { texts } from "./texts";
@@ -137,7 +138,7 @@ export function AssignmentsScreen() {
 
 function AssignAction({ row, smes }: { row: QueueRow; smes: { value: string; label: string }[] }) {
   const t = useDictionary(assignmentsTexts);
-  const update = useProtoUpdate();
+  const update = useGuardedUpdate();
   const names = useProto((s) => (id: string | null) => accountName(s, id));
   const [sme, setSme] = useState<string | null>(row.smeId);
   const choices = smes.filter((s) => s.value !== row.smeId);
@@ -154,7 +155,10 @@ function AssignAction({ row, smes }: { row: QueueRow; smes: { value: string; lab
           : localized(assignmentsTexts, "assigned", { sme: to }),
       },
       (draft) => {
-        draft.profiles.find((p) => p.id === row.profileId)!.assignedExpertId = sme;
+        const profile = draft.profiles.find((p) => p.id === row.profileId);
+        if (!profile || !draft.accounts.some((a) => a.id === sme)) return false;
+        profile.assignedExpertId = sme;
+        return true;
       },
     );
   };

@@ -18,8 +18,9 @@ import type { ProtoAccount, ProtoOrganization } from "@/prototype/data";
 import { localized, translate, useDictionary } from "@/prototype/i18n";
 import { commonTexts, useCommonTexts } from "@/prototype/labels";
 import { protoPath } from "@/prototype/registry";
-import { newId, nowIso, useActor, useProto, useProtoUpdate } from "@/prototype/store";
+import { newId, nowIso, useProto, useProtoUpdate } from "@/prototype/store";
 
+import { useAdminAccountId, useGuardedUpdate } from "./actor";
 import { ChoiceField, TextField } from "./fields";
 import { organizationsTexts } from "./organizations-texts";
 import { isEmail, localizedWith, texts } from "./texts";
@@ -160,7 +161,7 @@ function OrganizationCard({ organization, roles }: { organization: ProtoOrganiza
   const t = useDictionary(organizationsTexts);
   const admin = useDictionary(texts);
   const format = useFormat();
-  const update = useProtoUpdate();
+  const update = useGuardedUpdate();
   const accounts = useProto((s) => s.accounts.filter((a) => a.organizationId === organization.id));
 
   const setMajor = (value: boolean) =>
@@ -171,7 +172,10 @@ function OrganizationCard({ organization, roles }: { organization: ProtoOrganiza
         summary: localized(organizationsTexts, value ? "markedMajor" : "unmarkedMajor", { name: organization.name }),
       },
       (draft) => {
-        draft.organizations.find((o) => o.id === organization.id)!.majorOperator = value;
+        const target = draft.organizations.find((o) => o.id === organization.id);
+        if (!target) return false;
+        target.majorOperator = value;
+        return true;
       },
     );
 
@@ -335,9 +339,9 @@ function LastSignIn({ account }: { account: ProtoAccount }) {
 /** Блокировка и разблокировка (ADM-02); блокировка завершает открытые сеансы (AUTH-06). */
 function BlockToggle({ account }: { account: ProtoAccount }) {
   const t = useDictionary(organizationsTexts);
-  const update = useProtoUpdate();
-  const actor = useActor();
-  if (account.id === actor.accountId) return <span className="text-xs text-muted-foreground">{t("self")}</span>;
+  const update = useGuardedUpdate();
+  const self = useAdminAccountId();
+  if (account.id === self) return <span className="text-xs text-muted-foreground">{t("self")}</span>;
   const blocked = account.state === "blocked";
   const toggle = () =>
     update(
@@ -347,8 +351,10 @@ function BlockToggle({ account }: { account: ProtoAccount }) {
         summary: localized(organizationsTexts, blocked ? "unblocked" : "blocked"),
       },
       (draft) => {
-        const target = draft.accounts.find((a) => a.id === account.id)!;
+        const target = draft.accounts.find((a) => a.id === account.id);
+        if (!target) return false;
         target.state = blocked ? (target.lastSignInAt ? "active" : "invited") : "blocked";
+        return true;
       },
     );
   return (
@@ -435,10 +441,11 @@ function ManufacturerAccounts({ organizations }: { organizations: ProtoOrganizat
 function ChangeLoginEmail({ account, organization }: { account: ProtoAccount; organization: ProtoOrganization }) {
   const t = useDictionary(organizationsTexts);
   const admin = useDictionary(texts);
-  const update = useProtoUpdate();
+  const update = useGuardedUpdate();
   const accounts = useProto((s) => s.accounts);
   const [email, setEmail] = useState("");
-  const error = emailError(accounts, email, account.id);
+  const same = email.trim().toLowerCase() === account.email.toLowerCase();
+  const error = same ? "emailSame" : emailError(accounts, email, account.id);
 
   const change = () => {
     const to = email.trim();
@@ -449,7 +456,10 @@ function ChangeLoginEmail({ account, organization }: { account: ProtoAccount; or
         summary: localized(organizationsTexts, "emailChanged", { from: account.email, to }),
       },
       (draft) => {
-        draft.accounts.find((a) => a.id === account.id)!.email = to;
+        const target = draft.accounts.find((a) => a.id === account.id);
+        if (!target) return false;
+        target.email = to;
+        return true;
       },
     );
     setEmail("");
@@ -466,7 +476,13 @@ function ChangeLoginEmail({ account, organization }: { account: ProtoAccount; or
       confirmDisabled={error !== null}
       onConfirm={change}
     >
-      <TextField label={t("newEmail")} type="email" value={email} onChange={setEmail} error={error && admin(error)} />
+      <TextField
+        label={t("newEmail")}
+        type="email"
+        value={email}
+        onChange={setEmail}
+        error={error === "emailSame" ? t("emailSame") : error && admin(error)}
+      />
     </ConfirmAction>
   );
 }

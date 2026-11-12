@@ -6,6 +6,7 @@ export const referencesTexts = defineDictionary({
     description:
       "Values manufacturers and SMEs choose from. The certificate and document type lists mark mandatory types.",
     list: "Reference list",
+    noLists: "No reference lists in the demo data.",
     add: "Add value",
     addTitle: "Add a value to “{list}”",
     code: "Code",
@@ -23,6 +24,7 @@ export const referencesTexts = defineDictionary({
     description:
       "Значения, из которых выбирают производители и SME. В справочниках типов сертификатов и документов отмечены обязательные.",
     list: "Справочник",
+    noLists: "В демо-данных нет справочников.",
     add: "Добавить значение",
     addTitle: "Новое значение: «{list}»",
     code: "Код",
@@ -39,6 +41,7 @@ export const referencesTexts = defineDictionary({
     title: "Анықтамалықтар",
     description: "Өндірушілер мен SME таңдайтын мәндер. Сертификат және құжат түрлерінде міндеттілері белгіленген.",
     list: "Анықтамалық",
+    noLists: "Демо-деректерде анықтамалық жоқ.",
     add: "Мән қосу",
     addTitle: "Жаңа мән: «{list}»",
     code: "Коды",

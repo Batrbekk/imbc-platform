@@ -3,13 +3,15 @@ import type { Locale } from "@imbc/contracts";
 import { useState } from "react";
 import { useSearchParams } from "react-router";
 
+import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ConfirmAction, ProtoPage } from "@/prototype/components";
 import type { ReferenceItem, ReferenceList, ReferenceListId } from "@/prototype/data";
 import { useDictionary } from "@/prototype/i18n";
-import { useProto, useProtoUpdate } from "@/prototype/store";
+import { useProto } from "@/prototype/store";
 
+import { useGuardedUpdate } from "./actor";
 import { TextField } from "./fields";
 import { referencesTexts } from "./references-texts";
 import { hasMandatoryMark, OrgChartSampleView, ReferenceListView, sharedTexts } from "./shared";
@@ -18,15 +20,16 @@ import { localizedWith } from "./texts";
 export function ReferencesScreen() {
   const t = useDictionary(referencesTexts);
   const shared = useDictionary(sharedTexts);
-  const update = useProtoUpdate();
+  const update = useGuardedUpdate();
   const lists = useProto((s) => s.referenceLists);
   const sample = useProto((s) => s.orgChartSample);
   const [params, setParams] = useSearchParams();
   const list =
-    lists.find((l) => l.id === params.get("list")) ?? lists.find((l) => l.id === "certificate_types") ?? lists[0]!;
+    lists.find((l) => l.id === params.get("list")) ?? lists.find((l) => l.id === "certificate_types") ?? lists[0];
   const listName = (id: ReferenceListId) => (l: Locale) => sharedTexts[l][`list.${id}`];
 
   const changeItem = (
+    list: ReferenceList,
     item: ReferenceItem,
     key: "madeMandatory" | "madeOptional" | "retiredItem" | "restoredItem",
     change: (target: ReferenceItem) => void,
@@ -38,8 +41,10 @@ export function ReferencesScreen() {
         summary: localizedWith(referencesTexts, key, (l) => ({ item: item.label, list: listName(list.id)(l) })),
       },
       (draft) => {
-        const target = draft.referenceLists.find((l) => l.id === list.id)!.items.find((i) => i.code === item.code)!;
+        const target = draft.referenceLists.find((l) => l.id === list.id)?.items.find((i) => i.code === item.code);
+        if (!target) return false;
         change(target);
+        return true;
       },
     );
 
@@ -47,48 +52,56 @@ export function ReferencesScreen() {
 
   return (
     <ProtoPage title={t("title")} description={t("description")}>
-      <Card>
-        <CardHeader>
-          <CardTitle>{shared(`list.${list.id}`)}</CardTitle>
-          <CardAction className="flex flex-wrap gap-2">
-            <Select
-              items={items}
-              value={list.id}
-              onValueChange={(value) => {
-                if (typeof value === "string") setParams({ list: value }, { replace: true });
-              }}
-            >
-              <SelectTrigger aria-label={t("list")}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent alignItemWithTrigger={false} align="end" className="w-auto min-w-(--anchor-width)">
-                {items.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <AddValue list={list} name={shared(`list.${list.id}`)} />
-          </CardAction>
-        </CardHeader>
-        <CardContent>
-          <ReferenceListView
-            list={list}
-            readOnly={false}
-            onMandatoryChange={(item, mandatory) =>
-              changeItem(item, mandatory ? "madeMandatory" : "madeOptional", (target) => {
-                target.mandatory = mandatory;
-              })
-            }
-            onRetiredChange={(item, retired) =>
-              changeItem(item, retired ? "retiredItem" : "restoredItem", (target) => {
-                target.retired = retired;
-              })
-            }
-          />
-        </CardContent>
-      </Card>
+      {list ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>{shared(`list.${list.id}`)}</CardTitle>
+            <CardAction className="flex flex-wrap gap-2">
+              <Select
+                items={items}
+                value={list.id}
+                onValueChange={(value) => {
+                  if (typeof value === "string") setParams({ list: value }, { replace: true });
+                }}
+              >
+                <SelectTrigger aria-label={t("list")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent alignItemWithTrigger={false} align="end" className="w-auto min-w-(--anchor-width)">
+                  {items.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <AddValue list={list} name={shared(`list.${list.id}`)} />
+            </CardAction>
+          </CardHeader>
+          <CardContent>
+            <ReferenceListView
+              list={list}
+              readOnly={false}
+              onMandatoryChange={(item, mandatory) =>
+                changeItem(list, item, mandatory ? "madeMandatory" : "madeOptional", (target) => {
+                  target.mandatory = mandatory;
+                })
+              }
+              onRetiredChange={(item, retired) =>
+                changeItem(list, item, retired ? "retiredItem" : "restoredItem", (target) => {
+                  target.retired = retired;
+                })
+              }
+            />
+          </CardContent>
+        </Card>
+      ) : (
+        <Empty className="border">
+          <EmptyHeader>
+            <EmptyDescription>{t("noLists")}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      )}
 
       <OrgChartSampleView
         file={sample}
@@ -102,6 +115,7 @@ export function ReferencesScreen() {
             },
             (draft) => {
               draft.orgChartSample = file;
+              return true;
             },
           )
         }
@@ -112,7 +126,7 @@ export function ReferencesScreen() {
 
 function AddValue({ list, name }: { list: ReferenceList; name: string }) {
   const t = useDictionary(referencesTexts);
-  const update = useProtoUpdate();
+  const update = useGuardedUpdate();
   const [code, setCode] = useState("");
   const [label, setLabel] = useState("");
   const taken = list.items.some((i) => i.code.toLowerCase() === code.trim().toLowerCase());
@@ -135,7 +149,10 @@ function AddValue({ list, name }: { list: ReferenceList; name: string }) {
         })),
       },
       (draft) => {
-        draft.referenceLists.find((l) => l.id === list.id)!.items.push(item);
+        const target = draft.referenceLists.find((l) => l.id === list.id);
+        if (!target || target.items.some((i) => i.code.toLowerCase() === item.code.toLowerCase())) return false;
+        target.items.push(item);
+        return true;
       },
     );
     setCode("");

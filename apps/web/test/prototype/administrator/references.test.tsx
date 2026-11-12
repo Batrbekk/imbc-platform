@@ -111,4 +111,24 @@ describe("версии NDA (ADM-10, FC-03)", () => {
     expect(forecastOpen(state(), p01())).toBe(false);
     expect(state().audit.at(-1)).toMatchObject({ action: "nda.publish", subject: { type: "nda", label: "NDA 3.0" } });
   });
+
+  it("пустые справочники и версии NDA — пустое состояние, без ошибки", async () => {
+    renderCabinet("/proto/administrator/references", {
+      role: "administrator",
+      prepare: (d) => {
+        d.referenceLists = [];
+      },
+    });
+    expect(await screen.findByText("No reference lists in the demo data.")).toBeTruthy();
+  });
+
+  it("нет версий NDA — пустое состояние", async () => {
+    renderCabinet("/proto/administrator/nda", {
+      role: "administrator",
+      prepare: (d) => {
+        d.ndaVersions = [];
+      },
+    });
+    expect(await screen.findByText("No NDA version has been published yet.")).toBeTruthy();
+  });
 });

@@ -23,6 +23,9 @@ describe("приглашение перенесённых (ADM-04, NOT-25)", () 
     expect(within(await rowOf("ТОО «Тест Химия»")).getByText(/Invited/)).toBeTruthy();
     const report = screen.getByText("Report: profiles with no usable email").closest<HTMLElement>("[data-slot=card]")!;
     expect(within(report).getByText(/АО «Пример Кабель» — Invalid email/)).toBeTruthy();
+    // Одна запись уже приглашена: страница не пишет «ещё не запускалось».
+    expect(screen.queryByText(/Not run yet/)).toBeNull();
+    expect(screen.getByText(/Last invitation sent:/)).toBeTruthy();
     expect(apiV1Calls(api)).toEqual([]);
   });
 
@@ -42,12 +45,22 @@ describe("приглашение перенесённых (ADM-04, NOT-25)", () 
     expect(state().accounts.find((a) => a.organizationId === "org-m03")).toBeUndefined();
     expect(state().audit.at(-1)).toMatchObject({
       action: "account.invite_migrated",
-      subject: { type: "account" },
+      subject: { type: "account", label: "Migrated manufacturers" },
       summary: { en: "Invited 1 migrated manufacturers; 1 without a usable email" },
     });
     expect(
       (screen.getByRole("button", { name: "Invite all migrated manufacturers" }) as HTMLButtonElement).disabled,
     ).toBe(true);
+  });
+
+  it("без приглашений вовсе — «ещё не отправлялись»", async () => {
+    renderCabinet("/proto/administrator/migration", {
+      role: "administrator",
+      prepare: (d) => {
+        for (const invite of d.migrationInvites) invite.invitedAt = null;
+      },
+    });
+    expect(await screen.findByText(/No invitations sent yet/)).toBeTruthy();
   });
 
   it("исправленная почта приглашается при следующем запуске", async () => {
@@ -127,6 +140,17 @@ describe("журнал аудита администратора (AUD-03)", () =
     await user.click(screen.getByRole("tab", { name: "Pull API" }));
     await waitFor(() => expect(router.state.location.search).toBe("?object=api_credential"));
     expect(screen.getByText("Events: 1")).toBeTruthy();
+  });
+
+  it("объект массового приглашения — подпись на языке интерфейса", async () => {
+    const { user } = renderCabinet("/proto/administrator/migration", { role: "administrator", locale: "ru" });
+    await user.click(await screen.findByRole("button", { name: "Пригласить всех перенесённых производителей" }));
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Отправить приглашения" }),
+    );
+    await user.click(screen.getByRole("link", { name: "Журнал аудита" }));
+    const row = (await screen.findByText(/Приглашено перенесённых производителей: 1/)).closest("tr")!;
+    expect(within(row).getByText("Перенесённые производители")).toBeTruthy();
   });
 
   it("пустой журнал — своё сообщение", async () => {
