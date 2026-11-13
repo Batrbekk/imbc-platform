@@ -8,8 +8,8 @@ import {
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put, Query, Req } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
+import { auditIp } from '../../common/audit-ip.js';
 import { parseOrThrow } from '../../common/problem.js';
-import { auditIp } from '../admin/organizations.controller.js';
 import type { AuthContext } from '../auth/auth.types.js';
 import { Auth, Can } from '../auth/guards.js';
 import { DictionariesService } from './dictionaries.service.js';

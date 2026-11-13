@@ -686,7 +686,7 @@ describe.skipIf(!databaseUrl)('справочники: API администра�
     expect(await stored(unused.id)).toEqual({ row: undefined, translations: [] });
     expect(await audits('dictionary.entry_deleted', unused.id)).toEqual([
       {
-        diff: { code: '0000000070', names: { kk: null, ru: 'Позиция 70', en: null } },
+        diff: { dictionary: 'tn_ved', code: '0000000070', names: { kk: null, ru: 'Позиция 70', en: null } },
         is_account_event: false,
         ip: IP,
         user_id: admin.id,
@@ -903,6 +903,38 @@ describe.skipIf(!databaseUrl)('справочники: API администра�
       denied(DICTIONARY_ROUTES.entry),
       denied(DICTIONARY_ROUTES.retire),
     ]);
+  });
+
+  it('право исполнителя проверяется раньше предметных проверок: закрытый справочник и неверный код — 403 и denied, а не 409 dictionary_closed и не 400 code_format (GEN-08)', async () => {
+    const blocked = await administrator();
+    await pool.query(`update user_accounts set state = 'blocked' where id = $1`, [blocked.id]);
+    const demoted = await administrator();
+    await pool.query(`update user_accounts set role = 'director' where id = $1`, [demoted.id]);
+    const forbidden = { status: 403, code: 'forbidden' };
+    // Действующему администратору те же запросы отвечают предметной ошибкой.
+    expect(await problem(service.create(admin, 'commodity_group', createInput('F'), IP))).toEqual({
+      status: 409,
+      code: 'dictionary_closed',
+    });
+    expect(await problem(service.create(admin, 'tn_ved', createInput('1'), IP))).toEqual({
+      status: 400,
+      code: 'code_format',
+    });
+    for (const actor of [blocked, demoted]) {
+      expect(await problem(service.create(actor, 'commodity_group', createInput('F'), IP))).toEqual(forbidden);
+      expect(await problem(service.create(actor, 'tn_ved', createInput('1'), IP))).toEqual(forbidden);
+    }
+    const { rows } = await pool.query<{ user_id: string; action: string; object_id: string; outcome: string }>(
+      `select user_id, action, object_id, outcome from audit_entries where user_id = any($1::uuid[]) order by at, id`,
+      [[blocked.id, demoted.id]],
+    );
+    const denied = (userId: string) => ({
+      user_id: userId,
+      action: 'reference.manage',
+      object_id: DICTIONARY_ROUTES.entries,
+      outcome: 'denied',
+    });
+    expect(rows).toEqual([denied(blocked.id), denied(blocked.id), denied(demoted.id), denied(demoted.id)]);
   });
 
   it('действия администратора идут под ролью приложения: у неё только SELECT на dictionary', async () => {

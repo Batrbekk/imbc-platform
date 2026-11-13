@@ -126,6 +126,15 @@ const ENTRY_COLUMNS = {
 
 type Names = DictionaryEntry['names'];
 
+/** Записи аудита изменений справочников (AUD-01). */
+type DictionaryAuditAction =
+  | 'dictionary.entry_created'
+  | 'dictionary.entry_updated'
+  | 'dictionary.entry_mandatory_changed'
+  | 'dictionary.entry_retired'
+  | 'dictionary.entry_restored'
+  | 'dictionary.entry_deleted';
+
 const toNames = (stored: Partial<Record<Locale, string>> | null): Names => ({
   kk: stored?.kk ?? null,
   ru: stored?.ru ?? null,
@@ -383,8 +392,8 @@ export class DictionariesService {
   /**
    * Удаление (DATA-04): только неиспользуемое и не обязательное значение. Проверки — под блокировкой строки
    * значения, поэтому параллельные обязательность, вывод и второе удаление ждут и перечитывают её. Ссылка
-   * внешним ключом (`23503`) — тоже 409. Аудит хранит прежние код и названия (DATA-01); переводы удаляет
-   * `ON DELETE CASCADE`.
+   * внешним ключом (`23503`) — тоже 409. Аудит хранит справочник и прежние код и названия (DATA-01): строки
+   * значения больше нет, а у загруженного нет записи `entry_created`; переводы удаляет `ON DELETE CASCADE`.
    */
   async remove(actor: AuthUser, code: string, id: string, ip: string | null = null): Promise<void> {
     const dict = known(code);
@@ -397,7 +406,7 @@ export class DictionariesService {
         if (await entryInUse(tx, dict, row.code)) throw entryUsed();
         const { names } = await this.readEntry(tx, id);
         await tx.delete(dictionaryEntry).where(eq(dictionaryEntry.id, id));
-        await this.record(tx, actor, ip, 'dictionary.entry_deleted', id, { code: row.code, names });
+        await this.record(tx, actor, ip, 'dictionary.entry_deleted', id, { dictionary: dict, code: row.code, names });
       });
     } catch (error) {
       if (sqlState(error) === '23503') throw entryUsed();
@@ -411,7 +420,14 @@ export class DictionariesService {
   }
 
   /** Запись аудита в транзакции действия (AUD-01): не событие аккаунта; IP — только колонка `ip`. */
-  private record(tx: Database, actor: AuthUser, ip: string | null, action: string, id: string, diff?: unknown) {
+  private record(
+    tx: Database,
+    actor: AuthUser,
+    ip: string | null,
+    action: DictionaryAuditAction,
+    id: string,
+    diff?: unknown,
+  ) {
     return this.audit.record(
       {
         userId: actor.id,
