@@ -214,7 +214,7 @@ az vm run-command invoke -g imbc-dev-rg -n imbc-dev --command-id RunShellScript 
 
 Миграция сначала проверяет данные: если в `organizations.type` или `user_accounts.role` осталось `spectator`, в `manufacturer_profiles.update_status` или `catalog_visible.update_status` — `inactive`, или в одной из таблиц каркаса есть строка, она останавливается с ошибкой `spec v1.3 contract: …` до любой правки. Миграции выката мигратор применяет одной транзакцией, поэтому база остаётся в прежнем состоянии, `migrate` завершается ошибкой, а новые `api` и `worker` не стартуют (`service_completed_successfully`). Прямой выкат на базу версии до v1.3 так и остановится: переноса данных в этой версии больше нет — сначала нужен выкат любой версии v1.3 до contract (например, `8c748ea`).
 
-**Что выкатывается на стенд.** Стенд работает на ветке стенда `demo/prototype-cabinets` (`8c748ea`): в её дереве есть прототип кабинетов (`apps/api/src/modules/prototype/*`, `apps/api/src/database/prototype-store.ts`, `packages/contracts/src/prototype.ts`, `apps/web/src/prototype/**`). Ручной выкат загружает дерево через `rsync` без `--delete` (`sync_tree` в `infrastructure/azure/vm-deploy.sh`), поэтому файлы прототипа на VM остаются, даже если в загружаемом дереве их нет. Дерево без прототипа на сборке образа остановится: `prototype.controller.ts` импортирует `prototypeWriteSchema`, а `@imbc/contracts` этой ветки его не экспортирует. Поэтому этот релиз выкатывается на стенд **из ветки стенда `demo/prototype-cabinets`, в которую влита ветка этапа**: прототип остаётся в дереве, сборка проходит. Общее правило для любого выката дерева, в котором нет части файлов, лежащих на VM: до `redeploy` удалить на VM файлы, которых нет в выкатываемом коммите (см. «[Файлы, которых нет в выкатываемом коммите](#файлы-которых-нет-в-выкатываемом-коммите)»).
+**Что выкатывается на стенд.** Стенд работает на ветке стенда `demo/prototype-cabinets` (`8c748ea`): в её дереве есть прототип кабинетов (`apps/api/src/modules/prototype/*`, `apps/api/src/database/prototype-store.ts`, `packages/contracts/src/prototype.ts`, `apps/web/src/prototype/**`). Ручной выкат загружает дерево через `rsync` без `--delete` (`sync_tree` в `infrastructure/azure/vm-deploy.sh`), поэтому файлы прототипа на VM остаются, даже если в загружаемом дереве их нет. Дерево без прототипа на сборке образа остановится: `prototype.controller.ts` импортирует `prototypeWriteSchema`, а `@imbc/contracts` этой ветки его не экспортирует. Поэтому этот релиз выкатывается на стенд **из ветки стенда `demo/prototype-cabinets`, в которую влита ветка этапа**: прототип остаётся в дереве, сборка проходит. `apps/api/src/database/migrate.ts` при слиянии конфликтует: в ветке стенда он вызывает `backfillSpecV13` и сам выдаёт права, в ветке этапа перенос удалён, а права выдаёт `applyAppRoleGrants`. После слияния в нём должно быть: миграции Drizzle → при `PROTOTYPE_CABINETS=true` `createPrototypeTable(pool)` (таблица прототипа создаётся **до** выдачи прав, чтобы `GRANT` её захватил) → `applyAppRoleGrants(pool, appRole)` из `./app-role.js` (выдаёт права и отзывает UPDATE/DELETE на `audit_entries` и `nda_acceptance`); импорта `./backfill.js` и вызова `backfillSpecV13` нет — файл удалён. До выката в чистом checkout слитой ветки стенда должны пройти `pnpm install --frozen-lockfile && pnpm typecheck && pnpm build`: оставшийся на VM старый `backfill.ts` (ручной выкат его не удаляет) иначе спрятал бы забытый импорт — сборка на VM прошла бы, а локальная бы упала. Общее правило для любого выката дерева, в котором нет части файлов, лежащих на VM: до `redeploy` удалить на VM файлы, которых нет в выкатываемом коммите (см. «[Файлы, которых нет в выкатываемом коммите](#файлы-которых-нет-в-выкатываемом-коммите)»).
 
 **До выката** — в `/home/imbc/imbc-platform` на VM (`./infrastructure/azure/deploy.sh ssh`). Команды можно вставлять блоком: у каждой `docker compose exec -T` без входного файла стоит `</dev/null`, иначе она прочитала бы следующие строки вставленного текста. Успех команд, которые создают или меняют что-то, виден по строке `…-ok` после `&&`; если её нет, дальше не идти.
 
@@ -351,7 +351,8 @@ sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql 
 Развёрнутые коммиты записывает `vm-deploy.sh`: `.deployed-source-commit` (последний успешный `deploy.sh redeploy`), `.deployed-revision` (конвейер), `.synced-revision` (что синхронизировано на диск, `<sha> pipeline|local`) в `/home/imbc/imbc-platform`, а также имена журналов `/var/log/imbc-deploy/deploy-<время>-<режим>-<sha12>-<pid>.log` (последние 20). Список строится локально, в чистом checkout репозитория с актуальными ветками (`git fetch`), из корня:
 
 ```bash
-TARGET=<целевой коммит>
+TARGET=   # целевой коммит, например TARGET=d6ea422
+: "${TARGET:?задайте целевой коммит}"
 ssh -i ~/.ssh/imbc-dev-azure imbc@20.215.209.224 'cd /home/imbc/imbc-platform && cat .deployed-source-commit .deployed-revision .synced-revision 2>/dev/null; sudo ls /var/log/imbc-deploy/' </dev/null \
   | sed -nE 's/^([0-9a-f]{7,40})( .*)?$/\1/p; s/^deploy-[0-9TZ]+-[a-z]+-([0-9a-f]{7,40})-[0-9]+\.log$/\1/p' | sort -u > /tmp/imbc-revs.txt
 cat /tmp/imbc-revs.txt
@@ -418,9 +419,18 @@ GitHub Actions на аккаунте владельца заблокирован
 
    Если подключения есть, посмотрите, чьи они (`select pid, usename, application_name, state from pg_stat_activity where datname = 'imbc'`), и остановите их источник. Если первое переименование прошло, а второе нет, `swap-ok` не печатается: верните базу командой `ALTER DATABASE imbc_after_0006 RENAME TO imbc` и разберитесь. После `swap-ok` новую версию не запускать: её `migrate` применил бы `0006` к восстановленной базе снова.
 
-5. Дальше — шаги 2–6 подраздела ниже (шаг 1 уже выполнен): база в состоянии до `0006`, данные — v1.3, прежние значения снова есть в типах. Лишние файлы (шаг 5) считаются для `TARGET=d6ea422`.
+5. Сверить Keycloak с восстановленной базой. База Keycloak `keycloak` при восстановлении копии не откатывается: пользователи, созданные или изменённые после времени копии (регистрации, приглашения, смена почты-логина администратором), остаются в Keycloak без строк в базе платформы или с другим адресом. Повторная регистрация или приглашение с тем же адресом получат отказ «адрес занят», а почта-логин, сменённая после копии, не совпадёт со строкой `user_accounts`. Консоль `/kc/admin/` (IP из `ADMIN_ALLOWED_IPS`), realm `imbc`, Users: просмотрите пользователей, созданных или изменённых после времени копии (время файла — `ls -l --time-style=full-iso /home/imbc/backup-before-0006.dump`), и сравните с восстановленной базой:
 
-6. Только после того, как прежняя версия выкачена и проверена (вход, данные), удалить базу после `0006`. До этого она — полная копия данных на момент отката, и обратный путь — остановить `api` и `worker` и переименовать базы обратно:
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -At -v ON_ERROR_STOP=1 \
+     -c 'select email, idp_subject from user_accounts order by email' </dev/null
+   ```
+
+   Пользователя без строки в базе удалите; у пользователя с другой почтой верните адрес из базы (email и username — `registrationEmailAsUsername`). На dev-стенде допустимо принять это расхождение без правки — тогда запишите в отчёт выката, какие адреса заняты только в Keycloak.
+
+6. Дальше — шаги 2–6 подраздела ниже (шаг 1 уже выполнен): база в состоянии до `0006`, данные — v1.3, прежние значения снова есть в типах. Лишние файлы (шаг 5) считаются для `TARGET=d6ea422`.
+
+7. Только после того, как прежняя версия выкачена и проверена (вход, данные), удалить базу после `0006`. До этого она — полная копия данных на момент отката, и обратный путь — остановить `api` и `worker` и переименовать базы обратно:
 
    ```bash
    sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres dropdb -U imbc imbc_after_0006 </dev/null && echo dropdb-ok
