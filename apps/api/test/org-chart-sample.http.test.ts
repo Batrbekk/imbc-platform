@@ -1,26 +1,32 @@
 import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
+import { Readable } from 'node:stream';
 import {
   type Action,
   can,
-  FILE_PROBLEM_CODES,
+  type OrgChartSampleCurrent,
   type OrgChartSampleState,
   type OrgChartSampleUpload,
   ROLES,
   type Role,
 } from '@imbc/contracts';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
+import { ProblemException } from '../src/common/problem.js';
 import { OrgChartSampleController } from '../src/modules/files/org-chart-sample.controller.js';
+import { orgChartSampleAccess } from '../src/modules/files/org-chart-sample.rules.js';
 import { ORG_CHART_SAMPLE_ROUTES, OrgChartSampleService } from '../src/modules/files/org-chart-sample.service.js';
 import { type HttpStand, startHttp } from './support/http.js';
 
 // Граница HTTP образца оргструктуры: настоящий SessionGuard, перехватчик загрузки и проверка файла; права — из
-// матрицы: просмотр reference.read, загрузка reference.manage (ADM-11, GEN-08, NFR-09). Сервис — заглушка.
+// матрицы: просмотр reference.read, загрузка reference.manage; текущий образец — без действия матрицы, доступ
+// решает сервис по orgChartSampleAccess (ADM-11, MAN-19, GEN-08, NFR-09). Сервис — заглушка.
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/files/${name}`, import.meta.url));
+const SESSION_USER = '00000000-0000-4000-8000-0000000000a2';
+const SAMPLE_NAME = 'Құрылым үлгісі.pdf';
 
 const FILE = {
   fileId: '00000000-0000-4000-8000-000000000051',
-  originalName: 'Құрылым үлгісі.pdf',
+  originalName: SAMPLE_NAME,
   byteSize: 1024,
   mediaType: 'application/pdf',
   scanState: 'passed',
@@ -28,14 +34,26 @@ const FILE = {
 } as const;
 const STATE: OrgChartSampleState = { current: FILE, latest: { ...FILE, scanState: 'pending' } };
 const UPLOAD: OrgChartSampleUpload = { upload: { ...FILE, scanState: 'pending' } };
+const CURRENT: OrgChartSampleCurrent = {
+  current: { originalName: SAMPLE_NAME, byteSize: 1024, mediaType: 'application/pdf', uploadedAt: FILE.uploadedAt },
+};
+const description = () => ({
+  originalName: SAMPLE_NAME,
+  mediaType: 'application/pdf',
+  byteSize: fixture('sample.pdf').length,
+  versionNumber: 1,
+});
 
 const samples = {
   state: vi.fn(async () => structuredClone(STATE)),
   upload: vi.fn(async () => structuredClone(UPLOAD)),
+  current: vi.fn(async () => structuredClone(CURRENT)),
+  openCurrent: vi.fn(async () => ({ ...description(), stream: Readable.from([fixture('sample.pdf')]) })),
+  describeCurrent: vi.fn(async () => description()),
 };
 const services = Object.values(samples);
 
-const sampleForm = (name = 'Құрылым үлгісі.pdf', bytes = fixture('sample.pdf')) => {
+const sampleForm = (name = SAMPLE_NAME, bytes = fixture('sample.pdf')) => {
   const form = new FormData();
   form.append('file', new Blob([new Uint8Array(bytes)], { type: 'application/pdf' }), name);
   return form;
@@ -56,6 +74,10 @@ const ROUTES: Route[] = [
 
 const allowed = (action: Action) => ROLES.filter((role) => can(role, action));
 const denied = (action: Action) => ROLES.filter((role) => !can(role, action));
+const onlyCalled = (service: Mock) => {
+  for (const other of services) if (other !== service) expect(other).not.toHaveBeenCalled();
+  expect(service).toHaveBeenCalledOnce();
+};
 
 describe('образец оргструктуры: просмотр и загрузка (ADM-11, GEN-08, NFR-09)', () => {
   vi.setConfig({ testTimeout: 30000 });
@@ -82,10 +104,25 @@ describe('образец оргструктуры: просмотр и загр�
     await http?.close();
   });
 
-  it('маршрут — /api/v1/org-chart-sample; просмотр — администратор и директор, загрузка — только администратор (раздел 4)', () => {
-    expect(ORG_CHART_SAMPLE_ROUTES.sample).toBe('/api/v1/org-chart-sample');
+  it('маршруты — /api/v1/org-chart-sample, …/current, …/current/content; просмотр — администратор и директор, загрузка — только администратор (раздел 4)', () => {
+    expect(ORG_CHART_SAMPLE_ROUTES).toEqual({
+      sample: '/api/v1/org-chart-sample',
+      current: '/api/v1/org-chart-sample/current',
+      currentContent: '/api/v1/org-chart-sample/current/content',
+    });
     expect(allowed('reference.read')).toEqual(['administrator', 'director']);
     expect(allowed('reference.manage')).toEqual(['administrator']);
+  });
+
+  it('orgChartSampleAccess: администратор и директор — any, производитель — current, SME, оператор и наблюдатель — null (MAN-19, расхождение 2 плана этапа 2)', () => {
+    expect(Object.fromEntries(ROLES.map((role) => [role, orgChartSampleAccess(role)]))).toEqual({
+      manufacturer: 'current',
+      expert: null,
+      administrator: 'any',
+      director: 'any',
+      operator: null,
+      observer: null,
+    });
   });
 
   it.each(ROUTES.flatMap((route) => allowed(route.action).map((role) => [route.method, role, route] as const)))(
@@ -94,12 +131,12 @@ describe('образец оргструктуры: просмотр и загр�
       const res = await request(route, role);
       expect(res.status).toBe(route.status);
       expect(await res.json()).toEqual(route.response);
-      expect(route.service).toHaveBeenCalledOnce();
+      onlyCalled(route.service);
       if (route.method === 'POST')
         expect(samples.upload).toHaveBeenCalledWith(
-          expect.objectContaining({ role, id: '00000000-0000-4000-8000-0000000000a2' }),
+          expect.objectContaining({ role, id: SESSION_USER }),
           expect.objectContaining({
-            originalName: 'Құрылым үлгісі.pdf',
+            originalName: SAMPLE_NAME,
             mediaType: 'application/pdf',
             bytes: fixture('sample.pdf'),
           }),
@@ -132,10 +169,19 @@ describe('образец оргструктуры: просмотр и загр�
     },
   );
 
-  it.each(ROUTES.map((route) => [route.method, route] as const))('%s: без сеанса — 401', async (_method, route) => {
-    const res = await request(route);
+  it.each([
+    ['GET', ORG_CHART_SAMPLE_ROUTES.sample],
+    ['POST', ORG_CHART_SAMPLE_ROUTES.sample],
+    ['GET', ORG_CHART_SAMPLE_ROUTES.current],
+    ['GET', ORG_CHART_SAMPLE_ROUTES.currentContent],
+    ['HEAD', ORG_CHART_SAMPLE_ROUTES.currentContent],
+  ] as const)('%s %s: без сеанса — 401', async (method, path) => {
+    const res =
+      method === 'POST'
+        ? await http.upload(path, undefined, sampleForm())
+        : await fetch(`${http.base}${path}`, { method });
     expect(res.status).toBe(401);
-    expect(await res.json()).toMatchObject({ status: 401, code: 'unauthenticated' });
+    if (method !== 'HEAD') expect(await res.json()).toMatchObject({ status: 401, code: 'unauthenticated' });
     for (const service of services) expect(service).not.toHaveBeenCalled();
   });
 
@@ -174,35 +220,67 @@ describe('образец оргструктуры: просмотр и загр�
     expect(await exe.json()).toMatchObject({ status: 415, code: 'file_type_not_allowed' });
     for (const service of services) expect(service).not.toHaveBeenCalled();
   });
-});
 
-describe('коды ошибок образца оргструктуры — из FILE_PROBLEM_CODES', () => {
-  // Ошибки маршрутов образца приходят из загрузки, FilesService, actorTransaction и SessionGuard (их коды сверяет
-  // upload.http.test.ts); экран переводит их по одному списку FILE_PROBLEM_CODES.
-  const SOURCES = [
-    '../src/modules/files/org-chart-sample.service.ts',
-    '../src/modules/files/org-chart-sample.controller.ts',
-  ];
-  const UPLOAD_ERRORS = [
-    'file_missing',
-    'file_empty',
-    'validation',
-    'file_too_large',
-    'file_type_not_allowed',
-    'file_type_mismatch',
-    'busy',
-    'storage_unavailable',
-    'forbidden',
-    'bad_origin',
-    'unauthenticated',
-  ];
+  it.each(ROLES)(
+    'GET current: %s — без действия матрицы доходит до сервиса (доступ решает orgChartSampleAccess)',
+    async (role) => {
+      const res = await http.get(ORG_CHART_SAMPLE_ROUTES.current, role);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual(CURRENT);
+      onlyCalled(samples.current);
+      expect(samples.current).toHaveBeenCalledWith(
+        expect.objectContaining({ role, id: SESSION_USER }),
+        expect.any(String),
+      );
+      expect(http.audit.record).not.toHaveBeenCalled();
+    },
+  );
 
-  it('ошибки загрузки образца и коды ProblemException его сервиса и контроллера есть в FILE_PROBLEM_CODES', () => {
-    for (const code of UPLOAD_ERRORS) expect(FILE_PROBLEM_CODES).toContain(code);
-    for (const source of SOURCES) {
-      const text = readFileSync(new URL(source, import.meta.url), 'utf8');
-      for (const match of text.matchAll(/new ProblemException\(\s*\d+,\s*'([a-z_]+)'/g))
-        expect(FILE_PROBLEM_CODES, source).toContain(match[1]);
-    }
+  it.each(ROLES)(
+    'GET current/content: %s — байты из openCurrent с заголовками скачивания (attachment, nosniff, no-store)',
+    async (role) => {
+      const res = await http.get(ORG_CHART_SAMPLE_ROUTES.currentContent, role);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toBe('application/pdf');
+      expect(res.headers.get('content-length')).toBe(String(fixture('sample.pdf').length));
+      expect(res.headers.get('content-disposition')).toMatch(/^attachment; filename="[^"]*"; filename\*=UTF-8''/);
+      expect(decodeURIComponent(res.headers.get('content-disposition')!.split("UTF-8''")[1]!)).toBe(SAMPLE_NAME);
+      expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(res.headers.get('cache-control')).toBe('no-store');
+      expect(Buffer.from(await res.arrayBuffer())).toEqual(fixture('sample.pdf'));
+      onlyCalled(samples.openCurrent);
+      expect(samples.openCurrent).toHaveBeenCalledWith(
+        expect.objectContaining({ user: expect.objectContaining({ role, id: SESSION_USER }) }),
+        expect.any(String),
+      );
+    },
+  );
+
+  it('HEAD current/content — describeCurrent (без чтения объекта и без «скачано»), те же заголовки, без тела', async () => {
+    const get = await http.get(ORG_CHART_SAMPLE_ROUTES.currentContent, 'manufacturer');
+    await get.arrayBuffer();
+    samples.openCurrent.mockClear();
+    const head = await fetch(`${http.base}${ORG_CHART_SAMPLE_ROUTES.currentContent}`, {
+      method: 'HEAD',
+      headers: { cookie: 'imbc-session=manufacturer' },
+    });
+    expect(head.status).toBe(200);
+    for (const header of ['content-type', 'content-length', 'content-disposition', 'cache-control'])
+      expect(head.headers.get(header), header).toBe(get.headers.get(header));
+    expect((await head.arrayBuffer()).byteLength).toBe(0);
+    onlyCalled(samples.describeCurrent);
+  });
+
+  it('current/content: отказ сервиса уходит как problem+json — текущего нет 404 not_found, роль без доступа 403', async () => {
+    samples.openCurrent.mockRejectedValueOnce(new ProblemException(404, 'not_found', 'Не найдено'));
+    const missing = await http.get(ORG_CHART_SAMPLE_ROUTES.currentContent, 'manufacturer');
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get('content-type')).toMatch(/^application\/problem\+json/);
+    expect(await missing.json()).toMatchObject({ status: 404, code: 'not_found' });
+
+    samples.current.mockRejectedValueOnce(new ProblemException(403, 'forbidden', 'Нет прав'));
+    const forbidden = await http.get(ORG_CHART_SAMPLE_ROUTES.current, 'operator');
+    expect(forbidden.status).toBe(403);
+    expect(await forbidden.json()).toMatchObject({ status: 403, code: 'forbidden' });
   });
 });

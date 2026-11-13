@@ -16,7 +16,7 @@ import { SessionService } from '../modules/auth/session.service.js';
 import { ProfilesService } from '../modules/profiles/profiles.service.js';
 import { ManufacturerOnboardingService } from '../modules/registration/onboarding.service.js';
 import { ANTIVIRUS, ClamdAntivirus } from '../modules/files/antivirus.js';
-import { orgChartSamplePassed } from '../modules/files/org-chart-sample.service.js';
+import { orgChartSamplePassed } from '../modules/files/org-chart-sample.rules.js';
 import {
   ADATA_QUEUE_OPTIONS,
   FILE_SCAN_QUEUE_OPTIONS,

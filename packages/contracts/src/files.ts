@@ -92,7 +92,7 @@ export type FileContentQuery = z.infer<typeof fileContentQuerySchema>;
 
 /**
  * Образец оргструктуры (ADM-11, MAN-19): файл и его проверка. `fileId` — id `file_object` для
- * `GET /api/v1/files/:id/content`; `uploadedAt` — ISO-строка времени загрузки.
+ * `GET /api/v1/files/:id/content`; `uploadedAt` — время загрузки, ISO 8601 в UTC (`toISOString`).
  */
 export const orgChartSampleFileSchema = z
   .object({
@@ -101,23 +101,52 @@ export const orgChartSampleFileSchema = z
     byteSize: z.number().int(),
     mediaType: z.string(),
     scanState: z.enum(FILE_SCAN_STATES),
-    uploadedAt: z.string(),
+    uploadedAt: z.iso.datetime(),
   })
   .strict();
 export type OrgChartSampleFile = z.infer<typeof orgChartSampleFileSchema>;
 
+/** Последняя загрузка, которая не стала текущей: проверяется или не прошла проверку (DATA-07). */
+export const ORG_CHART_SAMPLE_LATEST_SCAN_STATES = ['pending', 'rejected'] as const;
+
 /**
- * `GET /api/v1/org-chart-sample`: `current` — текущий образец (прошёл скан, DATA-07), `latest` — последняя
- * загрузка, если она не текущая (`pending` — проверяется, `rejected` — не прошла проверку).
+ * `GET /api/v1/org-chart-sample`: `current` — текущий образец (только `passed`, DATA-07), `latest` — последняя
+ * загрузка, если она не текущая (`pending` — проверяется, `rejected` — не прошла проверку; `passed` здесь не бывает:
+ * прошедшая проверку последняя загрузка становится текущей).
  */
 export const orgChartSampleStateSchema = z
-  .object({ current: orgChartSampleFileSchema.nullable(), latest: orgChartSampleFileSchema.nullable() })
+  .object({
+    current: orgChartSampleFileSchema.extend({ scanState: z.literal('passed') }).nullable(),
+    latest: orgChartSampleFileSchema.extend({ scanState: z.enum(ORG_CHART_SAMPLE_LATEST_SCAN_STATES) }).nullable(),
+  })
   .strict();
 export type OrgChartSampleState = z.infer<typeof orgChartSampleStateSchema>;
 
 /** `POST /api/v1/org-chart-sample` — 202: загрузка принята, файл ждёт скана (`pending`). */
-export const orgChartSampleUploadSchema = z.object({ upload: orgChartSampleFileSchema }).strict();
+export const orgChartSampleUploadSchema = z
+  .object({ upload: orgChartSampleFileSchema.extend({ scanState: z.literal('pending') }) })
+  .strict();
 export type OrgChartSampleUpload = z.infer<typeof orgChartSampleUploadSchema>;
+
+/**
+ * `GET /api/v1/org-chart-sample/current` — текущий образец для производителя (MAN-19): только то, что нужно
+ * для ссылки «Скачать» (`/api/v1/org-chart-sample/current/content`). Без id файла, состояния скана, истории
+ * и загрузившего. Текущего нет — `null`, даже если есть загрузки на проверке или отклонённые.
+ */
+export const orgChartSampleCurrentSchema = z
+  .object({
+    current: z
+      .object({
+        originalName: z.string(),
+        byteSize: z.number().int(),
+        mediaType: z.string(),
+        uploadedAt: z.iso.datetime(),
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict();
+export type OrgChartSampleCurrent = z.infer<typeof orgChartSampleCurrentSchema>;
 
 /**
  * Коды problem+json маршрутов файлов (загрузка, скачивание; их сервис, правила чтения, транзакция исполнителя

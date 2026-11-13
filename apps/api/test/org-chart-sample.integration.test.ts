@@ -1,7 +1,15 @@
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { type FilePurpose, type OrgChartSampleFile, orgChartSampleUploadSchema, type Role } from '@imbc/contracts';
+import {
+  FILE_PROBLEM_CODES,
+  type FilePurpose,
+  type OrgChartSampleFile,
+  orgChartSampleCurrentSchema,
+  orgChartSampleStateSchema,
+  orgChartSampleUploadSchema,
+  type Role,
+} from '@imbc/contracts';
 import type { Provider } from '@nestjs/common';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import type pg from 'pg';
@@ -17,11 +25,8 @@ import type { AuthUser } from '../src/modules/auth/auth.types.js';
 import { FilesController } from '../src/modules/files/files.controller.js';
 import { FilesService } from '../src/modules/files/files.service.js';
 import { OrgChartSampleController } from '../src/modules/files/org-chart-sample.controller.js';
-import {
-  ORG_CHART_SAMPLE_ROUTES,
-  OrgChartSampleService,
-  orgChartSamplePassed,
-} from '../src/modules/files/org-chart-sample.service.js';
+import { orgChartSamplePassed } from '../src/modules/files/org-chart-sample.rules.js';
+import { ORG_CHART_SAMPLE_ROUTES, OrgChartSampleService } from '../src/modules/files/org-chart-sample.service.js';
 import { acceptUpload } from '../src/modules/files/upload.js';
 import { FileScanJob, SCAN_PASSED_HOOKS, type ScanPassedHook } from '../src/worker/file-scan.job.js';
 import { WorkerModule } from '../src/worker/worker.module.js';
@@ -33,6 +38,7 @@ import { MemoryObjectStorage } from './support/memory-storage.js';
 // Образец оргструктуры на PostgreSQL 18 и pg-boss `pgboss_auth_test`: хранилище — MemoryObjectStorage, антивирус —
 // StubAntivirus, без сети; `FileScanJob.run` вызывает тест. Загружает администратор (ADM-11), текущим образец
 // становится только после скана (DATA-07), производитель скачивает текущий (MAN-19, расхождение 2 плана этапа 2).
+// Сеанс производителя — отдельный стенд с организацией-производителем (не IMBC); остальные роли — организация IMBC.
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const QUARANTINE = 'test-quarantine';
 const FILES = 'test-files';
@@ -68,7 +74,10 @@ describe.skipIf(!databaseUrl)(
     let samples: OrgChartSampleService;
     let scan: FileScanJob;
     let http: HttpStand;
+    /** Стенд сеанса производителя другой организации (не IMBC). */
+    let manufacturerHttp: HttpStand;
     let imbcId: string;
+    let manufacturerOrg: string;
     let admin: AuthUser;
 
     const accepted = (name: string, bytes: Buffer = fixture('sample.pdf')) =>
@@ -164,12 +173,39 @@ describe.skipIf(!databaseUrl)(
     };
 
     const content = (fileId: string) => `/api/v1/files/${fileId}/content`;
-    /** Статус скачивания и байты, если 200. */
-    const download = async (fileId: string, role: Role) => {
-      const res = await http.get(content(fileId), role);
+    /** Производитель — со своего стенда (организация-производитель), остальные роли — организация IMBC. */
+    const standFor = (role: Role) => (role === 'manufacturer' ? manufacturerHttp : http);
+    /**
+     * Запрос роли: статус, тело, заголовки и код problem+json. Каждый код отказа — из FILE_PROBLEM_CODES: по этому
+     * списку экран переводит ошибки маршрутов образца и файлов.
+     */
+    const call = async (path: string, role: Role, method: 'GET' | 'HEAD' = 'GET') => {
+      const stand = standFor(role);
+      const res = await fetch(`${stand.base}${path}`, { method, headers: { cookie: `imbc-session=${role}` } });
       const body = Buffer.from(await res.arrayBuffer());
-      return { status: res.status, body, code: res.status === 200 ? null : JSON.parse(body.toString()).code };
+      const code = res.status >= 400 && body.length ? (JSON.parse(body.toString()) as { code: string }).code : null;
+      if (code !== null) expect(FILE_PROBLEM_CODES).toContain(code);
+      return { status: res.status, body, code, headers: res.headers };
     };
+    /** Скачивание файла по id: статус, байты и код отказа. */
+    const download = async (fileId: string, role: Role) => {
+      const { status, body, code } = await call(content(fileId), role);
+      return { status, body, code };
+    };
+    /** Описание текущего образца (`GET …/current`). */
+    const currentOf = async (role: Role) => {
+      const res = await call(ORG_CHART_SAMPLE_ROUTES.current, role);
+      return { status: res.status, code: res.code, json: res.status === 200 ? JSON.parse(res.body.toString()) : null };
+    };
+    /** Записи `file.read` `denied` о файле `objectId` (null — отказ маршрута текущего образца, без id файла). */
+    const readDenials = async (objectId: string | null) =>
+      (
+        await pool.query(
+          `select user_id, organization_id, object_type, object_id, outcome, diff, host(ip) as ip from audit_entries
+            where action = 'file.read' and outcome = 'denied' and object_id is not distinct from $1 order by at, id`,
+          [objectId],
+        )
+      ).rows;
 
     const passed = (file: OrgChartSampleFile): OrgChartSampleFile => ({ ...file, scanState: 'passed' });
 
@@ -214,6 +250,21 @@ describe.skipIf(!databaseUrl)(
         ],
         organizationId: imbcId,
       });
+      const bin = String(Math.floor(Math.random() * 1e12)).padStart(12, '0');
+      manufacturerOrg = (
+        await pool.query<{ id: string }>(
+          "insert into organizations (type, name, bin) values ('manufacturer', $1, $2) returning id",
+          [`ТОО ${bin}`, bin],
+        )
+      ).rows[0]!.id;
+      manufacturerHttp = await startHttp({
+        controllers: [FilesController, OrgChartSampleController],
+        providers: [
+          { provide: FilesService, useValue: files },
+          { provide: OrgChartSampleService, useValue: samples },
+        ],
+        organizationId: manufacturerOrg,
+      });
     }, 120000);
 
     beforeEach(async () => {
@@ -228,6 +279,7 @@ describe.skipIf(!databaseUrl)(
 
     afterAll(async () => {
       await http?.close();
+      await manufacturerHttp?.close();
       await boss?.stop({ graceful: false });
       await pool?.end();
     });
@@ -406,9 +458,51 @@ describe.skipIf(!databaseUrl)(
       ]);
     });
 
-    it('производитель скачивает текущий образец (MAN-19); прежний образец — 403; SME, оператор и наблюдатель — 403 с записью file.read denied; администратор и директор скачивают любой', async () => {
+    it.each([
+      ['более старый', 'older'],
+      ['более новый', 'newer'],
+    ] as const)(
+      'текущего ещё нет: хук A (%s образец) в незафиксированной транзакции, хук B ждёт; итог — один текущий, более новый',
+      async (_label, firstHook) => {
+        const older = await upload('Ескі.pdf');
+        const newer = await upload('Жаңа.pdf');
+        const hookOf = async (fileId: string) => ({
+          id: (await versionOf(fileId)).id,
+          fileObjectId: fileId,
+          purpose: 'organisation_chart_sample' as const,
+        });
+        const versions = { older: await hookOf(older.fileId), newer: await hookOf(newer.fileId) };
+        const [a, b] = firstHook === 'older' ? [versions.older, versions.newer] : [versions.newer, versions.older];
+
+        let second: Promise<void> | undefined;
+        let secondDone = false;
+        await db.transaction(async (tx) => {
+          // Хук A поставил свой образец текущим и ещё не зафиксирован; хук B стартует и ждёт блокировку строк.
+          await orgChartSamplePassed(tx as unknown as Database, a);
+          second = db.transaction((other) => orgChartSamplePassed(other as unknown as Database, b));
+          second.then(
+            () => {
+              secondDone = true;
+            },
+            () => undefined,
+          );
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          expect(secondDone).toBe(false);
+        });
+        // Без блокировки строк B не увидел бы незафиксированный текущий A и упал бы на уникальном индексе текущего.
+        await second;
+        expect(await rows()).toEqual([
+          { file_object_id: older.fileId, is_current: false },
+          { file_object_id: newer.fileId, is_current: true },
+        ]);
+      },
+    );
+
+    it('производитель другой организации скачивает текущий образец (MAN-19); прежний, на проверке и отклонённый — 403 с записью file.read denied; SME, оператор и наблюдатель — 403 с записью; администратор и директор скачивают любой', async () => {
       const previous = await upload('Алдыңғы.pdf');
       expect(await scanAs(previous.fileId)).toBe('passed');
+      const rejected = await upload('Жұқпалы.pdf');
+      expect(await scanAs(rejected.fileId, { clean: false, signature: 'Eicar-Test-Signature' })).toBe('rejected');
       const current = await upload('Ағымдағы.pdf');
       expect(await scanAs(current.fileId)).toBe('passed');
       const pending = await upload('Тексерілуде.pdf');
@@ -417,29 +511,189 @@ describe.skipIf(!databaseUrl)(
         status: 200,
         body: fixture('sample.pdf'),
       });
-      expect(await download(previous.fileId, 'manufacturer')).toMatchObject({ status: 403, code: 'forbidden' });
-      expect(await download(pending.fileId, 'manufacturer')).toMatchObject({ status: 403, code: 'forbidden' });
+      const manufacturerDenial = (fileId: string) => ({
+        user_id: SESSION_USER,
+        organization_id: manufacturerOrg,
+        object_type: 'file_object',
+        object_id: fileId,
+        outcome: 'denied',
+        diff: null,
+        ip: expect.stringMatching(/127\.0\.0\.1/),
+      });
+      // Отказ — правило образца, а не состояние скана: на проверке и отклонённый образец производителю закрыт так же,
+      // как прежний, и каждый отказ записан с id файла и организацией производителя.
+      for (const file of [previous, pending, rejected]) {
+        expect(await download(file.fileId, 'manufacturer')).toMatchObject({ status: 403, code: 'forbidden' });
+        expect(await readDenials(file.fileId)).toEqual([manufacturerDenial(file.fileId)]);
+      }
 
       for (const role of ['expert', 'operator', 'observer'] as const)
         expect(await download(current.fileId, role), role).toMatchObject({ status: 403, code: 'forbidden' });
-      const denied = await audits('file.read', current.fileId);
-      expect(denied).toHaveLength(3);
-      for (const entry of denied)
-        expect(entry).toMatchObject({
+      expect(await readDenials(current.fileId)).toEqual(
+        Array.from({ length: 3 }, () => ({
           user_id: SESSION_USER,
+          organization_id: imbcId,
           object_type: 'file_object',
+          object_id: current.fileId,
           outcome: 'denied',
           diff: null,
-        });
-      expect(await audits('file.read', previous.fileId)).toHaveLength(1);
+          ip: expect.stringMatching(/127\.0\.0\.1/),
+        })),
+      );
 
       for (const role of ['administrator', 'director'] as const) {
         for (const file of [previous, current])
           expect(await download(file.fileId, role), role).toMatchObject({ status: 200, body: fixture('sample.pdf') });
         expect(await download(pending.fileId, role), role).toMatchObject({ status: 409, code: 'file_pending_scan' });
+        expect(await download(rejected.fileId, role), role).toMatchObject({ status: 409, code: 'file_rejected' });
       }
       // Скачивания — в аудите (AUD-01): производитель — один раз, администратор и директор — по два.
-      expect(await audits('file.downloaded', (await versionOf(current.fileId)).id)).toHaveLength(3);
+      const downloads = await audits('file.downloaded', (await versionOf(current.fileId)).id);
+      expect(downloads.map((d) => d.organization_id)).toEqual([manufacturerOrg, imbcId, imbcId]);
+    });
+
+    it('текущий образец для производителя другой организации: описание без id и истории, стабильная ссылка отдаёт текущий; после замены — новый; HEAD без «скачано» (MAN-19, NFR-09)', async () => {
+      const contentOf = (role: Role, method: 'GET' | 'HEAD' = 'GET') =>
+        call(ORG_CHART_SAMPLE_ROUTES.currentContent, role, method);
+
+      // Образцов нет; только загрузка на проверке; только отклонённая — текущего нет ни для кого.
+      const noCurrent = async () => {
+        for (const role of ['manufacturer', 'administrator', 'director'] as const) {
+          expect(await currentOf(role), role).toEqual({ status: 200, code: null, json: { current: null } });
+          expect(await contentOf(role), role).toMatchObject({ status: 404, code: 'not_found' });
+        }
+      };
+      await noCurrent();
+      await upload('Тексерілуде.pdf');
+      await noCurrent();
+      await pool.query('delete from org_chart_sample; delete from file_version; delete from file_object');
+      const infected = await upload('Жұқпалы.pdf');
+      expect(await scanAs(infected.fileId, { clean: false, signature: 'Eicar-Test-Signature' })).toBe('rejected');
+      await noCurrent();
+
+      const first = await upload('Құрылым үлгісі.pdf');
+      expect(await scanAs(first.fileId)).toBe('passed');
+      const described = await currentOf('manufacturer');
+      expect(described.status).toBe(200);
+      expect(described.json).toEqual({
+        current: {
+          originalName: 'Құрылым үлгісі.pdf',
+          byteSize: fixture('sample.pdf').length,
+          mediaType: 'application/pdf',
+          uploadedAt: first.uploadedAt,
+        },
+      });
+      // Только поля схемы: ни id файла, ни состояния скана, ни истории, ни загрузившего.
+      expect(orgChartSampleCurrentSchema.parse(described.json)).toEqual(described.json);
+      expect(Object.keys(described.json.current).sort()).toEqual([
+        'byteSize',
+        'mediaType',
+        'originalName',
+        'uploadedAt',
+      ]);
+      const text = JSON.stringify(described.json);
+      for (const part of [first.fileId, infected.fileId, 'passed', 'scanState', SESSION_USER])
+        expect(text).not.toContain(part);
+      for (const role of ['administrator', 'director'] as const)
+        expect((await currentOf(role)).json, role).toEqual(described.json);
+
+      const versionId = (await versionOf(first.fileId)).id;
+      const got = await contentOf('manufacturer');
+      expect(got.status).toBe(200);
+      expect(got.body).toEqual(fixture('sample.pdf'));
+      expect(got.headers.get('content-type')).toBe('application/pdf');
+      expect(got.headers.get('content-length')).toBe(String(fixture('sample.pdf').length));
+      expect(got.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(got.headers.get('cache-control')).toBe('no-store');
+      const disposition = got.headers.get('content-disposition')!;
+      expect(disposition).toMatch(/^attachment; /);
+      expect(decodeURIComponent(disposition.split("UTF-8''")[1]!)).toBe('Құрылым үлгісі.pdf');
+      expect(await audits('file.downloaded', versionId)).toEqual([
+        {
+          user_id: SESSION_USER,
+          organization_id: manufacturerOrg,
+          object_type: 'file_version',
+          outcome: 'ok',
+          diff: { versionNumber: 1 },
+          is_account_event: false,
+          ip: expect.stringMatching(/127\.0\.0\.1/),
+        },
+      ]);
+
+      // HEAD: те же заголовки, тела нет, объект не читается, «скачано» не пишется.
+      const read = vi.spyOn(storage, 'get');
+      const head = await contentOf('manufacturer', 'HEAD');
+      expect(head.status).toBe(200);
+      expect(head.body.length).toBe(0);
+      for (const header of ['content-type', 'content-length', 'content-disposition', 'cache-control'])
+        expect(head.headers.get(header), header).toBe(got.headers.get(header));
+      expect(read).not.toHaveBeenCalled();
+      expect(await audits('file.downloaded', versionId)).toHaveLength(1);
+      read.mockRestore();
+
+      // Новый образец на проверке — ссылка отдаёт прежний; прошёл — новый (PNG: другие байты и тип).
+      const second = (await samples.upload(admin, await accepted('Жаңа үлгі.png', fixture('sample.png')), IP)).upload;
+      expect((await contentOf('manufacturer')).body).toEqual(fixture('sample.pdf'));
+      expect((await currentOf('manufacturer')).json.current.originalName).toBe('Құрылым үлгісі.pdf');
+      expect(await scanAs(second.fileId)).toBe('passed');
+      const replaced = await contentOf('manufacturer');
+      expect(replaced.status).toBe(200);
+      expect(replaced.body).toEqual(fixture('sample.png'));
+      expect(replaced.headers.get('content-type')).toBe('image/png');
+      expect((await currentOf('manufacturer')).json).toEqual({
+        current: {
+          originalName: 'Жаңа үлгі.png',
+          byteSize: fixture('sample.png').length,
+          mediaType: 'image/png',
+          uploadedAt: second.uploadedAt,
+        },
+      });
+    });
+
+    it('текущий образец: SME, оператор и наблюдатель — 403 на описание и на ссылку (GET и HEAD) с записью file.read denied без id файла', async () => {
+      const file = await upload('Құрылым.pdf');
+      expect(await scanAs(file.fileId)).toBe('passed');
+      const before = (await readDenials(null)).length;
+      const versionId = (await versionOf(file.fileId)).id;
+
+      for (const role of ['expert', 'operator', 'observer'] as const) {
+        expect(await currentOf(role), role).toEqual({ status: 403, code: 'forbidden', json: null });
+        expect(await call(ORG_CHART_SAMPLE_ROUTES.currentContent, role), role).toMatchObject({
+          status: 403,
+          code: 'forbidden',
+        });
+        expect((await call(ORG_CHART_SAMPLE_ROUTES.currentContent, role, 'HEAD')).status, role).toBe(403);
+      }
+      const denials = (await readDenials(null)).slice(before);
+      expect(denials).toEqual(
+        Array.from({ length: 9 }, () => ({
+          user_id: SESSION_USER,
+          organization_id: imbcId,
+          object_type: 'file_object',
+          object_id: null,
+          outcome: 'denied',
+          diff: null,
+          ip: expect.stringMatching(/127\.0\.0\.1/),
+        })),
+      );
+      // Отказ — до поиска образца: записи с id файла нет, «скачано» нет.
+      expect(await readDenials(file.fileId)).toEqual([]);
+      expect(await audits('file.downloaded', versionId)).toEqual([]);
+    });
+
+    it('state и текущий образец: строка is_current с версией не passed текущей не считается (страховка от умолчания колонки)', async () => {
+      const file = await upload('Құрылым.pdf');
+      // Строка помечена текущей в обход хука, версия ещё на проверке.
+      await pool.query('update org_chart_sample set is_current = true where file_object_id = $1', [file.fileId]);
+      const state = await samples.state();
+      expect(orgChartSampleStateSchema.parse(state)).toEqual({ current: null, latest: file });
+      expect(await currentOf('manufacturer')).toEqual({ status: 200, code: null, json: { current: null } });
+      expect(await call(ORG_CHART_SAMPLE_ROUTES.currentContent, 'manufacturer')).toMatchObject({
+        status: 404,
+        code: 'not_found',
+      });
+      // Скачивание по id остаётся закрытым проверкой скана (DATA-07).
+      expect(await download(file.fileId, 'manufacturer')).toMatchObject({ status: 409, code: 'file_pending_scan' });
     });
 
     it('state: без образцов — current null, latest null; после прохождения — latest null', async () => {
