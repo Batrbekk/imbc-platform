@@ -22,7 +22,8 @@ async function main(): Promise<void> {
     await pool.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
     await migrate(drizzle(pool), { migrationsFolder });
 
-    // Права роли приложения; журнал аудита и принятия NDA — только добавление (app-role.ts).
+    // Права роли приложения; журналы аудита и писем, принятия NDA — только добавление, правила писем и
+    // справочники — только чтение (app-role.ts).
     const appRole = process.env.DB_APP_ROLE;
     if (appRole) await applyAppRoleGrants(pool, appRole);
     console.log('Миграции применены');

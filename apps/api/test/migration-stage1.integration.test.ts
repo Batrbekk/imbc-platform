@@ -15,6 +15,9 @@ const statements = (tag: string) =>
     .split('--> statement-breakpoint')
     .map((s) => s.replace(/^\s*--.*$/gm, '').trim())
     .filter(Boolean);
+/** Число миграций в журнале: на стенде поверх 0005 одной пачкой применяются все последующие. */
+const journalLength = () =>
+  (JSON.parse(readFileSync(join(MIGRATIONS, 'meta/_journal.json'), 'utf8')) as { entries: unknown[] }).entries.length;
 
 // Этап 1: модель регистрации и организаций. 0007 — expand (NFR-06), 0008 — данные: организация IMBC
 // и major operators NCOC, TCO, KPO (GEN-05).
@@ -134,7 +137,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('этап 1: миграции 00
 
     it('0006–0008 одной пачкой на базе 0005 с данными прежней версии: строки и id целы (NFR-06)', async () => {
       const journal = await pool.query('select count(*)::int as n from drizzle.__drizzle_migrations');
-      expect(journal.rows).toEqual([{ n: 9 }]);
+      expect(journal.rows).toEqual([{ n: journalLength() }]);
       expect(await row('organizations', ids.organization, ['notification_mailbox'])).toEqual(before.organization);
       expect(await row('user_accounts', ids.account, NEW_ACCOUNT_COLUMNS)).toEqual(before.account);
       expect(await row('manufacturer_profiles', ids.profile)).toEqual(before.profile);

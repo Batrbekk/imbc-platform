@@ -13,7 +13,12 @@ import {
   companyPageSchema,
   computeBinCheckDigit,
   createOrganizationSchema,
+  DATA_CLASSES,
   dashboardSchema,
+  DICTIONARY_CODES,
+  FILE_PURPOSES,
+  FILE_SCAN_STATES,
+  MANUFACTURER_FILE_PURPOSES,
   imbcMailboxSchema,
   INVITABLE_ROLES,
   inviteAccountSchema,
@@ -43,6 +48,69 @@ describe('перечисления v1.3 (раздел 3.1, UPD-06)', () => {
 
   it('тир профиля — tier_1 и tier_2; tier 3 принадлежит продукту (IMBC-19, IMBC-20, IMBC-21)', () => {
     expect(PROFILE_TIERS).toEqual(['tier_1', 'tier_2']);
+  });
+});
+
+describe('файлы и справочники (DBML, ADM-08, DATA-05, DATA-07)', () => {
+  it('FILE_PURPOSES, DATA_CLASSES, FILE_SCAN_STATES — значения DBML; MANUFACTURER_FILE_PURPOSES — подмножество FILE_PURPOSES; DICTIONARY_CODES — двенадцать кодов ADM-08', () => {
+    // DBML `file_purpose`, порядок тот же.
+    expect(FILE_PURPOSES).toEqual([
+      'organisation_chart',
+      'cv',
+      'unified_register_extract',
+      'conformity_certificate',
+      'production_photo',
+      'certificate_file',
+      'document_file',
+      'site_survey_report',
+      'due_diligence_report',
+      'enhanced_due_diligence_report',
+      'operator_visit_file',
+      'technical_requirements',
+      'agar_cdp_report',
+      'organisation_chart_sample',
+      'export',
+    ]);
+    expect(DATA_CLASSES).toEqual([
+      'a_register',
+      'b_manufacturer',
+      'c_imbc',
+      'd_operator',
+      'e_administration',
+      'f_forecast',
+    ]);
+    // DBML `scan_state`; в БД тип называется file_scan_state, пока скелетный scan_state не удалён (NFR-06).
+    expect(FILE_SCAN_STATES).toEqual(['pending', 'passed', 'rejected']);
+
+    // Файлы секций профиля — те назначения, на которые ссылаются таблицы профиля DBML.
+    expect(MANUFACTURER_FILE_PURPOSES).toEqual([
+      'organisation_chart',
+      'cv',
+      'unified_register_extract',
+      'conformity_certificate',
+      'production_photo',
+      'certificate_file',
+      'document_file',
+    ]);
+    for (const purpose of MANUFACTURER_FILE_PURPOSES) expect(FILE_PURPOSES).toContain(purpose);
+    expect(new Set(MANUFACTURER_FILE_PURPOSES).size).toBe(MANUFACTURER_FILE_PURPOSES.length);
+
+    // ADM-08: regions, legal forms, OKED, TN VED, KPVED, commodity groups, commodity types, processes,
+    // equipment types, contact roles, certificate types, and document types; коды — из DBML `dictionary.code`.
+    expect(DICTIONARY_CODES).toEqual([
+      'region',
+      'legal_form',
+      'oked',
+      'tn_ved',
+      'kpved',
+      'commodity_group',
+      'commodity_type',
+      'process',
+      'equipment_type',
+      'contact_role',
+      'certificate_type',
+      'document_type',
+    ]);
   });
 });
 

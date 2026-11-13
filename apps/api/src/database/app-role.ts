@@ -11,4 +11,9 @@ export async function applyAppRoleGrants(client: pg.Pool, role: string): Promise
   // у роли приложения нет UPDATE/DELETE.
   await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON audit_entries FROM ${name}`);
   await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON nda_acceptance FROM ${name}`);
+  // Журнал писем (NOT-18) — только добавление: запись и отправка идут одной транзакцией, сбой SMTP — откат.
+  await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON notification FROM ${name}`);
+  // Правила писем и справочники — данные релиза (миграция 0010): приложение их только читает.
+  // Значения справочников (dictionary_entry) ведёт администратор — на них права обычные.
+  await client.query(`REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON notification_rule, dictionary FROM ${name}`);
 }

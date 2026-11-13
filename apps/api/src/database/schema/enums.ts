@@ -3,7 +3,10 @@ import {
   CAPACITY_UNITS,
   COMMODITY_GROUPS,
   CONTACT_ROLES,
+  DATA_CLASSES,
   DOCUMENT_STATUSES,
+  FILE_PURPOSES,
+  FILE_SCAN_STATES,
   LOCALES,
   MARK_STATES,
   ORGANIZATION_TYPES,
@@ -30,6 +33,14 @@ export const contactRole = pgEnum('contact_role', CONTACT_ROLES);
 export const capacityUnit = pgEnum('capacity_unit', CAPACITY_UNITS);
 export const markState = pgEnum('mark_state', MARK_STATES);
 export const locale = pgEnum('locale', LOCALES);
+
+// Файлы этапа 2 (DBML `file_purpose`, `data_class`, `scan_state`). Тип состояния скана называется
+// file_scan_state: имя scan_state занято скелетным перечислением ниже с другими значениями; переименование —
+// в contract вместе с удалением скелетных file_objects/file_versions (NFR-06). Язык DBML `language_code`
+// совпадает по значениям с locale — используется locale.
+export const filePurpose = pgEnum('file_purpose', FILE_PURPOSES);
+export const dataClass = pgEnum('data_class', DATA_CLASSES);
+export const fileScanState = pgEnum('file_scan_state', FILE_SCAN_STATES);
 
 export const revisionState = pgEnum('revision_state', ['working', 'submitted', 'verified', 'rejected', 'superseded']);
 export const decision = pgEnum('decision', ['verified', 'rejected']);

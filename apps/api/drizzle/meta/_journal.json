@@ -64,6 +64,20 @@
       "when": 1794495804697,
       "tag": "0008_reference_organizations",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794541653644,
+      "tag": "0009_stage2_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794541659224,
+      "tag": "0010_stage2_reference_data",
+      "breakpoints": true
     }
   ]
 }
