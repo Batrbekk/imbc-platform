@@ -505,11 +505,11 @@
     },
     "mandatoryType": "Mandatory type",
     "groupLabel": "Commodity group",
-    "groupPlaceholder": "Choose a group",
+    "noGroup": "No group",
+    "groupLoadError": "Could not load the commodity groups.",
     "fieldErrors": {
       "codeRequired": "Enter the code.",
       "name": "Enter the name in this language.",
-      "group": "Choose a commodity group.",
       "sortOrder": "Enter a whole number from 0 to {max}."
     },
     "save": "Save",
@@ -549,10 +549,14 @@
       "pending": "Being scanned for viruses",
       "pendingHint": "The current sample stays available until the new one passes the scan.",
       "pendingFirstHint": "The sample will appear here when the scan is finished.",
+      "pendingDuration": "This usually takes up to a minute. You can close the page — the scan will carry on.",
       "rejected": "Failed the scan",
       "rejectedHint": "The file was not accepted. Upload another one.",
+      "rejectedPlain": "The file was not accepted.",
       "keptCurrent": "The current sample has not changed.",
       "uploaded": "The sample has been uploaded and is being scanned.",
+      "checkPassed": "The sample passed the scan and is now the current one.",
+      "checkRejected": "The file failed the scan.",
       "loadError": "Could not load the sample."
     },
     "errors": {

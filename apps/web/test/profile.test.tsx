@@ -192,7 +192,11 @@ describe("свой профиль производителя (MAN-46, IMBC-22)",
 
     expect(await screen.findByText(DEMO.organizationName)).toBeTruthy();
     const page = within(screen.getByRole("main"));
-    expect(page.getByRole("link", { name: kk.nav.account }).getAttribute("href")).toBe("/account");
+    const link = page.getByRole("link", { name: kk.nav.account });
+    expect(link.getAttribute("href")).toBe("/account");
+    // Ссылка-кнопка outline с рамкой: в строке классов нет прозрачной рамки (buttonVariants без cn оставляет обе).
+    expect(link.className.split(/\s+/)).not.toContain("border-transparent");
+    expect(link.className.split(/\s+/)).toContain("border-border");
     expect(page.queryByRole("button", { name: kk.nav.account })).toBeNull();
     expect(screen.getByText(kk.profile.accountHint)).toBeTruthy();
   });

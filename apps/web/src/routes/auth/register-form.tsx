@@ -1,5 +1,6 @@
 import { checkBin, DEFAULT_LOCALE, type RegistrationRequest, registrationTermsReadSchema } from "@imbc/contracts";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { cn } from "cn";
 import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { useLocale, useTranslations } from "use-intl";
@@ -229,7 +230,7 @@ export function RegisterForm() {
           {resend.isPending && <Spinner />}
           {cooldown.seconds > 0 ? t("resendIn", { seconds: format.number(cooldown.seconds) }) : t("resend")}
         </Button>
-        <Link className={buttonVariants({ className: "w-full" })} to="/login">
+        <Link className={cn(buttonVariants({ className: "w-full" }))} to="/login">
           {common("signIn")}
         </Link>
       </div>

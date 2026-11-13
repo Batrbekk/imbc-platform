@@ -549,6 +549,9 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     expect(screen.getByText("Иван Петров")).toBeTruthy();
     const reset = screen.getByRole("link", { name: ru.account.resetPassword });
     expect(reset.getAttribute("href")).toBe("/api/auth/password-reset?returnTo=%2Faccount&locale=ru");
+    // Ссылка-кнопка outline с рамкой: прозрачной рамки в строке классов нет.
+    expect(reset.className.split(/\s+/)).not.toContain("border-transparent");
+    expect(reset.className.split(/\s+/)).toContain("border-border");
     expect(screen.getByRole("button", { name: ru.auth.signOut })).toBeTruthy();
   });
 
