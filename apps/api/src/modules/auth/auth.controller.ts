@@ -222,10 +222,10 @@ export class AuthController {
         retryAfter: issued.retryAfter,
         expiresAt: issued.expiresAt.toISOString(),
       };
-    // NOT-02: на языке учётной записи; отправляется сразу, без очереди — пользователь ждёт код. В журнале
-    // `notification` — факт отправки, адрес, язык и id кода, но не сам код (NOT-18).
+    // NOT-02: на языке учётной записи; отправляется сразу, без очереди и без транзакции базы вокруг SMTP —
+    // пользователь ждёт код. В журнале `notification` — факт отправки, адрес, язык и id кода, но не сам код.
     try {
-      await this.mail.sendOnce(
+      await this.mail.sendImmediate(
         {
           ruleCode: 'NOT-02',
           eventKey: `otp:${issued.id}`,

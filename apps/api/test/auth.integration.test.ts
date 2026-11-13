@@ -482,10 +482,10 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
     expect(await sessions.resolve(legacyToken)).toBeNull();
   });
 
-  it('processes password revocation before a failing older lockout email', async () => {
+  it('processes password revocation before a failing older lockout notification', async () => {
     const user = await account();
     const old = await session(user, new Date(Date.now() - 3600000));
-    const notifications = { dispatch: vi.fn().mockRejectedValue(new Error('notification NOT-03: 1 не отправлено')) };
+    const queue = { send: vi.fn().mockRejectedValue(new Error('queue unavailable')) };
     const worker = new JobHandlers(
       db,
       {} as never,
@@ -504,11 +504,12 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
       } as never,
       sessions,
       { onPasswordSet: vi.fn().mockResolvedValue({ profile: 'skipped', adata: 'skipped' }) } as never,
-      notifications as never,
+      pool,
+      queue as never,
     );
-    // Письмо не ушло — опрос падает (курсор не сдвигается, блокировка не теряется), но отзыв уже сделан.
-    await expect(worker.keycloakEvents()).rejects.toThrow('keycloak-events: NOT-03 не отправлено: 1');
-    expect(notifications.dispatch).toHaveBeenCalledOnce();
+    // Задание письма о блокировке не поставилось (очередь недоступна) — опрос падает, но отзыв уже сделан.
+    await expect(worker.keycloakEvents()).rejects.toThrow('queue unavailable');
+    expect(queue.send).toHaveBeenCalledOnce();
     expect(await sessions.resolve(old.token)).toBeNull();
   });
 
@@ -603,6 +604,7 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
       new AuditService(db),
       keycloak as never,
       sessions,
+      {} as never,
       {} as never,
       {} as never,
     );

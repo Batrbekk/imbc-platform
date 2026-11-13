@@ -130,10 +130,10 @@ describe.skipIf(!databaseUrl)('регистрация v1.3 и профиль п�
 
   type SecurityEvent = { id: string; type: string; userId: string; time: number; details?: Record<string, string> };
 
-  /** Опрос событий Keycloak worker с заданным пакетом; уведомления и Keycloak — шпионы. */
+  /** Опрос событий Keycloak worker с заданным пакетом; очередь писем и Keycloak — шпионы. */
   function poll(events: SecurityEvent[], service: Pick<ManufacturerOnboardingService, 'onPasswordSet'> = onboarding) {
     const keycloak = { securityEvents: vi.fn(async () => events), sendPasswordEmail: vi.fn() };
-    const notifications = { dispatch: vi.fn() };
+    const queue = { send: vi.fn() };
     const worker = new JobHandlers(
       db,
       {} as never,
@@ -142,9 +142,10 @@ describe.skipIf(!databaseUrl)('регистрация v1.3 и профиль п�
       keycloak as never,
       sessions,
       service as ManufacturerOnboardingService,
-      notifications as never,
+      pool,
+      queue as never,
     );
-    return { run: () => worker.keycloakEvents(), keycloak, notifications };
+    return { run: () => worker.keycloakEvents(), keycloak, queue };
   }
 
   const passwordEvent = (subject: string, at: Date, type = 'UPDATE_PASSWORD'): SecurityEvent => ({
@@ -428,7 +429,7 @@ describe.skipIf(!databaseUrl)('регистрация v1.3 и профиль п�
     expect(await jobs(QUEUES.sendPasswordEmail, `data->>'subject' = $2`, [account.idpSubject])).toHaveLength(1);
     expect(worker.keycloak.sendPasswordEmail).not.toHaveBeenCalled();
     expect(keycloak.sendPasswordEmail).not.toHaveBeenCalled();
-    expect(worker.notifications.dispatch).not.toHaveBeenCalled();
+    expect(worker.queue.send).not.toHaveBeenCalled();
     await boss.deleteAllJobs(QUEUES.sendPasswordEmail);
   });
 

@@ -31,7 +31,6 @@ import {
   NOTIFICATION_RENDERER,
   NotificationDispatcher,
 } from '../notifications/dispatcher.js';
-import { notifyJobSchema } from '../notifications/enqueue.js';
 import { DEFAULT_RECIPIENT_RESOLVERS, RECIPIENT_RESOLVERS } from '../notifications/recipients.js';
 import { AccountInactivityJob } from './account-inactivity.job.js';
 import { ADATA_CLIENT_FACTORY, ADATA_TIMING, AdataPrefillJob, defaultAdataClientFactory } from './adata-prefill.job.js';
@@ -104,9 +103,10 @@ export class WorkerModule implements OnApplicationBootstrap {
       [QUEUES.fileScanSweep]: async () => {
         await this.fileScan.sweep();
       },
-      // Задание проверяется схемой: в нём только id, код правила и параметры, без адресов.
+      // Задание проверяется схемой (только id, код правила и параметры, без адресов). Постоянный отказ —
+      // строка журнала и завершение без повторов; сбой SMTP или базы — повтор (NOTIFY_QUEUE_OPTIONS).
       [QUEUES.notify]: async (d) => {
-        await this.notifications.dispatch(notifyJobSchema.parse(d));
+        await this.notifications.runJob(d);
       },
       [QUEUES.sendPasswordEmail]: (d) => h.sendPasswordEmail(d),
       [QUEUES.cleanupIdentity]: (d) => h.cleanupIdentity(d),

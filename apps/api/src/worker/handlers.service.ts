@@ -1,12 +1,16 @@
 import { DeleteObjectsCommand, type S3Client } from '@aws-sdk/client-s3';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, eq, isNotNull, lt, sql } from 'drizzle-orm';
+import type pg from 'pg';
+import type { PgBoss } from 'pg-boss';
 import { AuditService } from '../common/audit.service.js';
 import { ENV, type Env } from '../config/env.js';
-import { DB, type Database } from '../database/database.module.js';
+import { DB, type Database, PG_POOL } from '../database/database.module.js';
+import { withQueueTransaction } from '../database/transaction.js';
 import {
   certificates,
   exportFiles,
+  notificationsSent,
   otpCodes,
   sessions,
   trustedDevices,
@@ -16,12 +20,12 @@ import {
   authSyncState,
   revokedIdpSessions,
 } from '../database/schema/index.js';
-import { S3 } from '../infra/infra.module.js';
+import { QUEUE, S3 } from '../infra/infra.module.js';
 import { KeycloakAdminService, KeycloakRequestError } from '../modules/auth/keycloak-admin.service.js';
 import { SessionService } from '../modules/auth/session.service.js';
 import { sha256 } from '../modules/auth/crypto.js';
 import { ManufacturerOnboardingService } from '../modules/registration/onboarding.service.js';
-import { NotificationDispatcher } from '../notifications/dispatcher.js';
+import { enqueueNotification } from '../notifications/enqueue.js';
 import { appLink } from '../notifications/links.js';
 import type { AccountJob, IdentityJob, IdentitySyncJob } from '../jobs/queues.js';
 
@@ -52,7 +56,8 @@ export class JobHandlers {
     private readonly keycloak: KeycloakAdminService,
     private readonly sessions: SessionService,
     private readonly onboarding: ManufacturerOnboardingService,
-    private readonly notifications: NotificationDispatcher,
+    @Inject(PG_POOL) private readonly pool: pg.Pool,
+    @Inject(QUEUE) private readonly queue: PgBoss,
   ) {}
 
   /** Истёкший сертификат помечается, но профиль не скрывается (REV-20). */
@@ -151,10 +156,10 @@ export class JobHandlers {
 
   /**
    * AUTH-04: Keycloak блокирует вход после 10 ошибок на 15 минут, но писем не шлёт.
-   * Раз в минуту читаем его события и отправляем NOT-03 через диспетчер — одно письмо на одну блокировку
-   * (ключ события — субъект и время, NOT-26). Письмо, которое не ушло, не останавливает остальные; после
-   * пакета опрос падает, курсор остаётся на месте — следующий опрос или повтор задания прочтёт событие снова,
-   * а журнал не даст второго письма тем, кому оно уже ушло.
+   * Раз в минуту читаем его события: отзыв сеансов по смене пароля, профиль после установки пароля и
+   * блокировки входа. Блокировка — задание `notify` NOT-03 и аудит `auth.locked_out` (`recordLockout`); письмо
+   * отправляет диспетчер в своём задании, его сбои и повторы ленту событий не держат. Курсор сдвигается, когда
+   * пакет обработан; сбой базы или очереди — исключение, курсор на месте, следующий опрос прочтёт пакет снова.
    */
   async keycloakEvents(): Promise<void> {
     const started = new Date();
@@ -162,7 +167,6 @@ export class JobHandlers {
     const since = new Date(cursor ? cursor.checkedAt.getTime() - 5 * 60_000 : Date.now() - 30 * 86_400_000);
     const events = await this.keycloak.securityEvents(since);
     const ordered = events.sort((a, b) => a.time - b.time);
-    // Revocations must finish even when an unrelated lockout notification cannot be mailed.
     // Самое раннее время установки пароля в пакете — момент появления профиля (registered_at, MAN-03).
     const passwordSet = new Map<string, Date>();
     for (const event of ordered) {
@@ -178,31 +182,56 @@ export class JobHandlers {
     }
     // Профиль и чтение Adata — после всех отзывов пакета и до уведомлений: отзыв не ждёт онбординг.
     for (const [subject, at] of passwordSet) await this.onboardAfterPassword(subject, at);
-    let undelivered = 0;
     for (const event of ordered) {
       if (!event.userId || event.error || !Number.isFinite(event.time)) continue;
-      if (event.type !== 'USER_DISABLED_BY_TEMPORARY_LOCKOUT') continue;
-      const [account] = await this.db
+      if (event.type === 'USER_DISABLED_BY_TEMPORARY_LOCKOUT') await this.recordLockout(event.userId, event.time);
+    }
+    await this.db
+      .insert(authSyncState)
+      .values({ name: 'keycloak-events', checkedAt: started })
+      .onConflictDoUpdate({ target: authSyncState.name, set: { checkedAt: started } });
+  }
+
+  /**
+   * Блокировка входа (AUTH-04, NOT-26): одна транзакция — отметка события `lockout:<sha256(субъект:время)>` в
+   * `auth_security_events`, задание `notify` NOT-03 (ключ события `<субъект>:<время>`, как в журнале писем) и
+   * аудит `auth.locked_out`. Повтор того же события (повтор задания опроса, перекрытие пятиминутных окон,
+   * параллельный опрос) упирается в отметку: второго задания и второй записи аудита нет. Аудит не зависит от
+   * доставки письма. Отметки живут 32 дня (`purgeSessions`) — дольше самого длинного окна опроса (30 дней).
+   */
+  private async recordLockout(subject: string, time: number): Promise<void> {
+    const eventKey = `${subject}:${time}`;
+    await withQueueTransaction(this.pool, async (tx, queueDb) => {
+      const [account] = await tx
         .select({ id: userAccounts.id, organizationId: userAccounts.organizationId })
         .from(userAccounts)
-        .where(eq(userAccounts.idpSubject, event.userId));
-      if (!account) continue;
-      let sent: number;
-      try {
-        ({ sent } = await this.notifications.dispatch({
+        .where(eq(userAccounts.idpSubject, subject));
+      if (!account) return;
+      const [fresh] = await tx
+        .insert(authSecurityEvents)
+        .values({ eventKey: `lockout:${sha256(eventKey)}` })
+        .onConflictDoNothing()
+        .returning();
+      if (!fresh) return;
+      // Expand (NFR-06): эту блокировку уже обработала предыдущая версия worker (письмо и аудит) — строка
+      // NOT-03 с тем же ключом в notifications_sent. Убрать в contract вместе с notifications_sent.
+      const [legacy] = await tx
+        .select({ id: notificationsSent.id })
+        .from(notificationsSent)
+        .where(and(eq(notificationsSent.code, 'NOT-03'), eq(notificationsSent.dedupeKey, eventKey)));
+      if (legacy) return;
+      await enqueueNotification(
+        this.queue,
+        {
           rule: 'NOT-03',
-          eventKey: `${event.userId}:${event.time}`,
+          eventKey,
           accountId: account.id,
           params: { minutes: '15', link: appLink(this.env.PUBLIC_URL, '/login') },
-        }));
-      } catch {
-        undelivered += 1;
-        this.logger.warn('keycloak-events: письмо NOT-03 о блокировке входа не отправлено');
-        continue;
-      }
-      // Аудит — один раз, когда письмо ушло; повтор пакета событий записи не добавляет.
-      if (sent > 0)
-        await this.audit.record({
+        },
+        queueDb,
+      );
+      await this.audit.record(
+        {
           userId: account.id,
           organizationId: account.organizationId,
           action: 'auth.locked_out',
@@ -210,13 +239,10 @@ export class JobHandlers {
           objectId: account.id,
           outcome: 'denied',
           isAccountEvent: true,
-        });
-    }
-    if (undelivered > 0) throw new Error(`keycloak-events: NOT-03 не отправлено: ${undelivered}`);
-    await this.db
-      .insert(authSyncState)
-      .values({ name: 'keycloak-events', checkedAt: started })
-      .onConflictDoUpdate({ target: authSyncState.name, set: { checkedAt: started } });
+        },
+        tx,
+      );
+    });
   }
 
   /**

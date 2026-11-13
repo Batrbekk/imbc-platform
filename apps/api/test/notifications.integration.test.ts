@@ -70,6 +70,10 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
       IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${ROLE}') THEN
         REVOKE ALL ON ALL TABLES IN SCHEMA public FROM ${ROLE};
         REVOKE ALL ON SCHEMA public FROM ${ROLE};
+        IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'pgboss_auth_test') THEN
+          REVOKE ALL ON ALL TABLES IN SCHEMA pgboss_auth_test FROM ${ROLE};
+          REVOKE ALL ON SCHEMA pgboss_auth_test FROM ${ROLE};
+        END IF;
         DROP ROLE ${ROLE};
       END IF;
     END $$`);
@@ -100,7 +104,16 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
     roleDb = drizzle(rolePool, { schema, casing: 'snake_case' });
     boss = new PgBoss({ connectionString: databaseUrl, schema: 'pgboss_auth_test', supervise: false, schedule: false });
     await boss.start();
-    await boss.createQueue(QUEUES.notify, NOTIFY_QUEUE_OPTIONS);
+    // Повторы как у worker, но без пауз и только два: тест доводит задание до failed за секунды.
+    await boss.createQueue(QUEUES.notify, {
+      ...NOTIFY_QUEUE_OPTIONS,
+      retryLimit: 2,
+      retryDelay: 0,
+      retryBackoff: false,
+    });
+    // Задание notify worker ставит от роли приложения (опрос Keycloak); на стенде схемой pg-boss владеет она.
+    await pool.query(`GRANT USAGE ON SCHEMA pgboss_auth_test TO ${ROLE}`);
+    await pool.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA pgboss_auth_test TO ${ROLE}`);
   }, 60000);
 
   afterEach(() => {
@@ -342,7 +355,11 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
     expect(await journal('NOT-03', locked)).toEqual([
       expect.objectContaining({ user_account_id: watcherA.id, language: 'ru' }),
     ]);
-    expect(watcherB.role).toBe('observer');
+    // Наблюдатель B не получил ничего ни на какой регистр своего логина.
+    const toB = await pool.query('select 1 from notification where lower(recipient_email) = lower($1)', [
+      watcherB.email,
+    ]);
+    expect(toB.rowCount).toBe(0);
   });
 
   it('язык письма (NOT-19): аккаунт ru — ru; аккаунт без выбора — kk; контакт — язык аккаунта производителя en; ящик IMBC — kk при языке администратора ru', async () => {
@@ -350,8 +367,9 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
     const unset = await account('operator');
     expect(unset.locale).toBe('kk');
     const maker = await account('manufacturer', { locale: 'en' });
+    // Ящик IMBC совпадает с логином администратора (язык ru): язык ящика не ищется по адресу — kk.
     const admin = await account('administrator', { locale: 'ru' });
-    const mailbox = address('imbc-lang');
+    const mailbox = admin.email.toUpperCase();
     await setMailbox(mailbox);
     const contact = asContact(address('contact'), maker.id);
     const { transport, dispatcher } = setup({ overrides: { manufacturer_contacts: async () => [contact] } });
@@ -387,7 +405,6 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
         [mailbox, 'kk', null],
       ].sort(),
     );
-    expect(admin.locale).toBe('ru');
   });
 
   it('ящик IMBC не задан — письма нет, skipped no_recipients, предупреждение без адреса, задание завершено', async () => {
@@ -558,6 +575,8 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
   it('notifyJobSchema: лишний ключ и почта вне params — отклоняются; enqueueNotification ставит задание в транзакции вызывающего', async () => {
     const base = { rule: 'NOT-04', eventKey: eventKey('submitted') } as const;
     expect(notifyJobSchema.parse(base)).toEqual({ ...base, params: {} });
+    const otp = { ...base, related: { type: 'otp_code', id: randomUUID() } };
+    expect(notifyJobSchema.parse(otp)).toEqual({ ...otp, params: {} });
     const email = 'person@stage2.local';
     for (const bad of [
       { ...base, email },
@@ -565,6 +584,9 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
       { ...base, eventKey: `submitted:${email}` },
       { ...base, params: { contact: email } },
       { ...base, related: { type: 'profile', id: randomUUID(), email } },
+      { ...base, related: { type: 'Profile', id: randomUUID() } },
+      { ...base, related: { type: 'profile-file', id: randomUUID() } },
+      { ...base, related: { type: 'x'.repeat(65), id: randomUUID() } },
       { ...base, rule: 'unknown' },
       { ...base, accountId: 'not-a-uuid' },
       { ...base, eventKey: '' },
@@ -613,17 +635,18 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
     await boss.deleteAllJobs(QUEUES.notify);
   });
 
-  /** Worker с заглушкой Keycloak: пакет событий задан тестом, онбординг не участвует. */
-  function keycloakWorker(events: () => object[], dispatcher: NotificationDispatcher) {
+  /** Worker с заглушкой Keycloak: пакет событий задан тестом, онбординг не участвует; транзакции — от роли приложения. */
+  function keycloakWorker(events: () => object[], sessions = new SessionService(roleDb, env)) {
     return new JobHandlers(
       roleDb,
       {} as never,
       env,
       new AuditService(roleDb),
       { securityEvents: vi.fn(async () => events()) } as never,
-      new SessionService(roleDb, env),
+      sessions,
       { onPasswordSet: vi.fn() } as never,
-      dispatcher,
+      rolePool,
+      boss,
     );
   }
 
@@ -636,15 +659,84 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
   const cursor = async () =>
     (await db.query.authSyncState.findFirst({ where: eq(schema.authSyncState.name, 'keycloak-events') }))?.checkedAt;
 
-  it('NOT-03 по блокировке входа: одно письмо на языке аккаунта, строка notification и аудит auth.locked_out; повтор пакета событий — ни письма, ни записи', async () => {
+  type QueuedJob = { state: string; retry_count: number; data: NotifyJob };
+  /** Задания notify события — в любом состоянии (created, retry, completed, failed). */
+  const notifyJobs = async (key: string) =>
+    (
+      await pool.query<QueuedJob>(
+        `select state, retry_count, data from pgboss_auth_test.job where name = $1 and data->>'eventKey' = $2`,
+        [QUEUES.notify, key],
+      )
+    ).rows;
+
+  const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  async function until(check: () => Promise<boolean> | boolean, what: string, timeoutMs = 5000) {
+    const deadline = Date.now() + timeoutMs;
+    while (!(await check())) {
+      if (Date.now() > deadline) throw new Error(`не дождались: ${what}`);
+      await pause(20);
+    }
+  }
+
+  /**
+   * Цикл worker очереди notify, как в WorkerModule: задание — `runJob`; исключение — `fail`, дальше повтор по
+   * правилам очереди (в тесте — два повтора без пауз). Идёт, пока в очереди есть живые задания.
+   */
+  async function drain(dispatcher: NotificationDispatcher) {
+    const live = async () =>
+      (
+        await pool.query<{ n: number }>(
+          `select count(*)::int as n from pgboss_auth_test.job where name = $1 and state in ('created', 'retry', 'active')`,
+          [QUEUES.notify],
+        )
+      ).rows[0]!.n;
+    for (let round = 0; round < 50 && (await live()) > 0; round++) {
+      const jobs = await boss.fetch<unknown>(QUEUES.notify, { batchSize: 20 });
+      if (jobs.length === 0) {
+        await pause(20);
+        continue;
+      }
+      for (const job of jobs) {
+        try {
+          await dispatcher.runJob(job.data);
+          await boss.complete(QUEUES.notify, job.id);
+        } catch (error) {
+          await boss.fail(QUEUES.notify, job.id, { message: (error as Error).message });
+        }
+      }
+    }
+    expect(await live()).toBe(0);
+  }
+
+  const lockout = (user: { idpSubject: string | null }, time: number) => ({
+    type: 'USER_DISABLED_BY_TEMPORARY_LOCKOUT',
+    userId: user.idpSubject,
+    time,
+  });
+
+  it('NOT-03 по блокировке входа: задание notify и аудит auth.locked_out одной транзакцией, письмо — из задания на языке аккаунта; повтор и параллельный опрос — одно задание, одна запись аудита, одно письмо', async () => {
+    await boss.deleteAllJobs(QUEUES.notify);
     const user = await account('operator', { locale: 'ru' });
     const time = Date.now() - 5000;
+    const key = `${user.idpSubject}:${time}`;
     const { transport, dispatcher } = setup();
-    const worker = keycloakWorker(
-      () => [{ id: `lock-${user.id}`, type: 'USER_DISABLED_BY_TEMPORARY_LOCKOUT', userId: user.idpSubject, time }],
-      dispatcher,
-    );
+    const worker = keycloakWorker(() => [{ id: `lock-${user.id}`, ...lockout(user, time) }]);
     await worker.keycloakEvents();
+    // Опрос письма не шлёт: задание и аудит есть, письма ещё нет.
+    expect(transport.sent).toEqual([]);
+    const [job] = await notifyJobs(key);
+    expect(job?.data).toEqual({
+      rule: 'NOT-03',
+      eventKey: key,
+      accountId: user.id,
+      params: { minutes: '15', link: 'https://imbc.local/login' },
+    });
+    expect(JSON.stringify(job?.data)).not.toContain('@');
+    const [audit] = await lockouts(user.id);
+    expect(audit).toMatchObject({ outcome: 'denied', isAccountEvent: true, objectType: 'account', userId: user.id });
+    expect(JSON.stringify(audit)).not.toContain(user.email);
+
+    await drain(dispatcher);
     expect(transport.sent).toHaveLength(1);
     const [mail] = transport.sent;
     expect(mail!.to).toBe(user.email);
@@ -652,7 +744,6 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
     expect(mail!.subject).toBe('Учётная запись в платформе IMBC временно заблокирована');
     expect(mail!.text).toContain('заблокирован на 15 минут');
     expect(mail!.text).toContain('https://imbc.local/login');
-    const key = `${user.idpSubject}:${time}`;
     expect(await journal('NOT-03', key)).toEqual([
       {
         rule_code: 'NOT-03',
@@ -664,18 +755,84 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
         related_object_id: null,
       },
     ]);
-    const [audit] = await lockouts(user.id);
-    expect(audit).toMatchObject({ outcome: 'denied', isAccountEvent: true, objectType: 'account', userId: user.id });
-    expect(JSON.stringify(audit)).not.toContain(user.email);
 
-    // Повтор того же пакета (окно опроса — пять минут): ни письма, ни строки журнала, ни записи аудита.
+    // Перекрытие окон опроса и два опроса разом: отметка события одна — ни второго задания, ни второго аудита.
     await worker.keycloakEvents();
+    await Promise.all([worker.keycloakEvents(), worker.keycloakEvents()]);
+    await drain(dispatcher);
+    expect((await notifyJobs(key)).map((j) => j.state)).toEqual(['completed']);
+    expect(await lockouts(user.id)).toHaveLength(1);
     expect(transport.sent).toHaveLength(1);
+    expect(await journal('NOT-03', key)).toHaveLength(1);
+  });
+
+  it('SMTP навсегда отклоняет адрес: курсор сдвинулся, остальные события пакета обработаны один раз, аудит блокировки один, задание notify повторяется и в итоге failed, опрос не стоит (AUTH-04)', async () => {
+    await boss.deleteAllJobs(QUEUES.notify);
+    const rejected = await account('operator');
+    const fine = await account('operator', { locale: 'en' });
+    const changed = await account('operator');
+    const time = Date.now() - 4000;
+    const events = [
+      lockout(rejected, time),
+      lockout(fine, time + 1),
+      { id: `pw-${changed.id}`, type: 'UPDATE_PASSWORD', userId: changed.idpSubject, time: time + 2 },
+    ];
+    const warn = vi.spyOn(Logger.prototype, 'warn');
+    const log = vi.spyOn(Logger.prototype, 'log');
+    const error = vi.spyOn(Logger.prototype, 'error');
+    const { transport, dispatcher } = setup();
+    transport.failWhen((to) => to === rejected.email);
+    const worker = keycloakWorker(() => events);
+
+    const before = await cursor();
+    await worker.keycloakEvents();
+    const moved = await cursor();
+    expect(moved).toBeDefined();
+    expect(moved).not.toEqual(before);
+    await drain(dispatcher);
+    // Отклонённый адрес: 1 попытка + 2 повтора, затем failed; письмо другому адресу — одно.
+    expect((await notifyJobs(`${rejected.idpSubject}:${time}`)).map((j) => [j.state, j.retry_count])).toEqual([
+      ['failed', 2],
+    ]);
+    expect(transport.attempts.get(rejected.email)).toBe(3);
+    expect((await notifyJobs(`${fine.idpSubject}:${time + 1}`)).map((j) => j.state)).toEqual(['completed']);
+    expect(transport.sent.map((m) => m.to)).toEqual([fine.email]);
+    expect(await lockouts(rejected.id)).toHaveLength(1);
+    expect(await lockouts(fine.id)).toHaveLength(1);
+    const versionOf = async (id: string) =>
+      (await db.query.userAccounts.findFirst({ where: eq(schema.userAccounts.id, id) }))!.authVersion;
+    expect(await versionOf(changed.id)).toBe(changed.authVersion + 1);
+
+    // Следующий опрос с перекрытием окна: курсор снова сдвигается, события пакета не повторяются.
+    await worker.keycloakEvents();
+    expect(await cursor()).not.toEqual(moved);
+    await drain(dispatcher);
+    expect(await notifyJobs(`${rejected.idpSubject}:${time}`)).toHaveLength(1);
+    expect(await notifyJobs(`${fine.idpSubject}:${time + 1}`)).toHaveLength(1);
+    expect(transport.attempts.get(rejected.email)).toBe(3);
+    expect(transport.sent).toHaveLength(1);
+    expect(await lockouts(rejected.id)).toHaveLength(1);
+    expect(await versionOf(changed.id)).toBe(changed.authVersion + 1);
+    expect(logged(warn, log, error)).not.toContain('@');
+  });
+
+  it('временный сбой SMTP: письмо NOT-03 уходит со следующей попытки задания, одно', async () => {
+    await boss.deleteAllJobs(QUEUES.notify);
+    const user = await account('operator');
+    const time = Date.now() - 3000;
+    const { transport, dispatcher } = setup();
+    transport.failWhen((to, attempt) => to === user.email && attempt === 1);
+    await keycloakWorker(() => [lockout(user, time)]).keycloakEvents();
+    await drain(dispatcher);
+    const key = `${user.idpSubject}:${time}`;
+    expect((await notifyJobs(key)).map((j) => [j.state, j.retry_count])).toEqual([['completed', 1]]);
+    expect(transport.attempts.get(user.email)).toBe(2);
+    expect(transport.sent.map((m) => m.to)).toEqual([user.email]);
     expect(await journal('NOT-03', key)).toHaveLength(1);
     expect(await lockouts(user.id)).toHaveLength(1);
   });
 
-  it('NOT-03, отправленное предыдущей версией: ключ журнала из 0010 совпадает с notificationDedupKey; тот же пакет событий письма не повторяет (NOT-18)', async () => {
+  it('NOT-03, отправленное предыдущей версией: ключ журнала из 0010 совпадает с notificationDedupKey; тот же пакет событий не ставит ни задания, ни аудита (NOT-18)', async () => {
     const key = `${legacy.subject}:${legacy.time}`;
     const [row] = await journal('NOT-03', key);
     // Формат ключа один в SQL миграции и в коде: код, ключ события, адрес в нижнем регистре.
@@ -684,47 +841,158 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
     const user = (await db.query.userAccounts.findFirst({
       where: eq(schema.userAccounts.idpSubject, legacy.subject),
     }))!;
-    const { transport, dispatcher } = setup();
-    const worker = keycloakWorker(
-      () => [{ type: 'USER_DISABLED_BY_TEMPORARY_LOCKOUT', userId: legacy.subject, time: legacy.time }],
-      dispatcher,
-    );
-    await worker.keycloakEvents();
-    expect(transport.sent).toEqual([]);
+    await keycloakWorker(() => [
+      { type: 'USER_DISABLED_BY_TEMPORARY_LOCKOUT', userId: legacy.subject, time: legacy.time },
+    ]).keycloakEvents();
+    expect(await notifyJobs(key)).toEqual([]);
     expect(await journal('NOT-03', key)).toHaveLength(1);
     expect(await lockouts(user.id)).toEqual([]);
   });
 
-  it('сбой письма NOT-03 не теряет блокировку: остальные письма пакета уходят, курсор не сдвигается, повтор отправляет недостающее (AUTH-04)', async () => {
-    const [failing, fine] = [await account('operator'), await account('operator', { locale: 'en' })];
-    const time = Date.now() - 4000;
-    const events = [failing, fine].map((u) => ({
-      type: 'USER_DISABLED_BY_TEMPORARY_LOCKOUT',
-      userId: u.idpSubject,
-      time,
-    }));
-    const warn = vi.spyOn(Logger.prototype, 'warn');
-    const { transport, dispatcher } = setup();
-    transport.failWhen((to) => to === failing.email);
-    const worker = keycloakWorker(() => events, dispatcher);
-    const before = await cursor();
-    const error = await worker.keycloakEvents().then(
-      () => null,
-      (e: unknown) => e as Error,
+  it('окно выката (NFR-06): NOT-03, которое прежняя версия записала в notifications_sent после постановки задания, считается отправленным — письма и строки журнала нет', async () => {
+    await boss.deleteAllJobs(QUEUES.notify);
+    const user = await account('operator', { locale: 'ru' });
+    const time = Date.now() - 2000;
+    const key = `${user.idpSubject}:${time}`;
+    await keycloakWorker(() => [lockout(user, time)]).keycloakEvents();
+    expect(await notifyJobs(key)).toHaveLength(1);
+    // Прежняя версия worker обработала ту же блокировку раньше нашего задания (адрес — в другом регистре).
+    await pool.query(
+      "insert into notifications_sent (code, dedupe_key, recipient, locale) values ('NOT-03', $1, $2, 'ru')",
+      [key, user.email.toUpperCase()],
     );
-    expect(error?.message).toBe('keycloak-events: NOT-03 не отправлено: 1');
-    expect(transport.sent.map((m) => m.to)).toEqual([fine.email]);
-    expect(await lockouts(fine.id)).toHaveLength(1);
-    expect(await lockouts(failing.id)).toEqual([]);
-    expect(await cursor()).toEqual(before);
-    expect(logged(warn)).not.toContain('@');
+    const { transport, dispatcher } = setup();
+    const log = vi.spyOn(Logger.prototype, 'log');
+    await drain(dispatcher);
+    expect(transport.sent).toEqual([]);
+    expect(await journal('NOT-03', key)).toEqual([]);
+    expect((await notifyJobs(key)).map((j) => j.state)).toEqual(['completed']);
+    expect(log).toHaveBeenCalledWith('notification NOT-03: sent 0, duplicates 1, observers 0, invalid 0');
+  });
 
-    transport.failWhen(() => false);
-    await worker.keycloakEvents();
-    expect(transport.sent.map((m) => m.to)).toEqual([fine.email, failing.email]);
-    expect(await lockouts(failing.id)).toHaveLength(1);
-    expect(await lockouts(fine.id)).toHaveLength(1);
-    expect(await cursor()).not.toEqual(before);
+  it('гонка, вторая ветка: первая транзакция откатилась по сбою SMTP — ждавшая на уникальном индексе отправляет сама; одно письмо, одна строка журнала', async () => {
+    const user = await account('operator');
+    const one = setup();
+    const two = new NotificationDispatcher(
+      roleDb,
+      new MailService(one.transport.transporter, env, roleDb),
+      DEFAULT_RECIPIENT_RESOLVERS,
+      testRenderer,
+    );
+    one.transport.failWhen((to, attempt) => to === user.email && attempt === 1);
+    const job: NotifyJob = { rule: 'NOT-08', eventKey: eventKey('reply'), accountId: user.id, params: {} };
+    const release = one.transport.hold();
+    // Первая копия вставила строку журнала и ждёт SMTP; вторая встаёт на уникальный индекс dedup_key.
+    const first = one.dispatcher.dispatch(job).then(
+      (value) => ({ ok: true as const, value }),
+      (reason: unknown) => ({ ok: false as const, reason: reason as Error }),
+    );
+    await until(() => one.transport.state.pending === 1, 'первая отправка в SMTP');
+    const second = two.dispatch(job);
+    await until(
+      async () =>
+        (
+          await pool.query<{ n: number }>(
+            "select count(*)::int as n from pg_stat_activity where wait_event_type = 'Lock' and query ilike 'insert into \"notification\"%'",
+          )
+        ).rows[0]!.n === 1,
+      'вторая вставка ждёт блокировку',
+    );
+    release();
+    const outcome = await first;
+    expect(outcome.ok).toBe(false);
+    expect(outcome.ok ? null : outcome.reason.message).toBe('notification NOT-08: 1 не отправлено');
+    expect(await second).toEqual({ ...summary, sent: 1 });
+    expect(one.transport.attempts.get(user.email)).toBe(2);
+    expect(one.transport.sent.map((m) => m.to)).toEqual([user.email]);
+    expect(await journal('NOT-08', job.eventKey)).toHaveLength(1);
+  });
+
+  it('постоянный отказ — задание завершается сразу со строкой журнала, без повторов (неверное задание, часть этапа 3, нет текста, нет подстановки, нет правила); временный сбой — повторы до failed', async () => {
+    await boss.deleteAllJobs(QUEUES.notify);
+    await setMailbox(address('imbc-permanent'));
+    const maker = await account('manufacturer');
+    const operator = await account('operator');
+    const error = vi.spyOn(Logger.prototype, 'error');
+    const warn = vi.spyOn(Logger.prototype, 'warn');
+    // Рендерер по умолчанию: текста NOT-04 ещё нет (этап 5), у NOT-03 есть.
+    const transport = fakeTransport();
+    const dispatcher = new NotificationDispatcher(
+      roleDb,
+      new MailService(transport.transporter, env, roleDb),
+      DEFAULT_RECIPIENT_RESOLVERS,
+      defaultNotificationRenderer,
+    );
+    const keys = {
+      invalid: eventKey('invalid'),
+      notReady: eventKey('review'),
+      noText: eventKey('submitted'),
+      noParam: eventKey('locked'),
+      noRule: eventKey('pause'),
+    };
+    // Мимо enqueueNotification — как испорченная строка задания.
+    await boss.send(QUEUES.notify, { rule: 'NOT-04', eventKey: keys.invalid, recipient: 'someone@stage2.local' });
+    await enqueueNotification(boss, {
+      rule: 'NOT-05',
+      eventKey: keys.notReady,
+      organizationId: maker.organizationId,
+      params: {},
+    });
+    await enqueueNotification(boss, { rule: 'NOT-04', eventKey: keys.noText, params: {} });
+    await enqueueNotification(boss, {
+      rule: 'NOT-03',
+      eventKey: keys.noParam,
+      accountId: operator.id,
+      params: { minutes: '15' },
+    });
+    await enqueueNotification(boss, { rule: 'NOT-17', eventKey: keys.noRule, accountId: operator.id, params: {} });
+    await pool.query("update notification_rule set code = 'retired-17' where code = 'NOT-17'");
+    try {
+      await drain(dispatcher);
+    } finally {
+      await pool.query("update notification_rule set code = 'NOT-17' where code = 'retired-17'");
+    }
+    for (const key of Object.values(keys))
+      expect(
+        (await notifyJobs(key)).map((j) => [j.state, j.retry_count]),
+        key,
+      ).toEqual([['completed', 0]]);
+    expect(transport.sent).toEqual([]);
+    const lines = error.mock.calls.map((call) => String(call[0]));
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        'notification NOT-04: задание отклонено без повторов — неверные поля: job:unrecognized_keys',
+        'notification NOT-05: письмо не будет отправлено, без повторов — notification: часть получателей focal_point появится на этапе 3',
+        'notification NOT-04: письмо не будет отправлено, без повторов — notification NOT-04: нет текста письма',
+        'notification NOT-03: письмо не будет отправлено, без повторов — mail NOT-03: нет подстановки {link}',
+        'notification NOT-17: письмо не будет отправлено, без повторов — notification NOT-17: правила нет в notification_rule',
+      ]),
+    );
+    expect(lines).toHaveLength(5);
+
+    // Временный сбой (база резолвера, SMTP) — повторы pg-boss до failed, письма нет.
+    const flaky = new NotificationDispatcher(
+      roleDb,
+      new MailService(transport.transporter, env, roleDb),
+      {
+        ...DEFAULT_RECIPIENT_RESOLVERS,
+        person: async () => {
+          throw new Error('connection terminated unexpectedly');
+        },
+      },
+      defaultNotificationRenderer,
+    );
+    const transient = eventKey('locked');
+    await enqueueNotification(boss, {
+      rule: 'NOT-03',
+      eventKey: transient,
+      accountId: operator.id,
+      params: { minutes: '15', link: 'https://imbc.local/login' },
+    });
+    await drain(flaky);
+    expect((await notifyJobs(transient)).map((j) => [j.state, j.retry_count])).toEqual([['failed', 2]]);
+    expect(error.mock.calls).toHaveLength(5);
+    expect(logged(error, warn)).not.toContain('@');
   });
 
   it('NOT-02: строка журнала с NOT-02, адресом, языком и related otp_code; кода нет ни в одной колонке; сбой SMTP — строки нет', async () => {
@@ -795,5 +1063,81 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
     );
     expect(await rowsOf(unlucky.id)).toEqual([]);
     expect(await db.select().from(schema.otpCodes).where(eq(schema.otpCodes.sessionId, second.entry.id))).toEqual([]);
+
+    // Письмо ушло, а строка журнала не записалась (база недоступна): вход не ломается, предупреждение без адреса.
+    const warn = vi.spyOn(Logger.prototype, 'warn');
+    const brokenJournal = {
+      insert: () => {
+        throw new Error('connection terminated unexpectedly');
+      },
+    } as unknown as Database;
+    const fragile = new AuthController(
+      {} as never,
+      sessions,
+      new AuditService(roleDb),
+      new MailService(transport.transporter, env, brokenJournal),
+      new AuthRateLimitService(roleDb),
+      env,
+      {} as never,
+      {} as never,
+    );
+    transport.failWhen(() => false);
+    const lucky = await account('operator');
+    const third = await signedIn(lucky);
+    expect(await fragile.sendOtp(third.auth, { ip: '127.0.0.63' } as never)).toMatchObject({ sent: true });
+    expect(transport.sent.map((m) => m.to)).toContain(lucky.email);
+    expect(await rowsOf(lucky.id)).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(
+      { error: 'Error' },
+      'notification NOT-02: письмо отправлено, строка журнала не записана',
+    );
+    expect(logged(warn)).not.toContain('@');
+  });
+
+  it('NOT-02 не держит соединение базы на время SMTP: пока письмо «висит», запрос из того же пула (max 1) проходит', async () => {
+    const single = new pg.Pool({ connectionString: databaseUrl, max: 1, options: `-c role=${ROLE}` });
+    try {
+      const singleDb = drizzle(single, { schema, casing: 'snake_case' });
+      const sessions = new SessionService(singleDb, env);
+      const transport = fakeTransport();
+      const controller = new AuthController(
+        {} as never,
+        sessions,
+        new AuditService(singleDb),
+        new MailService(transport.transporter, env, singleDb),
+        new AuthRateLimitService(singleDb),
+        env,
+        {} as never,
+        {} as never,
+      );
+      const user = await account('operator');
+      const entry = await sessions.create({
+        userId: user.id,
+        authVersion: user.authVersion,
+        idToken: null,
+        idpSessionId: randomUUID(),
+        idpAuthTime: new Date(Math.floor(Date.now() / 1000) * 1000),
+        ip: null,
+        userAgent: 'test',
+      });
+      const auth = (await sessions.resolve(entry.token))!;
+      const release = transport.hold();
+      const sending = controller.sendOtp(auth, { ip: '127.0.0.64' } as never);
+      try {
+        await until(() => transport.state.pending === 1, 'код входа в SMTP');
+        const probe = await Promise.race([
+          single.query<{ ok: number }>('select 1 as ok').then((r) => r.rows[0]!.ok),
+          pause(3000).then(() => 'пул занят'),
+        ]);
+        expect(probe).toBe(1);
+      } finally {
+        release();
+      }
+      expect(await sending).toMatchObject({ sent: true });
+      const rows = await pool.query('select rule_code from notification where user_account_id = $1', [user.id]);
+      expect(rows.rows).toEqual([{ rule_code: 'NOT-02' }]);
+    } finally {
+      await single.end();
+    }
   });
 });

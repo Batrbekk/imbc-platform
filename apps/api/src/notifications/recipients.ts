@@ -2,6 +2,7 @@ import { and, asc, eq, ne } from 'drizzle-orm';
 import type { Database } from '../database/database.module.js';
 import { manufacturerProfiles, organizations, userAccounts } from '../database/schema/index.js';
 import type { NotifyJob } from './enqueue.js';
+import { PermanentNotificationError } from './errors.js';
 import type { RecipientPart } from './rules.js';
 
 /**
@@ -18,8 +19,11 @@ export interface Recipient {
 
 export type RecipientResolver = (db: Database, job: NotifyJob) => Promise<Recipient[]>;
 
-/** Часть получателей, данные которой появятся на своём этапе: письмо не уходит никому, задание падает. */
-export class RecipientPartNotReady extends Error {
+/**
+ * Часть получателей, данные которой появятся на своём этапе: письмо не уходит никому, задание завершается
+ * без повторов со строкой журнала (отказ постоянный).
+ */
+export class RecipientPartNotReady extends PermanentNotificationError {
   constructor(
     readonly part: RecipientPart,
     readonly stage: '3' | '5',
@@ -49,7 +53,10 @@ const notReady =
 /** Организация события: явно или через профиль производителя. */
 async function eventOrganization(db: Database, job: NotifyJob): Promise<string | null> {
   if (job.organizationId) return job.organizationId;
-  if (!job.profileId) throw new Error(`notification ${job.rule}: manufacturer_account без organizationId и profileId`);
+  if (!job.profileId)
+    throw new PermanentNotificationError(
+      `notification ${job.rule}: manufacturer_account без organizationId и profileId`,
+    );
   const [profile] = await db
     .select({ organizationId: manufacturerProfiles.organizationId })
     .from(manufacturerProfiles)
@@ -61,7 +68,7 @@ async function eventOrganization(db: Database, job: NotifyJob): Promise<string |
 export const DEFAULT_RECIPIENT_RESOLVERS: Record<RecipientPart, RecipientResolver> = {
   /** Аккаунт события: тот, кто вошёл, заблокирован, отправил запрос или подписан (NOT-02, NOT-03, NOT-08…). */
   person: async (db, job) => {
-    if (!job.accountId) throw new Error(`notification ${job.rule}: person без accountId`);
+    if (!job.accountId) throw new PermanentNotificationError(`notification ${job.rule}: person без accountId`);
     return (await db.select(accountColumns).from(userAccounts).where(eq(userAccounts.id, job.accountId))).map(
       accountRecipient,
     );

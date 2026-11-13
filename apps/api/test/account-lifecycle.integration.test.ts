@@ -220,6 +220,7 @@ describe.skipIf(!databaseUrl)(
         sessions,
         {} as never,
         {} as never,
+        {} as never,
       );
 
     /** Доверенное устройство аккаунта на сутки; возвращает значение cookie. */

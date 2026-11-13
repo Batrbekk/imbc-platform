@@ -82,7 +82,8 @@ describe.skipIf(!databaseUrl)(
         keycloak as never,
         service,
         { onPasswordSet: vi.fn().mockResolvedValue({ profile: 'skipped', adata: 'skipped' }) } as never,
-        { dispatch: vi.fn() } as never,
+        {} as never,
+        {} as never,
       );
 
     const row = async (id: string) =>

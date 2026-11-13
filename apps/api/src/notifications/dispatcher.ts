@@ -7,9 +7,16 @@ import { databaseErrorSummary } from '../database/pg-errors.js';
 import { notificationRule, userAccounts } from '../database/schema/index.js';
 import { MailService } from '../mail/mail.service.js';
 import { isMailTemplateCode, type RenderedMail, renderNotification } from '../mail/templates.js';
-import type { NotifyJob } from './enqueue.js';
+import { type NotifyJob, notifyJobSchema } from './enqueue.js';
+import { PermanentNotificationError } from './errors.js';
 import { type Recipient, RECIPIENT_RESOLVERS, type RecipientResolver } from './recipients.js';
-import { ACCOUNT_SECURITY_RULES, type NotificationRuleCode, parseRecipientRule, type RecipientPart } from './rules.js';
+import {
+  ACCOUNT_SECURITY_RULES,
+  NOTIFICATION_RULE_CODES,
+  type NotificationRuleCode,
+  parseRecipientRule,
+  type RecipientPart,
+} from './rules.js';
 
 export const NOTIFICATION_RENDERER = Symbol('NOTIFICATION_RENDERER');
 export type NotificationRenderer = (
@@ -19,11 +26,11 @@ export type NotificationRenderer = (
 ) => RenderedMail;
 
 /**
- * Тексты из языковых файлов (`mail/messages`, LANG-02). Письма без текста ещё нет — ошибка: тексты
+ * Тексты из языковых файлов (`mail/messages`, LANG-02). Письма без текста ещё нет — постоянный отказ: тексты
  * NOT-04…NOT-17 приходят со своими этапами.
  */
 export const defaultNotificationRenderer: NotificationRenderer = (rule, language, params) => {
-  if (!isMailTemplateCode(rule)) throw new Error(`notification ${rule}: нет текста письма`);
+  if (!isMailTemplateCode(rule)) throw new PermanentNotificationError(`notification ${rule}: нет текста письма`);
   return renderNotification(rule, language, params);
 };
 
@@ -51,6 +58,12 @@ function failureSummary(error: unknown): object {
   };
 }
 
+/** Код правила из данных задания для строки журнала: только известный код, иначе `unknown`. */
+function ruleOf(data: unknown): string {
+  const rule = (data as { rule?: unknown } | null)?.rule;
+  return (NOTIFICATION_RULE_CODES as readonly unknown[]).includes(rule) ? (rule as string) : 'unknown';
+}
+
 /**
  * Диспетчер письма события (раздел 8.2): правило из `notification_rule` → части получателей → проверка
  * адреса → без наблюдателей (NOT-21) → один получатель на адрес без учёта регистра (NOT-18) → язык
@@ -69,15 +82,41 @@ export class NotificationDispatcher {
     @Inject(NOTIFICATION_RENDERER) private readonly render: NotificationRenderer,
   ) {}
 
+  /**
+   * Задание очереди `notify`. Постоянный отказ (неверное задание, неизвестное правило, часть получателей,
+   * которой ещё нет, нет текста или подстановки) — строка журнала с кодом правила и причиной, задание
+   * завершается без повторов; результат — `null`. Временный сбой (SMTP, база) — исключение: повтор pg-boss.
+   */
+  async runJob(data: unknown): Promise<DispatchResult | null> {
+    const parsed = notifyJobSchema.safeParse(data);
+    if (!parsed.success) {
+      // Только имя верхнего поля и код проверки: значения и ключи параметров в журнал не попадают.
+      const fields = [
+        ...new Set(parsed.error.issues.map((issue) => `${String(issue.path[0] ?? 'job')}:${issue.code}`)),
+      ].join(', ');
+      this.logger.error(`notification ${ruleOf(data)}: задание отклонено без повторов — неверные поля: ${fields}`);
+      return null;
+    }
+    try {
+      return await this.dispatch(parsed.data);
+    } catch (error) {
+      if (!(error instanceof PermanentNotificationError)) throw error;
+      this.logger.error(
+        `notification ${parsed.data.rule}: письмо не будет отправлено, без повторов — ${error.message}`,
+      );
+      return null;
+    }
+  }
+
   async dispatch(job: NotifyJob): Promise<DispatchResult> {
     const result: DispatchResult = { sent: 0, duplicates: 0, skippedObservers: 0, invalid: 0, skipped: null };
     const [rule] = await this.db
       .select({ recipientRule: notificationRule.recipientRule, enabled: notificationRule.enabled })
       .from(notificationRule)
       .where(eq(notificationRule.code, job.rule));
-    if (!rule) throw new Error(`notification ${job.rule}: правила нет в notification_rule`);
+    if (!rule) throw new PermanentNotificationError(`notification ${job.rule}: правила нет в notification_rule`);
     if (!rule.enabled) {
-      this.logger.log(`notification ${job.rule}: правило выключено`);
+      this.logger.warn(`notification ${job.rule}: письмо не отправлено — правило выключено`);
       return { ...result, skipped: 'disabled' };
     }
 
@@ -119,10 +158,23 @@ export class NotificationDispatcher {
 
     const languageOf = new Map(accounts.map((a) => [a.id, a.locale]));
     let failed = 0;
+    let rejected: PermanentNotificationError | null = null;
     for (const recipient of byAddress.values()) {
       const language =
         (recipient.languageAccountId !== null ? languageOf.get(recipient.languageAccountId) : undefined) ??
         DEFAULT_LOCALE;
+      let mail: RenderedMail;
+      try {
+        mail = this.render(job.rule, language, job.params);
+      } catch (error) {
+        // Текст не собрался: повтор не поможет, если отказ постоянный (нет шаблона или подстановки).
+        if (error instanceof PermanentNotificationError) rejected = error;
+        else {
+          failed += 1;
+          this.logger.warn(failureSummary(error), `notification ${job.rule}: текст письма не собран`);
+        }
+        continue;
+      }
       try {
         const outcome = await this.mail.sendOnce(
           {
@@ -133,7 +185,7 @@ export class NotificationDispatcher {
             language,
             related: job.related,
           },
-          this.render(job.rule, language, job.params),
+          mail,
         );
         if (outcome === 'sent') result.sent += 1;
         else result.duplicates += 1;
@@ -147,6 +199,7 @@ export class NotificationDispatcher {
       `notification ${job.rule}: sent ${result.sent}, duplicates ${result.duplicates}, observers ${result.skippedObservers}, invalid ${result.invalid}`,
     );
     if (failed > 0) throw new Error(`notification ${job.rule}: ${failed} не отправлено`);
+    if (rejected) throw rejected;
     return result;
   }
 

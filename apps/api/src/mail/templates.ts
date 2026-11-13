@@ -2,6 +2,7 @@ import { DEFAULT_LOCALE, LOCALES, type Locale } from '@imbc/contracts';
 import en from './messages/en.json' with { type: 'json' };
 import kk from './messages/kk.json' with { type: 'json' };
 import ru from './messages/ru.json' with { type: 'json' };
+import { PermanentNotificationError } from '../notifications/errors.js';
 
 /**
  * Письма платформы (раздел 8.2): тексты — в языковых файлах `messages/<язык>.json`, английский — исходный
@@ -36,11 +37,14 @@ export function toLocale(value: string | null | undefined): Locale {
   return (LOCALES as readonly string[]).includes(value ?? '') ? (value as Locale) : DEFAULT_LOCALE;
 }
 
-/** Подстановки `{name}`; недостающая — ошибка с именем подстановки (значений в тексте ошибки нет). */
+/**
+ * Подстановки `{name}`; недостающая — постоянный отказ с именем подстановки (значений в тексте ошибки нет):
+ * повтор задания письма не соберёт.
+ */
 function fill(code: MailTemplateCode, template: string, params: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (_match, name: string) => {
     const value = params[name];
-    if (value === undefined) throw new Error(`mail ${code}: нет подстановки {${name}}`);
+    if (value === undefined) throw new PermanentNotificationError(`mail ${code}: нет подстановки {${name}}`);
     return value;
   });
 }

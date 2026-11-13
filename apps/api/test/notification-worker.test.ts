@@ -1,12 +1,14 @@
 import 'reflect-metadata';
 import type { Provider } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
+import { NOTIFY_QUEUE_OPTIONS } from '../src/jobs/queues.js';
 import { MailService } from '../src/mail/mail.service.js';
 import {
   defaultNotificationRenderer,
   NOTIFICATION_RENDERER,
   NotificationDispatcher,
 } from '../src/notifications/dispatcher.js';
+import { PermanentNotificationError } from '../src/notifications/errors.js';
 import { DEFAULT_RECIPIENT_RESOLVERS, RECIPIENT_RESOLVERS } from '../src/notifications/recipients.js';
 import { JobHandlers } from '../src/worker/handlers.service.js';
 import { WorkerModule } from '../src/worker/worker.module.js';
@@ -23,13 +25,18 @@ describe('worker: письма событий', () => {
     expect(providers).toContain(MailService);
     expect(value(RECIPIENT_RESOLVERS)).toBe(DEFAULT_RECIPIENT_RESOLVERS);
     expect(value(NOTIFICATION_RENDERER)).toBe(defaultNotificationRenderer);
-    // Внедрение по типу: почта — вторым параметром диспетчера, диспетчер — последним у JobHandlers.
+    // Внедрение по типу: почта — вторым параметром диспетчера. Опрос Keycloak письма не шлёт, а ставит
+    // задание notify: диспетчера у JobHandlers нет.
     expect((Reflect.getMetadata('design:paramtypes', NotificationDispatcher) as unknown[])[1]).toBe(MailService);
-    expect((Reflect.getMetadata('design:paramtypes', JobHandlers) as unknown[]).at(-1)).toBe(NotificationDispatcher);
+    expect(Reflect.getMetadata('design:paramtypes', JobHandlers) as unknown[]).not.toContain(NotificationDispatcher);
+    // Повторы временных сбоев SMTP и базы — у задания notify.
+    expect(NOTIFY_QUEUE_OPTIONS).toEqual({ retryLimit: 10, retryDelay: 30, retryBackoff: true });
   });
 
-  it('письмо без текста — ошибка задания, а не пустое письмо: NOT-04 до своего этапа', () => {
+  it('письмо без текста или подстановки — постоянный отказ, а не пустое письмо: NOT-04 до своего этапа', () => {
+    expect(() => defaultNotificationRenderer('NOT-04', 'kk', {})).toThrow(PermanentNotificationError);
     expect(() => defaultNotificationRenderer('NOT-04', 'kk', {})).toThrow('notification NOT-04: нет текста письма');
+    expect(() => defaultNotificationRenderer('NOT-03', 'kk', { minutes: '15' })).toThrow(PermanentNotificationError);
     expect(
       defaultNotificationRenderer('NOT-03', 'en', { minutes: '15', link: 'https://imbc.local/login' }).subject,
     ).toBe('Your IMBC Platform account is temporarily locked');

@@ -1,3 +1,5 @@
+import { PermanentNotificationError } from './errors.js';
+
 /**
  * Правила писем раздела 8.2 (NOT-01…NOT-17) — данные: событие и получатели лежат в `notification_rule`
  * (миграция 0010), меняются только релизом. Здесь — закрытые списки кодов и частей получателей и формат
@@ -49,10 +51,14 @@ export type RecipientPart = (typeof RECIPIENT_PARTS)[number];
 const isRecipientPart = (value: string): value is RecipientPart =>
   (RECIPIENT_PARTS as readonly string[]).includes(value);
 
-/** Части правила по порядку; неизвестная или пустая часть — ошибка (правило из релиза не может её содержать). */
+/**
+ * Части правила по порядку; неизвестная или пустая часть — ошибка данных релиза, повтор её не исправит
+ * (`PermanentNotificationError`).
+ */
 export function parseRecipientRule(text: string): RecipientPart[] {
   return text.split('+').map((part) => {
-    if (!isRecipientPart(part)) throw new Error(`notification_rule: неизвестная часть получателей «${part}»`);
+    if (!isRecipientPart(part))
+      throw new PermanentNotificationError(`notification_rule: неизвестная часть получателей «${part}»`);
     return part;
   });
 }
