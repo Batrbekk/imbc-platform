@@ -2,13 +2,13 @@ import { changeEmailSchema, changeRoleSchema, inviteAccountSchema } from '@imbc/
 import { Body, Controller, Get, HttpCode, Param, Post, Put, Req } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
+import { auditIp } from '../../common/audit-ip.js';
 import { parseOrThrow } from '../../common/problem.js';
 import { Auth, Can } from '../auth/guards.js';
 import type { AuthContext } from '../auth/auth.types.js';
 import { AccountLifecycleService } from './account-lifecycle.service.js';
 import { AccountsService } from './accounts.service.js';
 import { InvitationsService } from './invitations.service.js';
-import { auditIp } from './organizations.controller.js';
 
 @ApiTags('admin')
 @Controller('v1/admin/accounts')

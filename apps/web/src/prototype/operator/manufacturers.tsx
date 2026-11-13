@@ -1,5 +1,6 @@
 // «Мои производители»: видимые Verified профили с отметками и заметками своей организации.
 // OPR-01, OPR-19, OPR-21, OPR-22, IMBC-22, UPD-04, GEN-12.
+import { cn } from "cn";
 import { Link, useSearchParams } from "react-router";
 
 import { buttonVariants } from "@/components/ui/button";
@@ -105,7 +106,7 @@ export function ManufacturersScreen() {
                 <TableCell>{format.number(noteCount)}</TableCell>
                 <TableCell>
                   <Link
-                    className={buttonVariants({ variant: "outline", size: "sm" })}
+                    className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
                     to={protoPath("operator", `manufacturers/${profile.id}`)}
                     aria-label={`${t("open")}: ${profile.nameRu}`}
                   >

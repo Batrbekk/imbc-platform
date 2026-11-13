@@ -1,3 +1,4 @@
+import type { FilePurpose } from '@imbc/contracts';
 import { Inject, Logger, Module, type OnApplicationBootstrap } from '@nestjs/common';
 import { LoggerModule } from 'nestjs-pino';
 import type { PgBoss } from 'pg-boss';
@@ -14,9 +15,26 @@ import { KeycloakAdminService } from '../modules/auth/keycloak-admin.service.js'
 import { SessionService } from '../modules/auth/session.service.js';
 import { ProfilesService } from '../modules/profiles/profiles.service.js';
 import { ManufacturerOnboardingService } from '../modules/registration/onboarding.service.js';
-import { ADATA_QUEUE_OPTIONS, PLATFORM_TZ, QUEUES, type QueueName, SCHEDULES } from '../jobs/queues.js';
+import { ANTIVIRUS, ClamdAntivirus } from '../modules/files/antivirus.js';
+import { orgChartSamplePassed } from '../modules/files/org-chart-sample.rules.js';
+import {
+  ADATA_QUEUE_OPTIONS,
+  FILE_SCAN_QUEUE_OPTIONS,
+  NOTIFY_QUEUE_OPTIONS,
+  PLATFORM_TZ,
+  QUEUES,
+  type QueueName,
+  SCHEDULES,
+} from '../jobs/queues.js';
+import {
+  defaultNotificationRenderer,
+  NOTIFICATION_RENDERER,
+  NotificationDispatcher,
+} from '../notifications/dispatcher.js';
+import { DEFAULT_RECIPIENT_RESOLVERS, RECIPIENT_RESOLVERS } from '../notifications/recipients.js';
 import { AccountInactivityJob } from './account-inactivity.job.js';
 import { ADATA_CLIENT_FACTORY, ADATA_TIMING, AdataPrefillJob, defaultAdataClientFactory } from './adata-prefill.job.js';
+import { FileScanJob, SCAN_PASSED_HOOKS, type ScanPassedHook } from './file-scan.job.js';
 import { JobHandlers } from './handlers.service.js';
 
 @Module({
@@ -45,8 +63,22 @@ import { JobHandlers } from './handlers.service.js';
     ManufacturerOnboardingService,
     AdataPrefillJob,
     AccountInactivityJob,
+    FileScanJob,
+    // Письма событий (раздел 8.2): получатели по правилам-данным, тексты из языковых файлов.
+    NotificationDispatcher,
+    { provide: RECIPIENT_RESOLVERS, useValue: DEFAULT_RECIPIENT_RESOLVERS },
+    { provide: NOTIFICATION_RENDERER, useValue: defaultNotificationRenderer },
     { provide: ADATA_CLIENT_FACTORY, useValue: defaultAdataClientFactory },
     { provide: ADATA_TIMING, useValue: ADATA_DEFAULT_TIMING },
+    // ClamAV вызывает только worker (DATA-07).
+    { provide: ANTIVIRUS, inject: [ENV], useFactory: (env: Env) => new ClamdAntivirus(env) },
+    // Действия назначений после скана: образец оргструктуры становится текущим (ADM-11, DATA-07).
+    {
+      provide: SCAN_PASSED_HOOKS,
+      useValue: { organisation_chart_sample: orgChartSamplePassed } satisfies Partial<
+        Record<FilePurpose, ScanPassedHook>
+      >,
+    },
   ],
 })
 export class WorkerModule implements OnApplicationBootstrap {
@@ -57,13 +89,24 @@ export class WorkerModule implements OnApplicationBootstrap {
     private readonly handlers: JobHandlers,
     private readonly adataPrefill: AdataPrefillJob,
     private readonly inactivity: AccountInactivityJob,
+    private readonly fileScan: FileScanJob,
+    private readonly notifications: NotificationDispatcher,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
     const h = this.handlers;
-    const routes: Record<QueueName, (data: never) => Promise<void>> = {
-      [QUEUES.scanFile]: (d) => h.scanFile(d),
-      [QUEUES.sendNotification]: (d) => h.sendNotification(d),
+    const routes: Record<QueueName, (data: never) => Promise<unknown>> = {
+      [QUEUES.fileScan]: async (d) => {
+        await this.fileScan.run(d);
+      },
+      // Без аргумента: «сейчас» — часы worker (DATA-08).
+      [QUEUES.fileScanSweep]: async () => {
+        await this.fileScan.sweep();
+      },
+      // Задание проверяется схемой (только id, код правила и параметры, без адресов). Постоянный отказ —
+      // строка журнала и завершение без повторов, причина — в output задания; сбой SMTP или базы — повтор
+      // (NOTIFY_QUEUE_OPTIONS).
+      [QUEUES.notify]: (d) => this.notifications.runJob(d),
       [QUEUES.sendPasswordEmail]: (d) => h.sendPasswordEmail(d),
       [QUEUES.cleanupIdentity]: (d) => h.cleanupIdentity(d),
       // Очередь письма сброса создаётся раньше задания неактивности, которое её наполняет (AUTH-07).
@@ -86,25 +129,33 @@ export class WorkerModule implements OnApplicationBootstrap {
       [QUEUES.identitySync]: (d) => h.syncIdentity(d),
     };
 
-    for (const [queue, run] of Object.entries(routes) as [QueueName, (data: never) => Promise<void>][]) {
+    for (const [queue, run] of Object.entries(routes) as [QueueName, (data: never) => Promise<unknown>][]) {
       await this.boss.createQueue(
         queue,
         queue === QUEUES.adataPrefill
           ? ADATA_QUEUE_OPTIONS
-          : {
-              retryLimit:
-                queue === QUEUES.sendPasswordEmail ||
-                queue === QUEUES.cleanupIdentity ||
-                queue === QUEUES.inactivityReset
-                  ? 10
-                  : 5,
-              retryBackoff: true,
-              retryDelay: 30,
-            },
+          : queue === QUEUES.fileScan
+            ? FILE_SCAN_QUEUE_OPTIONS
+            : queue === QUEUES.notify
+              ? NOTIFY_QUEUE_OPTIONS
+              : {
+                  retryLimit:
+                    queue === QUEUES.sendPasswordEmail ||
+                    queue === QUEUES.cleanupIdentity ||
+                    queue === QUEUES.inactivityReset
+                      ? 10
+                      : 5,
+                  retryBackoff: true,
+                  retryDelay: 30,
+                },
       );
       await this.boss.work(queue, async (jobs) => {
         try {
-          for (const job of jobs) await run(job.data as never);
+          let output: unknown;
+          for (const job of jobs) output = await run(job.data as never);
+          // Результат обработчика pg-boss сохраняет в output задания: у notify — итог отправки или причина
+          // постоянного отказа (без адресов); остальные очереди результата не отдают, как раньше.
+          return queue === QUEUES.notify ? output : undefined;
         } catch (error) {
           // pg-boss сохраняет ошибку обработчика в output задания: у ошибки базы — только сводка (NFR-11).
           throw redactDatabaseError(error);

@@ -1,4 +1,5 @@
 import { ROLES, type Role } from "@imbc/contracts";
+import { cn } from "cn";
 import { Suspense, use, useEffect } from "react";
 import { Link, Navigate, type RouteObject, useLocation, useParams, useRoutes } from "react-router";
 import { useTranslations } from "use-intl";
@@ -179,7 +180,7 @@ function ProtoNotFound() {
         </EmptyTitle>
         <EmptyDescription>{t("description")}</EmptyDescription>
       </EmptyHeader>
-      <Link className={buttonVariants()} to="/">
+      <Link className={cn(buttonVariants())} to="/">
         {t("home")}
       </Link>
     </Empty>

@@ -1,4 +1,6 @@
 export * from './enums.js';
+export * from './files.js';
+export * from './dictionaries.js';
 export * from './bin.js';
 export * from './normalize.js';
 export * from './catalog.js';

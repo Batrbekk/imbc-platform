@@ -1,0 +1,12 @@
+{
+  "dictionary": "commodity_type",
+  "status": "provisional",
+  "source": "прототип data/references.ts; ждёт перечня IMBC",
+  "entries": [
+    { "code": "steel_structures", "names": { "en": "Steel structures" }, "sortOrder": 0 },
+    { "code": "valves", "names": { "en": "Valves" }, "sortOrder": 1 },
+    { "code": "pumps", "names": { "en": "Pumps" }, "sortOrder": 2 },
+    { "code": "cables", "names": { "en": "Cables" }, "sortOrder": 3 },
+    { "code": "workwear", "names": { "en": "Workwear" }, "sortOrder": 4 }
+  ]
+}

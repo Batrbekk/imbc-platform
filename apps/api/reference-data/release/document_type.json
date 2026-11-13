@@ -1,0 +1,31 @@
+{
+  "dictionary": "document_type",
+  "status": "specification",
+  "source": "MAN-37, MAN-38, DBML document",
+  "entries": [
+    {
+      "code": "registration_certificate",
+      "names": { "kk": "Тіркеу туралы куәлік", "ru": "Свидетельство о регистрации", "en": "Registration certificate" },
+      "mandatory": true,
+      "sortOrder": 0
+    },
+    {
+      "code": "charter",
+      "names": { "kk": "Жарғы", "ru": "Устав", "en": "Charter" },
+      "mandatory": true,
+      "sortOrder": 1
+    },
+    {
+      "code": "licence",
+      "names": { "kk": "Лицензиялар", "ru": "Лицензии", "en": "Licences" },
+      "mandatory": true,
+      "sortOrder": 2
+    },
+    {
+      "code": "financial_statements",
+      "names": { "kk": "Қаржылық есептілік", "ru": "Финансовая отчётность", "en": "Financial statements" },
+      "mandatory": false,
+      "sortOrder": 3
+    }
+  ]
+}

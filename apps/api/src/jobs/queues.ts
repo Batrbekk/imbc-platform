@@ -1,12 +1,13 @@
-import type { QueueOptions } from 'pg-boss';
+import type { Queue, QueueOptions } from 'pg-boss';
 
 /**
  * Очереди pg-boss (ADR-06). Ставит задания API, выполняет worker.
  * Время расписаний — Asia/Almaty (GEN-30): в коде нигде не используется часовой пояс сервера.
  */
 export const QUEUES = {
-  scanFile: 'scan-file',
-  sendNotification: 'send-notification',
+  fileScan: 'file-scan',
+  fileScanSweep: 'file-scan-sweep',
+  notify: 'notify',
   sendPasswordEmail: 'send-password-email',
   cleanupIdentity: 'cleanup-identity',
   refreshCatalog: 'refresh-catalog',
@@ -48,23 +49,42 @@ export const SCHEDULES: ReadonlyArray<{ queue: QueueName; cron: string; note: st
   },
   { queue: QUEUES.activitySnapshotWeekly, cron: '0 3 * * 1', note: 'снимок активности за неделю (OPR-74)' },
   { queue: QUEUES.activitySnapshotMonthly, cron: '0 3 1 * *', note: 'снимок активности за месяц (OPR-74)' },
+  {
+    queue: QUEUES.fileScanSweep,
+    cron: '*/15 * * * *',
+    note: 'файлы, ждущие скана дольше 15 минут, — снова в file-scan (DATA-07)',
+  },
 ];
 
-export interface ScanFileJob {
+/**
+ * Проверка версии файла ClamAV и перенос из карантина (DATA-07). Ни имени, ни ключа объекта в задании — только
+ * id версии: строка задания хранится в pg-boss (NFR-11).
+ */
+export interface FileScanJobData {
   fileVersionId: string;
 }
 
-export interface SendNotificationJob {
-  /** Код события из каталога уведомлений (раздел 9), например NOT-11. */
-  code: string;
-  /** Ключ идемпотентности: одно письмо на событие и адрес (NOT-20). */
-  dedupeKey: string;
-  to: string;
-  locale: string;
-  subject: string;
-  text: string;
-  html?: string;
-}
+/**
+ * Очередь `file-scan` создают API (ставит задание в транзакции загрузки) и worker — с одними параметрами.
+ * `exclusive` с ключом — id версии: одно задание версии в очереди или в работе, зачистка не плодит повторов.
+ */
+export const FILE_SCAN_QUEUE_OPTIONS = {
+  policy: 'exclusive',
+  retryLimit: 5,
+  retryDelay: 30,
+  retryBackoff: true,
+} satisfies Omit<Queue, 'name'>;
+
+/**
+ * Письма событий (раздел 8.2): задание — `NotifyJob` (`notifications/enqueue.ts`), без адресов. Очередь
+ * создают API (ставит задание в транзакции события) и worker — с одними параметрами. Повтор после сбоя SMTP
+ * отправляет только неотправленное: журнал `notification` держит одно письмо на событие и адрес (NOT-18).
+ */
+export const NOTIFY_QUEUE_OPTIONS = {
+  retryLimit: 10,
+  retryDelay: 30,
+  retryBackoff: true,
+} satisfies Omit<Queue, 'name'>;
 
 export interface IdentityJob {
   subject: string;

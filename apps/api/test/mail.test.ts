@@ -12,7 +12,7 @@ describe('письма', () => {
   });
 
   it('экранирует значения в HTML', () => {
-    const m = renderMail('NOT-03', 'ru', { minutes: 15, publicUrl: 'https://x/<script>' });
+    const m = renderMail('NOT-03', 'ru', { minutes: 15, link: 'https://x/<script>' });
     expect(m.html).not.toContain('<script>');
     expect(m.html).toContain('&lt;script&gt;');
   });

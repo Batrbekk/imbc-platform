@@ -7,6 +7,7 @@ import { AuditService } from '../../common/audit.service.js';
 import { parseOrThrow, ProblemException } from '../../common/problem.js';
 import { ENV, type Env } from '../../config/env.js';
 import { MailService } from '../../mail/mail.service.js';
+import { renderMail, toLocale } from '../../mail/templates.js';
 import type { AuthContext } from './auth.types.js';
 import { sign, unsign } from './crypto.js';
 import { otpDeliveryFor } from './development-otp.js';
@@ -221,12 +222,20 @@ export class AuthController {
         retryAfter: issued.retryAfter,
         expiresAt: issued.expiresAt.toISOString(),
       };
-    // NOT-02: на языке учётной записи; отправляется сразу, без очереди — пользователь ждёт код.
+    // NOT-02: на языке учётной записи; отправляется сразу, без очереди и без транзакции базы вокруг SMTP —
+    // пользователь ждёт код. В журнале `notification` — факт отправки, адрес, язык и id кода, но не сам код.
     try {
-      await this.mail.send('NOT-02', auth.user.email, auth.user.locale, {
-        code: issued.code,
-        minutes: OTP_TTL_MS / 60_000,
-      });
+      await this.mail.sendImmediate(
+        {
+          ruleCode: 'NOT-02',
+          eventKey: `otp:${issued.id}`,
+          to: auth.user.email,
+          accountId: auth.user.id,
+          language: toLocale(auth.user.locale),
+          related: { type: 'otp_code', id: issued.id },
+        },
+        renderMail('NOT-02', auth.user.locale, { code: issued.code, minutes: OTP_TTL_MS / 60_000 }),
+      );
     } catch {
       await this.sessions.discardUndeliveredOtp(issued.id, auth.user.id);
       this.logger.warn('OTP email delivery failed');

@@ -30,7 +30,6 @@ x-backend-env: &backend-env
   COOKIE_SECURE: ${COOKIE_SECURE:-false}
   SMTP_URL: ${SMTP_URL:-smtp://mailpit:1025}
   MAIL_FROM: ${MAIL_FROM:-IMBC Platform <no-reply@imbc.local>}
-  IMBC_MAILBOX: ${IMBC_MAILBOX:-platform@imbc.local}
   CLAMAV_HOST: clamav
   CLAMAV_PORT: 3310
 
@@ -151,6 +150,8 @@ services:
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET}
       KEYCLOAK_DEV_USER_PASSWORD: ${KEYCLOAK_DEV_USER_PASSWORD}
       KEYCLOAK_LOGIN_THEME: ${KEYCLOAK_LOGIN_THEME:-keycloak.v2}
+      # Тема писем Keycloak (NOT-01 на языке получателя, NOT-19): в образе из каталога identity — imbc, в образе Keycloak без неё — keycloak.
+      KEYCLOAK_EMAIL_THEME: ${KEYCLOAK_EMAIL_THEME:-keycloak}
       # Почта Keycloak: письма установки и сброса пароля (AUTH-01, AUTH-08). По умолчанию — Mailpit.
       KEYCLOAK_SMTP_HOST: ${KEYCLOAK_SMTP_HOST:-mailpit}
       KEYCLOAK_SMTP_PORT: ${KEYCLOAK_SMTP_PORT:-1025}
@@ -176,11 +177,19 @@ services:
       retries: 30
       start_period: 30s
 
+  # Проверку файлов вызывает только worker (DATA-07): поток INSTREAM — не больше 25 МБ (MAX_FILE_BYTES, 26 214 400 байт).
+  # Значений образа по умолчанию недостаточно: пределы считаются по распакованному содержимому (DOCX и XLSX — ZIP),
+  # и при AlertExceedsMax no clamd молча прекращает проверку и отвечает OK. Настройки — infrastructure/clamav/clamd.conf:
+  # AlertExceedsMax yes (превышение предела — FOUND Heuristics.Limits.Exceeded…, файл отклоняется) и пределы платформы.
+  # Ответ clamd, кроме OK и FOUND (например, «INSTREAM size limit exceeded. ERROR»), — ошибка задания, не «чистый».
+  # clamd.conf примонтирован как файл: после его изменения контейнер clamav нужно пересоздать
+  # (`docker compose up -d --force-recreate clamav`); проверить действующие значения — `docker compose exec clamav clamconf`.
   clamav:
     image: ${CLAMAV_IMAGE:-clamav/clamav:1.4}
     restart: unless-stopped
     volumes:
       - clamav-db:/var/lib/clamav
+      - ./infrastructure/clamav/clamd.conf:/etc/clamav/clamd.conf:ro
     healthcheck:
       test: ["CMD", "clamdcheck.sh"]
       interval: 30s

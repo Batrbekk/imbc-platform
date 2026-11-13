@@ -1,0 +1,18 @@
+{
+  "dictionary": "contact_role",
+  "status": "specification",
+  "source": "MAN-13",
+  "entries": [
+    { "code": "management", "names": { "kk": "Басшылық", "ru": "Руководство", "en": "Management" }, "sortOrder": 0 },
+    {
+      "code": "technical",
+      "names": { "kk": "Техникалық", "ru": "Техническое направление", "en": "Technical" },
+      "sortOrder": 1
+    },
+    {
+      "code": "commercial",
+      "names": { "kk": "Коммерциялық", "ru": "Коммерческое направление", "en": "Commercial" },
+      "sortOrder": 2
+    }
+  ]
+}

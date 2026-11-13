@@ -24,9 +24,11 @@
     "@nestjs/swagger": "^12.1.1",
     "cookie-parser": "^1.4.7",
     "drizzle-orm": "^0.45.4",
+    "file-type": "^22.3.0",
     "helmet": "^8.3.0",
     "ioredis": "^6.0.0",
     "jose": "^6.2.15",
+    "multer": "^2.5.0",
     "nestjs-pino": "^5.3.1",
     "nodemailer": "^10.4.0",
     "openid-client": "^6.8.9",
@@ -43,6 +45,7 @@
     "@swc/core": "^1.16.22",
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.6",
+    "@types/multer": "^2.3.0",
     "@types/node": "^24.19.2",
     "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
@@ -54,6 +57,7 @@
   },
   "files": [
     "dist",
-    "drizzle"
+    "drizzle",
+    "reference-data"
   ]
 }

@@ -1,0 +1,9 @@
+{
+  "dictionary": "kpved",
+  "status": "provisional",
+  "source": "прототип data/references.ts; ждёт перечня IMBC",
+  "entries": [
+    { "code": "25.11.23", "names": { "ru": "Конструкции металлические прочие" }, "sortOrder": 0 },
+    { "code": "28.13.14", "names": { "ru": "Насосы центробежные" }, "sortOrder": 1 }
+  ]
+}

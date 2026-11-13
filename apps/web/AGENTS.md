@@ -11,7 +11,7 @@
 
 ## Routes
 
-- All routes are in `src/router.tsx`. Keep the existing addresses: `/`, `/login`, `/register`, `/auth/verify`, `/auth/responsibility`, `/catalog`, `/companies/:profileId`, `/dashboard`, `/reviews`, `/admin/accounts`, `/account`, `/profile`. BFF redirects point at them.
+- All routes are in `src/router.tsx`. Keep the existing addresses: `/`, `/login`, `/register`, `/auth/verify`, `/auth/responsibility`, `/catalog`, `/companies/:profileId`, `/dashboard`, `/reviews`, `/admin/accounts`, `/references`, `/account`, `/profile`. BFF redirects point at them.
 - Application pages and the `AppShell` layout are `lazy` routes (one chunk each); the root route has `ErrorBoundary` (`src/routes/route-error.tsx`, one guarded reload on a failed chunk) and `HydrateFallback`. `"*"` stays last.
 - Each page renders one `PageTitle` (`src/components/app/page-title.tsx`). It sets `document.title` in a layout effect, which updates the single `<title>` of `index.html`, and resets it to the platform name on unmount; do not render `<title>` elements, React 19 would hoist a second one into `<head>`.
 - The root route (`src/routes/root.tsx`) has a visually hidden `aria-live="polite"` region (`RouteAnnouncer`) that reads the new `document.title` to screen readers after the path changes; it is silent on the first render and on query-string changes. Give every page a meaningful `PageTitle`: that is what gets announced.
@@ -21,7 +21,7 @@
 ## Base UI rules (differences from Radix)
 
 1. `asChild` becomes `render`: `<PopoverTrigger render={<Button variant="outline" />}>…</PopoverTrigger>`; the same for `DropdownMenuTrigger`, `TooltipTrigger`, `SheetTrigger`, `DialogClose`, `SidebarMenuButton`, `Badge`.
-2. A link styled as a button stays a link: `<a className={buttonVariants({ variant, size })} href={url}>` or `<Link className={buttonVariants({ variant, size })} to="/…">`. Do not use `Button render={<a />}` for links: Base UI gives it `role="button"` and button keyboard behaviour. In tests find such elements with `getByRole("link")`. `Button render` is for real buttons and triggers.
+2. A link styled as a button stays a link: `<a className={cn(buttonVariants({ variant, size }))} href={url}>` or `<Link className={cn(buttonVariants({ variant, size }))} to="/…">`; `buttonVariants` is a bare `cva` without class merging, so without `cn` an `outline` link keeps both `border-transparent` and `border-border` and shows no border (`Button` runs its classes through `cn`). Do not use `Button render={<a />}` for links: Base UI gives it `role="button"` and button keyboard behaviour. In tests find such elements with `getByRole("link")`. `Button render` is for real buttons and triggers.
 3. `Select` needs `items` (an array of `{ value, label }`) on the root, otherwise `SelectValue` shows the raw value; the placeholder is an item with `value: null`; position with `alignItemWithTrigger`; `onValueChange(value, eventDetails)` may pass `null`.
 4. `Checkbox.onCheckedChange(checked: boolean, eventDetails)`; `DropdownMenuRadioGroup.onValueChange(value, eventDetails)` gives `unknown` — check it before use.
 5. `TooltipProvider` is not built into `Tooltip` or `Sidebar`: the app is wrapped in it once (`src/components/app/providers.tsx`).

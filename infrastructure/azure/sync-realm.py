@@ -2,7 +2,9 @@
 """Apply managed settings to an existing IMBC realm without importing users or secrets.
 
 Run from the repository on the VM after Keycloak is healthy:
-    python3 infrastructure/azure/sync-realm.py --theme imbc
+    python3 infrastructure/azure/sync-realm.py --theme imbc [--email-theme imbc]
+`--theme` is the login theme, `--email-theme` the email theme (both default to `imbc`: the theme JAR carries both,
+and the email theme is what sends NOT-01 in the recipient's language, NOT-19).
 Only the explicitly allowlisted fields below are sent to the admin API.
 """
 from __future__ import annotations
@@ -18,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 REALM_FIELDS = frozenset({
-    "loginTheme", "sslRequired", "resetPasswordAllowed", "verifyEmail", "passwordPolicy",
+    "loginTheme", "emailTheme", "sslRequired", "resetPasswordAllowed", "verifyEmail", "passwordPolicy",
     "bruteForceProtected", "permanentLockout", "failureFactor", "waitIncrementSeconds",
     "maxFailureWaitSeconds", "minimumQuickLoginWaitSeconds", "quickLoginCheckMilliSeconds",
     "maxDeltaTimeSeconds", "ssoSessionIdleTimeout", "ssoSessionMaxLifespan",
@@ -31,6 +33,8 @@ REALM_FIELDS = frozenset({
     "enabledEventTypes", "smtpServer",
 })
 CLIENT_FIELDS = frozenset({"rootUrl", "baseUrl", "redirectUris", "webOrigins", "attributes", "frontchannelLogout"})
+DEFAULT_THEME = "imbc"
+THEME_NAME = re.compile(r"[A-Za-z0-9._-]+")
 PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 # The login email is changed only by an IMBC administrator (MAN-05, ADM-05); with
 # registrationEmailAsUsername the username follows it. Everyone keeps seeing both.
@@ -88,17 +92,18 @@ def substitute(value: Any, env: dict[str, str]) -> Any:
     return value
 
 
-def desired_settings(source: dict[str, Any], env: dict[str, str], theme: str) -> tuple[str, dict[str, Any], dict[str, Any]]:
+def desired_settings(source: dict[str, Any], env: dict[str, str], theme: str, email_theme: str = DEFAULT_THEME) -> tuple[str, dict[str, Any], dict[str, Any]]:
     realm = source.get("realm")
     if not isinstance(realm, str) or not re.fullmatch(r"[A-Za-z0-9._-]+", realm):
         raise SyncError("Invalid desired realm name")
     clients = [client for client in source.get("clients", []) if client.get("clientId") == "imbc-bff"]
     if len(clients) != 1:
         raise SyncError("Desired configuration must contain exactly one imbc-bff client")
-    effective_env = {**env, "KEYCLOAK_LOGIN_THEME": theme}
+    effective_env = {**env, "KEYCLOAK_LOGIN_THEME": theme, "KEYCLOAK_EMAIL_THEME": email_theme}
     realm_patch = substitute({key: value for key, value in source.items() if key in REALM_FIELDS}, effective_env)
     client_patch = substitute({key: value for key, value in clients[0].items() if key in CLIENT_FIELDS}, effective_env)
     realm_patch["loginTheme"] = theme
+    realm_patch["emailTheme"] = email_theme
     client_patch.setdefault("attributes", {})["login_theme"] = theme
     return realm, realm_patch, client_patch
 
@@ -159,15 +164,17 @@ def parse_result(raw: str, operation: str) -> Any:
         raise SyncError(f"{operation} returned invalid JSON") from None
 
 
-def synchronize(root: Path, theme: str) -> None:
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", theme):
+def synchronize(root: Path, theme: str, email_theme: str = DEFAULT_THEME) -> None:
+    if not THEME_NAME.fullmatch(theme):
         raise SyncError("Invalid theme name")
+    if not THEME_NAME.fullmatch(email_theme):
+        raise SyncError("Invalid email theme name")
     env = read_env(root / ".env")
     for key in ("KEYCLOAK_ADMIN_USER", "KEYCLOAK_ADMIN_PASSWORD"):
         if not env.get(key):
             raise SyncError(f"Missing required environment variable: {key}")
     source = parse_result((root / "infrastructure/keycloak/imbc-realm.json").read_text(), "Desired realm configuration")
-    realm, realm_patch, client_patch = desired_settings(source, env, theme)
+    realm, realm_patch, client_patch = desired_settings(source, env, theme, email_theme)
     container_ids = run(["docker", "compose", "-f", "compose.yaml", "-f", "compose.azure.yaml", "ps", "-q", "keycloak"], operation="Find Keycloak container", root=root).split()
     if len(container_ids) != 1 or not re.fullmatch(r"[a-fA-F0-9]{12,64}", container_ids[0]):
         raise SyncError("Expected one running Keycloak container")
@@ -223,13 +230,18 @@ def synchronize(root: Path, theme: str) -> None:
     print("Realm synchronization complete; existing users, client secrets and unrelated settings preserved")
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--theme", default="imbc")
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--theme", default=DEFAULT_THEME, help="login theme name (default: imbc)")
+    parser.add_argument("--email-theme", default=DEFAULT_THEME, help="email theme name (default: imbc)")
     parser.add_argument("--root", type=Path, default=Path.cwd())
-    args = parser.parse_args()
+    return parser.parse_args(argv)
+
+
+def main() -> int:
+    args = parse_args()
     try:
-        synchronize(args.root.resolve(), args.theme)
+        synchronize(args.root.resolve(), args.theme, args.email_theme)
     except SyncError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1

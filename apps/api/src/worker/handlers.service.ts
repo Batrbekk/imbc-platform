@@ -1,20 +1,15 @@
-import {
-  CopyObjectCommand,
-  DeleteObjectCommand,
-  DeleteObjectsCommand,
-  GetObjectCommand,
-  type S3Client,
-} from '@aws-sdk/client-s3';
+import { DeleteObjectsCommand, type S3Client } from '@aws-sdk/client-s3';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, eq, isNotNull, lt, sql } from 'drizzle-orm';
-import type { Readable } from 'node:stream';
+import type pg from 'pg';
+import type { PgBoss } from 'pg-boss';
 import { AuditService } from '../common/audit.service.js';
 import { ENV, type Env } from '../config/env.js';
-import { DB, type Database } from '../database/database.module.js';
+import { DB, type Database, PG_POOL } from '../database/database.module.js';
+import { withQueueTransaction } from '../database/transaction.js';
 import {
   certificates,
   exportFiles,
-  fileVersions,
   notificationsSent,
   otpCodes,
   sessions,
@@ -25,15 +20,14 @@ import {
   authSyncState,
   revokedIdpSessions,
 } from '../database/schema/index.js';
-import { S3 } from '../infra/infra.module.js';
-import { MailService } from '../mail/mail.service.js';
-import { renderMail } from '../mail/templates.js';
+import { QUEUE, S3 } from '../infra/infra.module.js';
 import { KeycloakAdminService, KeycloakRequestError } from '../modules/auth/keycloak-admin.service.js';
 import { SessionService } from '../modules/auth/session.service.js';
 import { sha256 } from '../modules/auth/crypto.js';
 import { ManufacturerOnboardingService } from '../modules/registration/onboarding.service.js';
-import type { AccountJob, IdentityJob, IdentitySyncJob, ScanFileJob, SendNotificationJob } from '../jobs/queues.js';
-import { scanStream } from './clamd.js';
+import { enqueueNotification } from '../notifications/enqueue.js';
+import { appLink } from '../notifications/links.js';
+import type { AccountJob, IdentityJob, IdentitySyncJob } from '../jobs/queues.js';
 
 type SecurityEvent = Awaited<ReturnType<KeycloakAdminService['securityEvents']>>[number];
 
@@ -57,67 +51,14 @@ export class JobHandlers {
   constructor(
     @Inject(DB) private readonly db: Database,
     @Inject(S3) private readonly s3: S3Client,
-    private readonly mail: MailService,
     @Inject(ENV) private readonly env: Env,
     private readonly audit: AuditService,
     private readonly keycloak: KeycloakAdminService,
     private readonly sessions: SessionService,
     private readonly onboarding: ManufacturerOnboardingService,
+    @Inject(PG_POOL) private readonly pool: pg.Pool,
+    @Inject(QUEUE) private readonly queue: PgBoss,
   ) {}
-
-  /** Файл из карантина проверяется ClamAV и только чистым переносится в рабочий бакет (FILE-03). */
-  async scanFile({ fileVersionId }: ScanFileJob): Promise<void> {
-    const [version] = await this.db.select().from(fileVersions).where(eq(fileVersions.id, fileVersionId));
-    if (!version || version.scanState !== 'pending') return;
-
-    const object = await this.s3.send(new GetObjectCommand({ Bucket: version.bucket, Key: version.objectKey }));
-    const verdict = await scanStream(this.env.CLAMAV_HOST, this.env.CLAMAV_PORT, object.Body as Readable);
-
-    if (verdict.clean) {
-      await this.s3.send(
-        new CopyObjectCommand({
-          Bucket: this.env.S3_BUCKET_FILES,
-          Key: version.objectKey,
-          CopySource: `${version.bucket}/${encodeURIComponent(version.objectKey)}`,
-        }),
-      );
-      await this.db
-        .update(fileVersions)
-        .set({ scanState: 'clean', scannedAt: new Date(), bucket: this.env.S3_BUCKET_FILES })
-        .where(eq(fileVersions.id, fileVersionId));
-    } else {
-      await this.db
-        .update(fileVersions)
-        .set({ scanState: 'infected', scannedAt: new Date() })
-        .where(eq(fileVersions.id, fileVersionId));
-      await this.audit.record({
-        userId: version.uploadedBy,
-        action: 'file.infected',
-        objectType: 'file_version',
-        objectId: fileVersionId,
-        outcome: 'denied',
-        diff: { signature: verdict.signature },
-      });
-    }
-    await this.s3.send(new DeleteObjectCommand({ Bucket: version.bucket, Key: version.objectKey }));
-  }
-
-  /** Одно письмо на событие и адрес: уникальный ключ в notifications_sent (NOT-20, ADR-22). */
-  async sendNotification(job: SendNotificationJob): Promise<void> {
-    const [claimed] = await this.db
-      .insert(notificationsSent)
-      .values({ code: job.code, dedupeKey: job.dedupeKey, recipient: job.to, locale: job.locale })
-      .onConflictDoNothing()
-      .returning({ id: notificationsSent.id });
-    if (!claimed) return;
-    try {
-      await this.mail.sendRaw(job.to, job.subject, job.text, job.html);
-    } catch (error) {
-      // Освобождаем ключ, чтобы повтор задания отправил письмо.
-      await this.db.delete(notificationsSent).where(eq(notificationsSent.id, claimed.id));
-      throw error;
-    }
-  }
 
   /** Истёкший сертификат помечается, но профиль не скрывается (REV-20). */
   async certificateExpiry(): Promise<void> {
@@ -215,7 +156,10 @@ export class JobHandlers {
 
   /**
    * AUTH-04: Keycloak блокирует вход после 10 ошибок на 15 минут, но писем не шлёт.
-   * Раз в минуту читаем его события и отправляем NOT-03 — одно письмо на одну блокировку.
+   * Раз в минуту читаем его события: отзыв сеансов по смене пароля, профиль после установки пароля и
+   * блокировки входа. Блокировка — задание `notify` NOT-03 и аудит `auth.locked_out` (`recordLockout`); письмо
+   * отправляет диспетчер в своём задании, его сбои и повторы ленту событий не держат. Курсор сдвигается, когда
+   * пакет обработан; сбой базы или очереди — исключение, курсор на месте, следующий опрос прочтёт пакет снова.
    */
   async keycloakEvents(): Promise<void> {
     const started = new Date();
@@ -223,7 +167,6 @@ export class JobHandlers {
     const since = new Date(cursor ? cursor.checkedAt.getTime() - 5 * 60_000 : Date.now() - 30 * 86_400_000);
     const events = await this.keycloak.securityEvents(since);
     const ordered = events.sort((a, b) => a.time - b.time);
-    // Revocations must finish even when an unrelated lockout notification cannot be mailed.
     // Самое раннее время установки пароля в пакете — момент появления профиля (registered_at, MAN-03).
     const passwordSet = new Map<string, Date>();
     for (const event of ordered) {
@@ -241,39 +184,65 @@ export class JobHandlers {
     for (const [subject, at] of passwordSet) await this.onboardAfterPassword(subject, at);
     for (const event of ordered) {
       if (!event.userId || event.error || !Number.isFinite(event.time)) continue;
-      if (event.type !== 'USER_DISABLED_BY_TEMPORARY_LOCKOUT') continue;
-      const [account] = await this.db
-        .select({
-          id: userAccounts.id,
-          email: userAccounts.email,
-          locale: userAccounts.locale,
-          organizationId: userAccounts.organizationId,
-        })
-        .from(userAccounts)
-        .where(eq(userAccounts.idpSubject, event.userId));
-      if (!account) continue;
-      const dedupeKey = `${event.userId}:${event.time}`;
-      const mail = renderMail('NOT-03', account.locale, { minutes: 15, publicUrl: this.env.PUBLIC_URL });
-      const before = await this.db
-        .select({ id: notificationsSent.id })
-        .from(notificationsSent)
-        .where(and(eq(notificationsSent.code, 'NOT-03'), eq(notificationsSent.dedupeKey, dedupeKey)));
-      if (before.length) continue;
-      await this.sendNotification({ code: 'NOT-03', dedupeKey, to: account.email, locale: account.locale, ...mail });
-      await this.audit.record({
-        userId: account.id,
-        organizationId: account.organizationId,
-        action: 'auth.locked_out',
-        objectType: 'account',
-        objectId: account.id,
-        outcome: 'denied',
-        isAccountEvent: true,
-      });
+      if (event.type === 'USER_DISABLED_BY_TEMPORARY_LOCKOUT') await this.recordLockout(event.userId, event.time);
     }
     await this.db
       .insert(authSyncState)
       .values({ name: 'keycloak-events', checkedAt: started })
       .onConflictDoUpdate({ target: authSyncState.name, set: { checkedAt: started } });
+  }
+
+  /**
+   * Блокировка входа (AUTH-04, NOT-26): одна транзакция — отметка события `lockout:<sha256(субъект:время)>` в
+   * `auth_security_events`, задание `notify` NOT-03 (ключ события `<субъект>:<время>`, как в журнале писем) и
+   * аудит `auth.locked_out`. Повтор того же события (повтор задания опроса, перекрытие пятиминутных окон,
+   * параллельный опрос) упирается в отметку: второго задания и второй записи аудита нет. Аудит не зависит от
+   * доставки письма. Отметки живут 32 дня (`purgeSessions`) — дольше самого длинного окна опроса (30 дней).
+   */
+  private async recordLockout(subject: string, time: number): Promise<void> {
+    const eventKey = `${subject}:${time}`;
+    await withQueueTransaction(this.pool, async (tx, queueDb) => {
+      const [account] = await tx
+        .select({ id: userAccounts.id, organizationId: userAccounts.organizationId })
+        .from(userAccounts)
+        .where(eq(userAccounts.idpSubject, subject));
+      if (!account) return;
+      const [fresh] = await tx
+        .insert(authSecurityEvents)
+        .values({ eventKey: `lockout:${sha256(eventKey)}` })
+        .onConflictDoNothing()
+        .returning();
+      if (!fresh) return;
+      // Expand (NFR-06): эту блокировку уже обработала предыдущая версия worker (письмо и аудит) — строка
+      // NOT-03 с тем же ключом в notifications_sent. Убрать в contract вместе с notifications_sent.
+      const [legacy] = await tx
+        .select({ id: notificationsSent.id })
+        .from(notificationsSent)
+        .where(and(eq(notificationsSent.code, 'NOT-03'), eq(notificationsSent.dedupeKey, eventKey)));
+      if (legacy) return;
+      await enqueueNotification(
+        this.queue,
+        {
+          rule: 'NOT-03',
+          eventKey,
+          accountId: account.id,
+          params: { minutes: '15', link: appLink(this.env.PUBLIC_URL, '/login') },
+        },
+        queueDb,
+      );
+      await this.audit.record(
+        {
+          userId: account.id,
+          organizationId: account.organizationId,
+          action: 'auth.locked_out',
+          objectType: 'account',
+          objectId: account.id,
+          outcome: 'denied',
+          isAccountEvent: true,
+        },
+        tx,
+      );
+    });
   }
 
   /**

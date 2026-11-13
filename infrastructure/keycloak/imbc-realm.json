@@ -33,6 +33,7 @@
   ],
   "defaultLocale": "kk",
   "loginTheme": "${KEYCLOAK_LOGIN_THEME}",
+  "emailTheme": "${KEYCLOAK_EMAIL_THEME}",
   "smtpServer": {
     "host": "${KEYCLOAK_SMTP_HOST}",
     "port": "${KEYCLOAK_SMTP_PORT}",

@@ -214,11 +214,12 @@ describe.skipIf(!databaseUrl)(
       new JobHandlers(
         db,
         {} as never,
-        {} as never,
         env,
         new AuditService(db),
         keycloak as unknown as KeycloakAdminService,
         sessions,
+        {} as never,
+        {} as never,
         {} as never,
       );
 

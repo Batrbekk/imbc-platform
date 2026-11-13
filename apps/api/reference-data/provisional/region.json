@@ -1,0 +1,16 @@
+{
+  "dictionary": "region",
+  "status": "provisional",
+  "source": "прототип data/references.ts; ждёт перечня IMBC",
+  "entries": [
+    { "code": "KZ-AKT", "names": { "ru": "Актюбинская область" }, "sortOrder": 0 },
+    { "code": "KZ-ALA", "names": { "ru": "Алматы" }, "sortOrder": 1 },
+    { "code": "KZ-AST", "names": { "ru": "Астана" }, "sortOrder": 2 },
+    { "code": "KZ-ATY", "names": { "ru": "Атырауская область" }, "sortOrder": 3 },
+    { "code": "KZ-KAR", "names": { "ru": "Карагандинская область" }, "sortOrder": 4 },
+    { "code": "KZ-KUS", "names": { "ru": "Костанайская область" }, "sortOrder": 5 },
+    { "code": "KZ-MAN", "names": { "ru": "Мангистауская область" }, "sortOrder": 6 },
+    { "code": "KZ-PAV", "names": { "ru": "Павлодарская область" }, "sortOrder": 7 },
+    { "code": "KZ-ZAP", "names": { "ru": "Западно-Казахстанская область" }, "sortOrder": 8 }
+  ]
+}

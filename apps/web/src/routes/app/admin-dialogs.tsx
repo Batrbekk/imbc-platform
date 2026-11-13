@@ -47,16 +47,19 @@ import { api } from "@/lib/api";
 
 import { type Action, problemCode, useAdminAction, useProblemMessage } from "./admin-actions";
 
-/** Куда уходит фокус при закрытии диалога: ссылка на элемент или функция (Base UI `finalFocus`). */
-type FinalFocus = ComponentProps<typeof DialogContent>["finalFocus"];
+/**
+ * Куда уходит фокус при закрытии диалога: ссылка на элемент или функция (Base UI `finalFocus`).
+ * Тип общий: им же пользуются диалоги справочников.
+ */
+export type FinalFocus = ComponentProps<typeof DialogContent>["finalFocus"];
 
 /**
  * Диалог действия: своя переведённая кнопка «Отмена» (у встроенной подпись «Close» не переводится),
  * закрытие возвращает фокус на кнопку-триггер или на `finalFocus` (кнопку меню строки). Пока `locked`
  * (запрос в пути), диалог не закрывается ни Escape, ни щелчком по подложке: итог действия не придёт
- * на уже закрытый диалог.
+ * на уже закрытый диалог. Общий каркас: им пользуются и диалоги справочников.
  */
-function AdminDialog({
+export function AdminDialog({
   open,
   onOpenChange,
   trigger,
@@ -96,10 +99,11 @@ function AdminDialog({
  * проверки (`focusRequest` растёт) фокус уходит на первое поле с ошибкой. Пока запрос в пути, «Отмена»
  * недоступна (диалог не закрывается); `submitDisabled` — «Сохранить» недоступна, пока значение не изменено.
  */
-function DialogForm({
+export function DialogForm({
   title,
   description,
   submitLabel,
+  cancelLabel,
   pending,
   submitDisabled = false,
   error,
@@ -110,6 +114,8 @@ function DialogForm({
   title: string;
   description?: string;
   submitLabel: string;
+  /** Подпись «Отмена»; по умолчанию — из текстов аккаунтов, страницы с другими текстами передают свою. */
+  cancelLabel?: string;
   pending: boolean;
   submitDisabled?: boolean;
   error?: string;
@@ -141,7 +147,7 @@ function DialogForm({
       )}
       <DialogFooter>
         <DialogClose disabled={pending} render={<Button type="button" variant="outline" />}>
-          {t("cancel")}
+          {cancelLabel ?? t("cancel")}
         </DialogClose>
         <Button type="submit" disabled={pending || submitDisabled}>
           {pending && <Spinner aria-hidden="true" />}
@@ -153,7 +159,7 @@ function DialogForm({
 }
 
 /** Текстовое поле с подсказкой и ошибкой, связанными через aria-describedby. */
-function TextField({
+export function TextField({
   id,
   label,
   value,
@@ -161,6 +167,7 @@ function TextField({
   error,
   hint,
   type = "text",
+  inputMode,
   autoComplete,
   maxLength,
 }: {
@@ -171,6 +178,8 @@ function TextField({
   error?: string;
   hint?: ReactNode;
   type?: "text" | "email";
+  /** Клавиатура на телефоне; поле остаётся текстовым, число из него не получается. */
+  inputMode?: "numeric" | "text";
   autoComplete?: string;
   maxLength?: number;
 }) {
@@ -181,6 +190,7 @@ function TextField({
       <Input
         id={id}
         type={type}
+        inputMode={inputMode}
         autoComplete={autoComplete}
         maxLength={maxLength}
         value={value}
@@ -194,16 +204,22 @@ function TextField({
   );
 }
 
-/** Выпадающий список с подписью над ним; `items` с вариантом `null` — подпись пустого выбора (Base UI). */
-function SelectField<T extends string>({
+/**
+ * Выпадающий список с подписью над ним; `items` с вариантом `null` — подпись пустого выбора (Base UI).
+ * `emptyOption` — выбираемый первым пунктом вариант «ничего»: значение поля `null` (необязательное поле, как
+ * «Без группы»); его выбор вызывает `onSelect`. `errorAction` — кнопка под сообщением об ошибке (например «Повторить»).
+ */
+export function SelectField<T extends string>({
   id,
   label,
   value,
   onChange,
   options,
   placeholder,
+  emptyOption,
   disabled,
   error,
+  errorAction,
   hint,
 }: {
   id: string;
@@ -212,12 +228,15 @@ function SelectField<T extends string>({
   onChange: (value: T) => void;
   options: readonly { value: T; label: string }[];
   placeholder?: string;
+  emptyOption?: { label: string; onSelect: () => void };
   disabled?: boolean;
   error?: string;
+  errorAction?: ReactNode;
   hint?: string;
 }) {
   const labelId = `${id}-label`;
-  const items = placeholder ? [{ value: null, label: placeholder }, ...options] : [...options];
+  const nullLabel = emptyOption?.label ?? placeholder;
+  const items = nullLabel ? [{ value: null, label: nullLabel }, ...options] : [...options];
   const describedBy = [hint && `${id}-help`, error && `${id}-error`].filter(Boolean).join(" ") || undefined;
   return (
     <Field data-invalid={!!error || undefined}>
@@ -228,8 +247,12 @@ function SelectField<T extends string>({
         items={items}
         value={value}
         disabled={disabled}
-        // Base UI передаёт null при сбросе: принимаем только варианты списка.
+        // Base UI передаёт null, когда выбран пункт без значения: это «ничего» (если оно есть в списке) или сброс.
         onValueChange={(next) => {
+          if (next === null) {
+            emptyOption?.onSelect();
+            return;
+          }
           const option = options.find((o) => o.value === next);
           if (option) onChange(option.value);
         }}
@@ -244,6 +267,7 @@ function SelectField<T extends string>({
           <SelectValue />
         </SelectTrigger>
         <SelectContent alignItemWithTrigger={false}>
+          {emptyOption && <SelectItem value={null}>{emptyOption.label}</SelectItem>}
           {options.map((option) => (
             <SelectItem key={option.value} value={option.value}>
               {option.label}
@@ -253,6 +277,7 @@ function SelectField<T extends string>({
       </Select>
       {hint && <FieldDescription id={`${id}-help`}>{hint}</FieldDescription>}
       {error && <FieldError id={`${id}-error`}>{error}</FieldError>}
+      {error && errorAction}
     </Field>
   );
 }

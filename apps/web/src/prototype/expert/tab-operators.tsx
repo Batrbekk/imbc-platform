@@ -1,5 +1,6 @@
 // Операторы по профилю: кто работает с производителем, визиты, заметки и operator requests всех операторов —
 // SME видит их, производитель и другие операторы нет (IMBC-16, IMBC-18, OPR-22, GEN-11, GEN-12).
+import { cn } from "cn";
 import { Link } from "react-router";
 
 import { buttonVariants } from "@/components/ui/button";
@@ -16,7 +17,7 @@ export function OperatorsTab({ profile }: { profile: ProtoProfile }) {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
         <p className="text-sm text-muted-foreground">{t("operatorsHint")}</p>
-        <Link className={buttonVariants({ variant: "outline", size: "sm" })} to={expertPath("marks")}>
+        <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} to={expertPath("marks")}>
           {t("toMarks")}
         </Link>
       </div>

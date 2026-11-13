@@ -9,11 +9,29 @@ import {
   changeEmailSchema,
   changeRoleSchema,
   checkBin,
+  CLOSED_DICTIONARIES,
+  COMMODITY_GROUPS,
   companyCardDataSchema,
   companyPageSchema,
   computeBinCheckDigit,
+  CONTACT_ROLES,
+  createDictionaryEntrySchema,
   createOrganizationSchema,
+  DATA_CLASSES,
   dashboardSchema,
+  DICTIONARY_CODE_PATTERNS,
+  DICTIONARY_CODES,
+  DICTIONARY_ENTRY_STATUSES,
+  DICTIONARY_PARENT,
+  DICTIONARY_SORT_ORDER_MAX,
+  dictionaryChoicesQuerySchema,
+  dictionaryEntriesQuerySchema,
+  entryDisplayName,
+  entryMandatorySchema,
+  FILE_PURPOSES,
+  FILE_SCAN_STATES,
+  MANDATORY_DICTIONARIES,
+  MANUFACTURER_FILE_PURPOSES,
   imbcMailboxSchema,
   INVITABLE_ROLES,
   inviteAccountSchema,
@@ -30,8 +48,12 @@ import {
   ownProfileSchema,
   PREFILL_FIELDS,
   PROFILE_TIERS,
+  REFERENCE_DATA_STATUSES,
+  REFERENCE_PROBLEM_CODES,
+  referenceFileSchema,
   ROLES,
   UPDATE_STATUSES,
+  updateDictionaryEntrySchema,
 } from '../src/index.js';
 
 describe('перечисления v1.3 (раздел 3.1, UPD-06)', () => {
@@ -43,6 +65,260 @@ describe('перечисления v1.3 (раздел 3.1, UPD-06)', () => {
 
   it('тир профиля — tier_1 и tier_2; tier 3 принадлежит продукту (IMBC-19, IMBC-20, IMBC-21)', () => {
     expect(PROFILE_TIERS).toEqual(['tier_1', 'tier_2']);
+  });
+});
+
+describe('файлы и справочники (DBML, ADM-08, DATA-05, DATA-07)', () => {
+  it('FILE_PURPOSES, DATA_CLASSES, FILE_SCAN_STATES — значения DBML; MANUFACTURER_FILE_PURPOSES — подмножество FILE_PURPOSES; DICTIONARY_CODES — двенадцать кодов ADM-08', () => {
+    // DBML `file_purpose`, порядок тот же.
+    expect(FILE_PURPOSES).toEqual([
+      'organisation_chart',
+      'cv',
+      'unified_register_extract',
+      'conformity_certificate',
+      'production_photo',
+      'certificate_file',
+      'document_file',
+      'site_survey_report',
+      'due_diligence_report',
+      'enhanced_due_diligence_report',
+      'operator_visit_file',
+      'technical_requirements',
+      'agar_cdp_report',
+      'organisation_chart_sample',
+      'export',
+    ]);
+    expect(DATA_CLASSES).toEqual([
+      'a_register',
+      'b_manufacturer',
+      'c_imbc',
+      'd_operator',
+      'e_administration',
+      'f_forecast',
+    ]);
+    // DBML `scan_state`; в БД тип называется file_scan_state, пока скелетный scan_state не удалён (NFR-06).
+    expect(FILE_SCAN_STATES).toEqual(['pending', 'passed', 'rejected']);
+
+    // Файлы секций профиля — те назначения, на которые ссылаются таблицы профиля DBML.
+    expect(MANUFACTURER_FILE_PURPOSES).toEqual([
+      'organisation_chart',
+      'cv',
+      'unified_register_extract',
+      'conformity_certificate',
+      'production_photo',
+      'certificate_file',
+      'document_file',
+    ]);
+    for (const purpose of MANUFACTURER_FILE_PURPOSES) expect(FILE_PURPOSES).toContain(purpose);
+    expect(new Set(MANUFACTURER_FILE_PURPOSES).size).toBe(MANUFACTURER_FILE_PURPOSES.length);
+
+    // ADM-08: regions, legal forms, OKED, TN VED, KPVED, commodity groups, commodity types, processes,
+    // equipment types, contact roles, certificate types, and document types; коды — из DBML `dictionary.code`.
+    expect(DICTIONARY_CODES).toEqual([
+      'region',
+      'legal_form',
+      'oked',
+      'tn_ved',
+      'kpved',
+      'commodity_group',
+      'commodity_type',
+      'process',
+      'equipment_type',
+      'contact_role',
+      'certificate_type',
+      'document_type',
+    ]);
+  });
+});
+
+describe('файлы справочников: схема, шаблоны кодов, показ названия (ADM-08, DATA-03)', () => {
+  const file = (entry: unknown) => ({
+    dictionary: 'tn_ved',
+    status: 'provisional',
+    source: 'тест',
+    entries: [entry],
+  });
+
+  it('referenceFileSchema: код-число отклоняется, без названий — отклоняется, неизвестный справочник — отклоняется (DATA-03)', () => {
+    const ok = referenceFileSchema.safeParse(file({ code: '0101210000', names: { ru: 'Лошади' } }));
+    expect(ok.success).toBe(true);
+    // Значения по умолчанию: без родителя, без разрешения вводить название, порядок 0.
+    expect(ok.success && ok.data.entries[0]).toEqual({
+      code: '0101210000',
+      parent: null,
+      names: { ru: 'Лошади' },
+      customNameAllowed: false,
+      sortOrder: 0,
+    });
+
+    // Код — только строка: число теряет ведущие нули.
+    expect(referenceFileSchema.safeParse(file({ code: 101210000, names: { ru: 'x' } })).success).toBe(false);
+    // Хотя бы одно название, и не пустое.
+    expect(referenceFileSchema.safeParse(file({ code: '0101210000', names: {} })).success).toBe(false);
+    expect(referenceFileSchema.safeParse(file({ code: '0101210000', names: { ru: '  ' } })).success).toBe(false);
+    // Язык вне kk, ru, en и лишние поля отклоняются.
+    expect(referenceFileSchema.safeParse(file({ code: 'X', names: { ru: 'x', de: 'x' } })).success).toBe(false);
+    expect(referenceFileSchema.safeParse(file({ code: 'X', names: { ru: 'x' }, extra: 1 })).success).toBe(false);
+    // Неизвестный справочник, неизвестный статус и пустой список.
+    expect(
+      referenceFileSchema.safeParse({ ...file({ code: 'X', names: { ru: 'x' } }), dictionary: 'country' }).success,
+    ).toBe(false);
+    expect(referenceFileSchema.safeParse({ ...file({ code: 'X', names: { ru: 'x' } }), status: 'draft' }).success).toBe(
+      false,
+    );
+    expect(referenceFileSchema.safeParse({ ...file({}), entries: [] }).success).toBe(false);
+    expect(REFERENCE_DATA_STATUSES).toEqual(['specification', 'imbc', 'provisional']);
+  });
+
+  it('referenceFileSchema: порядок значения — не больше DICTIONARY_SORT_ORDER_MAX, как в форме правки: значение из файла сохраняется из формы без смены порядка (ADM-08)', () => {
+    const withOrder = (sortOrder: number) => file({ code: '0101210000', names: { ru: 'Лошади' }, sortOrder });
+    expect(referenceFileSchema.safeParse(withOrder(DICTIONARY_SORT_ORDER_MAX)).success).toBe(true);
+    expect(referenceFileSchema.safeParse(withOrder(DICTIONARY_SORT_ORDER_MAX + 1)).success).toBe(false);
+    expect(referenceFileSchema.safeParse(withOrder(-1)).success).toBe(false);
+    const names = { kk: 'Жылқы', ru: 'Лошади', en: 'Horses' };
+    expect(updateDictionaryEntrySchema.safeParse({ names, sortOrder: DICTIONARY_SORT_ORDER_MAX }).success).toBe(true);
+    expect(updateDictionaryEntrySchema.safeParse({ names, sortOrder: DICTIONARY_SORT_ORDER_MAX + 1 }).success).toBe(
+      false,
+    );
+  });
+
+  it('entryDisplayName: язык → kk → ru → en → код', () => {
+    const all = { kk: 'Қазақша', ru: 'Русский', en: 'English' };
+    expect(entryDisplayName(all, 'en', 'X')).toBe('English');
+    expect(entryDisplayName(all, 'ru', 'X')).toBe('Русский');
+    expect(entryDisplayName({ ru: 'Русский', en: 'English' }, 'en', 'X')).toBe('English');
+    // Нет названия на языке пользователя — kk, затем ru, затем en.
+    expect(entryDisplayName({ kk: 'Қазақша', ru: 'Русский' }, 'en', 'X')).toBe('Қазақша');
+    expect(entryDisplayName({ ru: 'Русский', en: 'English' }, 'kk', 'X')).toBe('Русский');
+    expect(entryDisplayName({ en: 'English' }, 'kk', 'X')).toBe('English');
+    // Пустое и null — не название.
+    expect(entryDisplayName({ kk: null, ru: '', en: 'English' }, 'ru', 'X')).toBe('English');
+    // Названий нет — код как есть, ведущие нули на месте.
+    expect(entryDisplayName({}, 'ru', '0101210000')).toBe('0101210000');
+    expect(entryDisplayName({ kk: null, ru: null, en: null }, 'kk', 'ISO 9001')).toBe('ISO 9001');
+  });
+
+  it('закрытые справочники = COMMODITY_GROUPS и CONTACT_ROLES; шаблон tn_ved принимает 0101210000 и отклоняет 101210000', () => {
+    expect(CLOSED_DICTIONARIES).toEqual(['commodity_group', 'contact_role']);
+    expect(MANDATORY_DICTIONARIES).toEqual(['certificate_type', 'document_type']);
+    expect(DICTIONARY_PARENT).toEqual({ commodity_type: 'commodity_group' });
+
+    // Коды закрытых справочников задаёт спецификация (MAN-23, MAN-13): шаблон принимает ровно их.
+    for (const group of COMMODITY_GROUPS) expect(DICTIONARY_CODE_PATTERNS.commodity_group.test(group)).toBe(true);
+    for (const bad of ['F', 'a', 'AB', '', ' A'])
+      expect(DICTIONARY_CODE_PATTERNS.commodity_group.test(bad), bad).toBe(false);
+    for (const role of CONTACT_ROLES) expect(DICTIONARY_CODE_PATTERNS.contact_role.test(role)).toBe(true);
+
+    // Шаблон есть у каждого справочника.
+    for (const code of DICTIONARY_CODES) expect(DICTIONARY_CODE_PATTERNS[code]).toBeInstanceOf(RegExp);
+    // MAN-25: ТН ВЭД — десять цифр, ведущий ноль не теряется.
+    expect(DICTIONARY_CODE_PATTERNS.tn_ved.test('0101210000')).toBe(true);
+    expect(DICTIONARY_CODE_PATTERNS.tn_ved.test('101210000')).toBe(false);
+    expect(DICTIONARY_CODE_PATTERNS.tn_ved.test('01012100001')).toBe(false);
+    expect(DICTIONARY_CODE_PATTERNS.oked.test('01110')).toBe(true);
+    expect(DICTIONARY_CODE_PATTERNS.oked.test('1110')).toBe(false);
+    for (const good of ['25.11.23', '01', '01.1', '28.13.14'])
+      expect(DICTIONARY_CODE_PATTERNS.kpved.test(good)).toBe(true);
+    for (const bad of ['1.1', '25.', '25.11.', '25-11'])
+      expect(DICTIONARY_CODE_PATTERNS.kpved.test(bad), bad).toBe(false);
+
+    // Остальные: латинские буквы, цифры, пробел и ._-/, 1–64 символа, без пробела по краям.
+    const generic = [
+      'region',
+      'legal_form',
+      'commodity_type',
+      'process',
+      'equipment_type',
+      'contact_role',
+      'certificate_type',
+      'document_type',
+    ] as const;
+    for (const dictionary of generic) {
+      const pattern = DICTIONARY_CODE_PATTERNS[dictionary];
+      const good = [
+        'KZ-AKT',
+        'ISO 9001',
+        'API Q1',
+        'LLP',
+        'Extract from e-Ondiris',
+        'registration_certificate',
+        'A/B.c-d_e',
+      ];
+      for (const code of good) expect(pattern.test(code), `${dictionary}: ${code}`).toBe(true);
+      // Код — устойчивый идентификатор, не название: кириллица и прочие буквы Unicode не допускаются
+      // (в базе с локалью C lower() не меняет их регистр, а уникальность держится на lower(code)).
+      for (const code of ['ЖШС', 'é', 'Ж', 'ISO 9001ё', 'ТОО'])
+        expect(pattern.test(code), `${dictionary}: ${code}`).toBe(false);
+      for (const code of ['', ' ISO', 'ISO ', 'a;b', 'a,b', 'a\nb', 'x'.repeat(65)])
+        expect(pattern.test(code), `${dictionary}: ${JSON.stringify(code)}`).toBe(false);
+    }
+    expect(DICTIONARY_CODE_PATTERNS.region.test('x'.repeat(64))).toBe(true);
+  });
+});
+
+describe('API справочников: формы, страницы, коды ошибок (ADM-08, ADM-09, DATA-03, DATA-04)', () => {
+  const names = { kk: 'Атауы', ru: 'Название', en: 'Name' };
+
+  it('createDictionaryEntrySchema: без любого из трёх названий — отклоняется; код — строка', () => {
+    expect(createDictionaryEntrySchema.parse({ code: ' 0101210000 ', names })).toEqual({
+      code: '0101210000',
+      parentCode: null,
+      names,
+    });
+    // Форма администратора требует все три языка (расхождение 6 плана этапа 2).
+    for (const locale of ['kk', 'ru', 'en'] as const) {
+      const { [locale]: _, ...rest } = names;
+      expect(createDictionaryEntrySchema.safeParse({ code: 'X', names: rest }).success, locale).toBe(false);
+      expect(
+        createDictionaryEntrySchema.safeParse({ code: 'X', names: { ...names, [locale]: '  ' } }).success,
+        locale,
+      ).toBe(false);
+    }
+    // Код — только строка: число теряет ведущие нули (DATA-03).
+    expect(createDictionaryEntrySchema.safeParse({ code: 101210000, names }).success).toBe(false);
+    expect(createDictionaryEntrySchema.safeParse({ code: '   ', names }).success).toBe(false);
+    expect(createDictionaryEntrySchema.safeParse({ code: 'x'.repeat(65), names }).success).toBe(false);
+    // Порядка в форме создания нет: значение встаёт в конец списка; лишний ключ — отказ.
+    expect(createDictionaryEntrySchema.safeParse({ code: 'X', names, sortOrder: 0 }).success).toBe(false);
+    expect(createDictionaryEntrySchema.parse({ code: 'X', names, mandatory: true, parentCode: ' A ' })).toEqual({
+      code: 'X',
+      names,
+      mandatory: true,
+      parentCode: 'A',
+    });
+  });
+
+  it('правка, обязательность и запросы страниц: границы и значения по умолчанию', () => {
+    expect(updateDictionaryEntrySchema.parse({ names, sortOrder: 3 })).toEqual({
+      names,
+      sortOrder: 3,
+      parentCode: null,
+    });
+    for (const sortOrder of [-1, 1.5, 100001, '3'])
+      expect(updateDictionaryEntrySchema.safeParse({ names, sortOrder }).success, String(sortOrder)).toBe(false);
+    // Код не меняется: его нет в форме правки.
+    expect(updateDictionaryEntrySchema.safeParse({ names, sortOrder: 0, code: 'Y' }).success).toBe(false);
+    expect(entryMandatorySchema.safeParse({ mandatory: 'yes' }).success).toBe(false);
+
+    expect(DICTIONARY_ENTRY_STATUSES).toEqual(['active', 'retired', 'all']);
+    expect(dictionaryEntriesQuerySchema.parse({})).toEqual({ q: '', status: 'active', page: 1, pageSize: 50 });
+    // Query приходит строками.
+    expect(dictionaryEntriesQuerySchema.parse({ q: ' 0101 ', status: 'all', page: '3', pageSize: '100' })).toEqual({
+      q: '0101',
+      status: 'all',
+      page: 3,
+      pageSize: 100,
+    });
+    for (const bad of [{ page: '0' }, { pageSize: '9' }, { pageSize: '101' }, { status: 'deleted' }, { sort: 'code' }])
+      expect(dictionaryEntriesQuerySchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    expect(dictionaryChoicesQuerySchema.parse({})).toEqual({ q: '', lang: 'kk', page: 1, pageSize: 50 });
+    expect(dictionaryChoicesQuerySchema.safeParse({ lang: 'de' }).success).toBe(false);
+    expect(dictionaryChoicesQuerySchema.safeParse({ q: 'x'.repeat(101) }).success).toBe(false);
+  });
+
+  it('REFERENCE_PROBLEM_CODES без повторов', () => {
+    expect(new Set(REFERENCE_PROBLEM_CODES).size).toBe(REFERENCE_PROBLEM_CODES.length);
+    for (const code of REFERENCE_PROBLEM_CODES) expect(code).toMatch(/^[a-z]+(_[a-z]+)*$/);
   });
 });
 

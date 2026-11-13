@@ -48,4 +48,27 @@ describe('clamd INSTREAM', () => {
       signature: 'Eicar-Test-Signature',
     });
   });
+
+  // Ответ clamd, кроме OK и FOUND, — ошибка задания, никогда не «прошёл» (DATA-07).
+  it.each([
+    'INSTREAM size limit exceeded. ERROR\0',
+    "stream: Can't allocate memory ERROR\0",
+    'UNKNOWN COMMAND\0',
+    '\0',
+    '',
+  ])('ответ %j — ошибка, не «чистый»', async (reply) => {
+    server = createServer((socket) => socket.end(reply));
+    await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    await expect(scanStream('127.0.0.1', port, Readable.from([Buffer.from('%PDF-1.7')]))).rejects.toThrow();
+  });
+
+  it('clamd недоступен — ошибка', async () => {
+    server = createServer();
+    await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    await new Promise<void>((resolve) => server!.close(() => resolve()));
+    server = undefined;
+    await expect(scanStream('127.0.0.1', port, Readable.from([Buffer.from('%PDF-1.7')]))).rejects.toThrow();
+  });
 });

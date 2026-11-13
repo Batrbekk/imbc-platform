@@ -2,6 +2,7 @@
 // (REV-05, REV-06, REV-08), due diligence (IMBC-07, IMBC-08, IMBC-11, IMBC-13), site survey (IMBC-01, IMBC-02,
 // IMBC-20), тиры, AGAR и CDP (IMBC-21, IMBC-23, IMBC-24), внешние проверки (EXT-01, EXT-04), заметки IMBC
 // (IMBC-15), операторы (IMBC-16, IMBC-18, OPR-22). Части досье — из кабинета SME с `readOnly`. Вкладка — в адресе.
+import { cn } from "cn";
 import type { ReactNode } from "react";
 import { Link, useParams } from "react-router";
 
@@ -49,7 +50,7 @@ export function DossierScreen() {
             <EmptyTitle>{t("profileNotFound")}</EmptyTitle>
             <EmptyDescription>{t("profileNotFoundHint")}</EmptyDescription>
           </EmptyHeader>
-          <Link className={buttonVariants({ variant: "outline" })} to={directorPath("profiles")}>
+          <Link className={cn(buttonVariants({ variant: "outline" }))} to={directorPath("profiles")}>
             {t("backToProfiles")}
           </Link>
         </Empty>
@@ -71,7 +72,7 @@ export function DossierScreen() {
         </>
       }
       actions={
-        <Link className={buttonVariants({ variant: "outline" })} to={directorPath("profiles")}>
+        <Link className={cn(buttonVariants({ variant: "outline" }))} to={directorPath("profiles")}>
           {t("backToProfiles")}
         </Link>
       }
@@ -156,7 +157,7 @@ export function DossierScreen() {
           <div className="flex flex-col gap-4">
             <div>
               <Link
-                className={buttonVariants({ variant: "outline", size: "sm" })}
+                className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
                 to={`${directorPath("operators")}?q=${encodeURIComponent(profile.nameRu)}`}
               >
                 {t("toOperators")}

@@ -1,5 +1,6 @@
 // Запросы производителей в списке SME: site survey (без продукта, без письма) и AGAR на продукт со STR; запрос
 // не создаёт запись и не начинает визит — SME решает, браться ли (IMBC-20, IMBC-24, IMBC-25).
+import { cn } from "cn";
 import { Link } from "react-router";
 
 import { Badge } from "@/components/ui/badge";
@@ -73,7 +74,7 @@ export function ManufacturerRequestsScreen() {
                       <TableCell>
                         <span className="flex flex-wrap gap-2">
                           <Link
-                            className={buttonVariants({ variant: "outline", size: "sm" })}
+                            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
                             to={dossierPath(r.profileId, "site-survey")}
                           >
                             {t("openSurvey")}
@@ -128,7 +129,7 @@ export function ManufacturerRequestsScreen() {
                         </TableCell>
                         <TableCell>
                           <Link
-                            className={buttonVariants({ variant: "outline", size: "sm" })}
+                            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
                             to={dossierPath(r.profileId, "tiers")}
                           >
                             {t("openTiers")}

@@ -1,11 +1,12 @@
-import { S3Client } from '@aws-sdk/client-s3';
+import type { S3Client } from '@aws-sdk/client-s3';
 import { Global, Inject, Logger, Module, type OnApplicationShutdown, type OnModuleInit } from '@nestjs/common';
 import { Redis } from 'ioredis';
 import nodemailer, { type Transporter } from 'nodemailer';
 import { PgBoss } from 'pg-boss';
 import { ENV, type Env } from '../config/env.js';
 import { databaseErrorSummary } from '../database/pg-errors.js';
-import { ADATA_QUEUE_OPTIONS, QUEUES } from '../jobs/queues.js';
+import { ADATA_QUEUE_OPTIONS, FILE_SCAN_QUEUE_OPTIONS, NOTIFY_QUEUE_OPTIONS, QUEUES } from '../jobs/queues.js';
+import { createS3Client, OBJECT_STORAGE, S3ObjectStorage } from '../modules/files/object-storage.js';
 
 export const VALKEY = Symbol('VALKEY');
 export const S3 = Symbol('S3');
@@ -39,18 +40,28 @@ export function logQueueError(logger: Pick<Logger, 'error'>, error: unknown): vo
     {
       provide: S3,
       inject: [ENV],
+      // Сроки соединения, простоя сокета и запроса — S3_TIMEOUTS: зависший RustFS не держит API и worker.
       useFactory: (env: Env) =>
-        new S3Client({
+        createS3Client({
           endpoint: env.S3_ENDPOINT,
           region: env.S3_REGION,
-          forcePathStyle: true,
-          credentials: { accessKeyId: env.S3_ACCESS_KEY, secretAccessKey: env.S3_SECRET_KEY },
+          accessKeyId: env.S3_ACCESS_KEY,
+          secretAccessKey: env.S3_SECRET_KEY,
         }),
     },
+    // Байты файлов — только через этот интерфейс: карантин, рабочий бакет, без presigned URL (NFR-09).
+    { provide: OBJECT_STORAGE, inject: [S3], useFactory: (s3: S3Client) => new S3ObjectStorage(s3) },
     {
       provide: MAILER,
       inject: [ENV],
-      useFactory: (env: Env): Transporter => nodemailer.createTransport(env.SMTP_URL),
+      // Зависший SMTP не держит транзакцию журнала письма и соединение БД дольше этих сроков (NOT-18).
+      useFactory: (env: Env): Transporter =>
+        nodemailer.createTransport({
+          url: env.SMTP_URL,
+          connectionTimeout: 10_000,
+          greetingTimeout: 10_000,
+          socketTimeout: 30_000,
+        }),
     },
     {
       provide: QUEUE,
@@ -66,7 +77,7 @@ export function logQueueError(logger: Pick<Logger, 'error'>, error: unknown): vo
         }),
     },
   ],
-  exports: [VALKEY, S3, MAILER, QUEUE],
+  exports: [VALKEY, S3, OBJECT_STORAGE, MAILER, QUEUE],
 })
 export class InfraModule implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(InfraModule.name);
@@ -94,6 +105,10 @@ export class InfraModule implements OnModuleInit, OnApplicationShutdown {
     await this.queue.createQueue(QUEUES.adataPrefill, ADATA_QUEUE_OPTIONS);
     // Действия администратора ставят identity-sync в своей транзакции (ADM-02, ADM-05); повторы — как у worker.
     await this.queue.createQueue(QUEUES.identitySync, { retryLimit: 5, retryDelay: 30, retryBackoff: true });
+    // Загрузка ставит проверку файла в своей транзакции (DATA-07) — до старта worker.
+    await this.queue.createQueue(QUEUES.fileScan, FILE_SCAN_QUEUE_OPTIONS);
+    // Письма событий ставятся в транзакции события (раздел 8.2) — до старта worker.
+    await this.queue.createQueue(QUEUES.notify, NOTIFY_QUEUE_OPTIONS);
     await this.valkey.connect().catch((error: unknown) => this.logger.warn(`Valkey недоступен: ${String(error)}`));
   }
 

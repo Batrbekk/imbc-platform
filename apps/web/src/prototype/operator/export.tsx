@@ -1,6 +1,7 @@
 // Выгрузка текущего поиска: колонки раздела 9.2, формат, файл из демо-данных, история своей организации.
 // OPR-05, OPR-14, OPR-24, DATA-09, DATA-10, DATA-11, DATA-12, DATA-13, AUD-01, GEN-12.
 import { COMMODITY_GROUPS, PROFILE_TIERS } from "@imbc/contracts";
+import { cn } from "cn";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
@@ -285,7 +286,7 @@ export function ExportScreen() {
             {t("build")}
           </Button>
           <Link
-            className={buttonVariants({ variant: "outline" })}
+            className={cn(buttonVariants({ variant: "outline" }))}
             to={`${protoPath("operator", "subscriptions")}${filtersString ? `?${filtersString}` : ""}`}
           >
             {t("subscribe")}

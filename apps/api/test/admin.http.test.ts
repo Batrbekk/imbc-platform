@@ -281,6 +281,8 @@ describe('действия администратора: организации,
 describe('коды ошибок маршрутов администратора — контракт (ADMIN_PROBLEM_CODES)', () => {
   // Сервисы, контроллеры, guard и поток Keycloak, через которые проходят маршруты администратора и список аккаунтов.
   const SOURCES = [
+    // Транзакция исполнителя (lockActor, notFound, busy) — общая с маршрутами справочников с этапа 2.
+    '../src/common/actor-transaction.ts',
     '../src/modules/admin/organizations.service.ts',
     '../src/modules/admin/invitations.service.ts',
     '../src/modules/admin/account-lifecycle.service.ts',

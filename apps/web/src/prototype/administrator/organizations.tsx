@@ -382,7 +382,7 @@ function ManufacturerAccounts({ organizations }: { organizations: ProtoOrganizat
         <CardDescription>{t("manufacturersDescription")}</CardDescription>
         <CardAction>
           <Link
-            className={buttonVariants({ variant: "outline", size: "sm" })}
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
             to={protoPath("administrator", "migration")}
           >
             {t("inviteMigrated")}

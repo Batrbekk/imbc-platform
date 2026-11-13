@@ -208,7 +208,6 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     return new JobHandlers(
       db,
       {} as never,
-      {} as never,
       env,
       audit,
       {
@@ -224,6 +223,8 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
       } as never,
       sessions,
       service as ManufacturerOnboardingService,
+      {} as never,
+      {} as never,
     );
   }
 
@@ -391,10 +392,16 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
       }),
     };
     const now = Date.now();
+    // Блокировка входа ставит задание письма NOT-03 — последним, после отзывов и чтений.
+    const queue = {
+      send: vi.fn(async (name: string) => {
+        order.push(name);
+        return null;
+      }),
+    };
     const worker = new JobHandlers(
       db,
       {} as never,
-      { sendRaw: vi.fn(async () => void order.push('mail')) } as never,
       env,
       audit,
       {
@@ -417,6 +424,8 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
       } as never,
       sessions,
       adata as never,
+      pool,
+      queue as never,
     );
     try {
       await worker.keycloakEvents();
@@ -428,7 +437,7 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
       `revoke:${b.account.idpSubject}`,
       `adata:${a.account.id}`,
       `adata:${b.account.id}`,
-      'mail',
+      QUEUES.notify,
     ]);
   });
 

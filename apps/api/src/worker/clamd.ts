@@ -4,10 +4,22 @@ import type { Readable } from 'node:stream';
 export type ScanVerdict = { clean: true } | { clean: false; signature: string };
 
 /**
+ * Простой сокета clamd, после которого клиент обрывает проверку (мс). Заметно больше `MaxScanTime` clamd
+ * (120 000 мс, infrastructure/clamav/clamd.conf): долгий скан первым завершает clamd — ответом
+ * `Heuristics.Limits.Exceeded…` FOUND, то есть решением (DATA-07); обрыв клиентом — только ошибка задания и повтор.
+ */
+export const CLAMD_CLIENT_TIMEOUT_MS = 180_000;
+
+/**
  * Минимальный клиент clamd (протокол INSTREAM): файл передаётся кусками
  * «4 байта длины + данные», нулевой кусок завершает поток.
  */
-export function scanStream(host: string, port: number, body: Readable, timeoutMs = 120_000): Promise<ScanVerdict> {
+export function scanStream(
+  host: string,
+  port: number,
+  body: Readable,
+  timeoutMs = CLAMD_CLIENT_TIMEOUT_MS,
+): Promise<ScanVerdict> {
   return new Promise((resolve, reject) => {
     const socket = connect({ host, port });
     const chunks: Buffer[] = [];

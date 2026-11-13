@@ -112,7 +112,7 @@ UI components: only `@/components/ui/*` (tabs, progress, switch, radio-group, ac
 
 ## Rules for a module
 
-Only your directory and your tests. No `/api/v1`. Every screen inside `ProtoPage`; a comment at the top of each screen file lists the requirement IDs it shows (they must exist: `pnpm check:requirements`). Dates and numbers through `useFormat`. Links styled as buttons: `<Link className={buttonVariants()} to={…}>`. Distinguish "empty" from other states. No horizontal page scroll at 1280 and 390 px. Show exactly what the role may see (section 4 table): observer — no focal point, no actions; operator — nothing of another operator; manufacturer — never which operator asked; administrator — no profile data; director — reads everything, changes nothing.
+Only your directory and your tests. No `/api/v1`. Every screen inside `ProtoPage`; a comment at the top of each screen file lists the requirement IDs it shows (they must exist: `pnpm check:requirements`). Dates and numbers through `useFormat`. Links styled as buttons: `<Link className={cn(buttonVariants())} to={…}>` (`cn` from `"cn"`: without it the outline variant loses its border). Distinguish "empty" from other states. No horizontal page scroll at 1280 and 390 px. Show exactly what the role may see (section 4 table): observer — no focal point, no actions; operator — nothing of another operator; manufacturer — never which operator asked; administrator — no profile data; director — reads everything, changes nothing.
 
 ## Tests (`test/prototype/support.tsx`)
 

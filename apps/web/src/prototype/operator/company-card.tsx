@@ -1,5 +1,6 @@
 // Карточка работы с компанией: тир и продукты tier 3, отметки works-with и визита, заметки организации.
 // OPR-10, OPR-12, OPR-19, OPR-20, OPR-21, OPR-22, OPR-23, IMBC-04, IMBC-21, IMBC-22, GEN-12.
+import { cn } from "cn";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 
@@ -57,13 +58,13 @@ function CompanyCard({ profileId }: { profileId: string }) {
       actions={
         <>
           <Link
-            className={buttonVariants({ variant: "outline" })}
+            className={cn(buttonVariants({ variant: "outline" }))}
             to={`${protoPath("operator", "requests")}?tab=operator&profile=${profile.id}`}
           >
             {t("askManufacturer")}
           </Link>
           <Link
-            className={buttonVariants({ variant: "outline" })}
+            className={cn(buttonVariants({ variant: "outline" }))}
             to={`${protoPath("operator", "requests")}?tab=imbc&profile=${profile.id}`}
           >
             {t("askImbc")}
@@ -72,7 +73,10 @@ function CompanyCard({ profileId }: { profileId: string }) {
       }
     >
       <div>
-        <Link className={buttonVariants({ variant: "ghost", size: "sm" })} to={protoPath("operator", "manufacturers")}>
+        <Link
+          className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+          to={protoPath("operator", "manufacturers")}
+        >
           ← {t("back")}
         </Link>
       </div>

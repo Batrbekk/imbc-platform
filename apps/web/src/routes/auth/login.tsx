@@ -1,4 +1,5 @@
 import { DEFAULT_LOCALE } from "@imbc/contracts";
+import { cn } from "cn";
 import { ArrowRightIcon } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { Link, useSearchParams } from "react-router";
@@ -60,7 +61,10 @@ export function LoginPage() {
           <AlertDescription>{t(`errors.${known}`)}</AlertDescription>
         </Alert>
       )}
-      <a className={buttonVariants({ size: "lg", className: "w-full" })} href={loginUrl(state.target, locale, "login")}>
+      <a
+        className={cn(buttonVariants({ size: "lg", className: "w-full" }))}
+        href={loginUrl(state.target, locale, "login")}
+      >
         {t(signedOut ? "signInAgain" : known === "no_account" ? "useAnotherEmail" : "button")}
         <ArrowRightIcon className="size-4" />
       </a>

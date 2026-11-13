@@ -1,0 +1,12 @@
+{
+  "dictionary": "commodity_group",
+  "status": "specification",
+  "source": "MAN-23, OPR-02: группы A–E; названия временные",
+  "entries": [
+    { "code": "A", "names": { "kk": "A тобы", "ru": "Группа A", "en": "Group A" }, "sortOrder": 0 },
+    { "code": "B", "names": { "kk": "B тобы", "ru": "Группа B", "en": "Group B" }, "sortOrder": 1 },
+    { "code": "C", "names": { "kk": "C тобы", "ru": "Группа C", "en": "Group C" }, "sortOrder": 2 },
+    { "code": "D", "names": { "kk": "D тобы", "ru": "Группа D", "en": "Group D" }, "sortOrder": 3 },
+    { "code": "E", "names": { "kk": "E тобы", "ru": "Группа E", "en": "Group E" }, "sortOrder": 4 }
+  ]
+}

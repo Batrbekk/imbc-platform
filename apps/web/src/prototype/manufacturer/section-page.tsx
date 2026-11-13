@@ -1,6 +1,7 @@
 // Секция профиля на своём адресе: форма, полнота, статус, комментарий SME, блокировка.
 // MAN-40, MAN-41, MAN-43, MAN-44, MAN-45, MAN-46, REV-07.
 import type { ProfileSection } from "@imbc/contracts";
+import { cn } from "cn";
 import { ArrowLeftIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link, useParams } from "react-router";
@@ -34,7 +35,7 @@ export function SectionPage() {
   const back = (
     <div>
       <Link
-        className={buttonVariants({ variant: "ghost", size: "sm" })}
+        className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
         to={withViewAs(protoPath("manufacturer", "profile"))}
       >
         <ArrowLeftIcon />

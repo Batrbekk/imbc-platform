@@ -1,0 +1,11 @@
+{
+  "dictionary": "tn_ved",
+  "status": "provisional",
+  "source": "прототип data/references.ts; ждёт перечня IMBC",
+  "entries": [
+    { "code": "7308909809", "names": { "ru": "Конструкции из чёрных металлов прочие" }, "sortOrder": 0 },
+    { "code": "8481805190", "names": { "ru": "Краны шаровые" }, "sortOrder": 1 },
+    { "code": "8413702100", "names": { "ru": "Насосы центробежные" }, "sortOrder": 2 },
+    { "code": "8544499108", "names": { "ru": "Проводники электрические прочие" }, "sortOrder": 3 }
+  ]
+}

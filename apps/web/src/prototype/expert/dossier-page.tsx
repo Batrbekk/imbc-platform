@@ -1,6 +1,7 @@
 // Досье профиля для SME — центральный экран кабинета: секции и решения (REV-02, REV-05…REV-09), due diligence
 // (IMBC-07…IMBC-14), site survey (IMBC-01…IMBC-04), тиры и AGAR (IMBC-19…IMBC-26), внешние проверки (EXT-01…EXT-04),
 // заметки IMBC (IMBC-15), операторы (IMBC-16, IMBC-18). Вкладка — в адресе (`?tab=`), не в хранилище.
+import { cn } from "cn";
 import { useEffect } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 
@@ -66,7 +67,7 @@ export function DossierScreen() {
             <EmptyTitle>{t("profileNotFound")}</EmptyTitle>
             <EmptyDescription>{t("profileNotFoundHint")}</EmptyDescription>
           </EmptyHeader>
-          <Link className={buttonVariants({ variant: "outline" })} to={expertPath("profiles")}>
+          <Link className={cn(buttonVariants({ variant: "outline" }))} to={expertPath("profiles")}>
             {t("backToProfiles")}
           </Link>
         </Empty>
@@ -95,7 +96,7 @@ export function DossierScreen() {
       description={t("dossierHint", { bin: profile.bin, name: profile.nameEn })}
       actions={
         <>
-          <Link className={buttonVariants({ variant: "outline" })} to={expertPath("profiles")}>
+          <Link className={cn(buttonVariants({ variant: "outline" }))} to={expertPath("profiles")}>
             {t("backToProfiles")}
           </Link>
           {canTake && <Button onClick={take}>{t("take")}</Button>}

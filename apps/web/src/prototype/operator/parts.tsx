@@ -1,4 +1,5 @@
 // Мелкие общие части экранов оператора: строка списка определений и «не найдено».
+import { cn } from "cn";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 
@@ -25,7 +26,7 @@ export function NotFound({ text, backLabel, backTo }: { text: string; backLabel:
         <EmptyDescription>{text}</EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
-        <Link className={buttonVariants({ variant: "outline" })} to={backTo}>
+        <Link className={cn(buttonVariants({ variant: "outline" }))} to={backTo}>
           {backLabel}
         </Link>
       </EmptyContent>

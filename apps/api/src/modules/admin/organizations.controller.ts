@@ -2,20 +2,11 @@ import { createOrganizationSchema, imbcMailboxSchema, majorOperatorSchema } from
 import { Body, Controller, HttpCode, Param, Post, Put, Req } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
-import { isIP } from 'node:net';
+import { auditIp } from '../../common/audit-ip.js';
 import { parseOrThrow } from '../../common/problem.js';
 import { Auth, Can } from '../auth/guards.js';
 import type { AuthContext } from '../auth/auth.types.js';
 import { OrganizationsService } from './organizations.service.js';
-
-/**
- * Адрес запроса администратора — только для колонки `audit_entries.ip` (AUD-01): `req.ip` за прокси,
- * без адреса, который не примет `inet`. В журнал запросов, тексты ошибок и `diff` не попадает.
- */
-export function auditIp(req: Request): string | null {
-  const ip = req.ip;
-  return ip && isIP(ip) !== 0 && !ip.includes('%') ? ip : null;
-}
 
 /** Организации операторов и наблюдателей, отметка major operator, ящик IMBC (ADM-03, GEN-05, раздел 8.2). */
 @ApiTags('admin')
