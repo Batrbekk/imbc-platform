@@ -8,7 +8,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "cn";
 import { DownloadIcon, UploadIcon } from "lucide-react";
-import { type ChangeEvent, useRef, useState } from "react";
+import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -20,7 +20,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { type AppFormat, useFormat } from "@/i18n/format";
 import { api } from "@/lib/api";
 
-import { useAdminAction } from "./admin-actions";
+import { useAdminAction, useAnnounce } from "./admin-actions";
 import { ORG_CHART_SAMPLE_KEY, useReferenceProblemMessage } from "./references-actions";
 
 /** Пока последняя загрузка на проверке антивирусом, состояние перечитывается каждые 5 секунд (DATA-07). */
@@ -49,6 +49,7 @@ export function OrgChartSampleCard({ canManage }: { canManage: boolean }) {
   const common = useTranslations("common");
   const format = useFormat();
   const problem = useReferenceProblemMessage();
+  const announce = useAnnounce();
   const picker = useRef<HTMLInputElement>(null);
   // Отказ до отправки (файл больше предела): сервер сказал бы то же, но без лишнего ожидания.
   const [tooLarge, setTooLarge] = useState(false);
@@ -86,6 +87,29 @@ export function OrgChartSampleCard({ canManage }: { canManage: boolean }) {
   const failure = tooLarge ? t("errors.file_too_large") : upload.isError ? problem(upload.error) : null;
   const current = state.data?.current ?? null;
   const latest = state.data?.latest ?? null;
+
+  // Проверка закончилась, пока страница открыта: строка итога объявляет результат, а не остаётся на «проверяется».
+  // Переход виден по ответу опроса: `pending` → последней загрузки нет, а текущий образец сменился (прошла проверку
+  // и стала текущим) или `pending` → `rejected` (не прошла; текущий прежний). Первый ответ при открытии страницы
+  // ничего не объявляет: человек не ждал этого результата. Прежнее значение — в `watched`, а не в состоянии:
+  // повторный запуск эффекта с тем же ответом ничего не объявит второй раз.
+  const watched = useRef<{ pendingId: string | null; currentId: string | null } | null>(null);
+  useEffect(() => {
+    const data = state.data;
+    if (!data) return;
+    const before = watched.current;
+    watched.current = {
+      pendingId: data.latest?.scanState === "pending" ? data.latest.fileId : null,
+      currentId: data.current?.fileId ?? null,
+    };
+    if (!before?.pendingId) return;
+    if (data.latest?.scanState === "rejected") {
+      const kept = data.current ? ` ${t("sample.keptCurrent")}` : "";
+      announce({ tone: "error", text: `${t("sample.checkRejected")}${kept}` });
+    } else if (data.latest === null && data.current && data.current.fileId !== before.currentId) {
+      announce({ tone: "success", text: t("sample.checkPassed") });
+    }
+  }, [state.data, announce, t]);
 
   return (
     <Card className="@container">
@@ -150,7 +174,7 @@ export function OrgChartSampleCard({ canManage }: { canManage: boolean }) {
           </div>
         )}
 
-        {latest && <LatestUpload file={latest} hasCurrent={current !== null} />}
+        {latest && <LatestUpload file={latest} hasCurrent={current !== null} canManage={canManage} />}
         {failure && (
           <Alert variant="destructive">
             <AlertDescription>{failure}</AlertDescription>
@@ -190,7 +214,15 @@ function CurrentSample({ file, format }: { file: OrgChartSampleFile; format: App
  * Последняя загрузка, которая не стала текущей: на проверке («Проверяется антивирусом») или не прошла её
  * («Не прошёл проверку»). Область — role=status: смена состояния читается программой чтения с экрана.
  */
-function LatestUpload({ file, hasCurrent }: { file: OrgChartSampleFile; hasCurrent: boolean }) {
+function LatestUpload({
+  file,
+  hasCurrent,
+  canManage,
+}: {
+  file: OrgChartSampleFile;
+  hasCurrent: boolean;
+  canManage: boolean;
+}) {
   const t = useTranslations("references.sample");
   const pending = file.scanState === "pending";
   return (
@@ -208,12 +240,19 @@ function LatestUpload({ file, hasCurrent }: { file: OrgChartSampleFile; hasCurre
       </div>
       <div className="flex flex-col gap-0.5 text-muted-foreground">
         {pending ? (
-          <p>{hasCurrent ? t("pendingHint") : t("pendingFirstHint")}</p>
-        ) : (
+          <>
+            {/* Проверка может идти дольше минуты: человек знает, что ждать и что страницу можно закрыть. */}
+            <p>{t("pendingDuration")}</p>
+            <p>{hasCurrent ? t("pendingHint") : t("pendingFirstHint")}</p>
+          </>
+        ) : canManage ? (
           <>
             <p>{t("rejectedHint")}</p>
             {hasCurrent && <p>{t("keptCurrent")}</p>}
           </>
+        ) : (
+          // Тому, кто загружать не может, «Загрузите другой» ни к чему: файл не принят, текущий образец прежний.
+          <p>{hasCurrent ? `${t("rejectedPlain")} ${t("keptCurrent")}` : t("rejectedPlain")}</p>
         )}
       </div>
     </div>

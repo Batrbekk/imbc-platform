@@ -159,7 +159,11 @@ describe("страница компании (OPR-09, OPR-10)", () => {
     expect(await screen.findByText(en.company.notFound)).toBeTruthy();
     const page = within(screen.getByRole("main"));
     expect(page.getByRole("link", { name: en.company.back }).getAttribute("href")).toBe("/catalog");
-    expect(page.getByRole("link", { name: en.nav.catalog }).getAttribute("href")).toBe("/catalog");
+    const toCatalog = page.getByRole("link", { name: en.nav.catalog });
+    expect(toCatalog.getAttribute("href")).toBe("/catalog");
+    // Ссылка-кнопка outline с рамкой: прозрачной рамки в строке классов нет.
+    expect(toCatalog.className.split(/\s+/)).not.toContain("border-transparent");
+    expect(toCatalog.className.split(/\s+/)).toContain("border-border");
     expect(screen.queryByRole("button", { name: en.common.retry })).toBeNull();
     cleanup();
 

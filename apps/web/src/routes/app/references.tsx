@@ -93,11 +93,13 @@ function ReferenceListCard({ canManage }: { canManage: boolean }) {
   // Каждое изменение — новый адрес (history: push): «Назад» возвращает прежний справочник, поиск, вкладку.
   // shallow: false — адаптер nuqs сообщает адрес и роутеру: возврат после истёкшего сеанса сохранит страницу.
   const [params, setParams] = useQueryStates(referencesParsers, { history: "push", shallow: false });
-  // Поля показывают состояние nuqs сразу, а запрос строится из записанного адреса: ввод с задержкой 350 мс
-  // даёт один запрос, и он совпадает с адресом, который вернёт returnTo.
+  // Поля ввода и выбор справочника показывают состояние nuqs сразу, а запрос строится из записанного адреса: ввод
+  // с задержкой 350 мс даёт один запрос, и он совпадает с адресом, который вернёт returnTo. Всё, что описывает
+  // показанные значения (название, подсказка, колонки, действия), берётся из того же адреса, что и значения:
+  // между выбором справочника и записью адреса таблица не показывает строки прежнего справочника с колонками нового.
   const { search } = useLocation();
   const applied = loadReferences(search);
-  const list = params.list;
+  const list = applied.list;
   const closed = isClosedDictionary(list);
   const mandatory = hasMandatoryMark(list);
   const listName = t(`list.${list}`);
@@ -155,7 +157,7 @@ function ReferenceListCard({ canManage }: { canManage: boolean }) {
               </FieldLabel>
               <Select
                 items={items}
-                value={list}
+                value={params.list}
                 onValueChange={(value) => {
                   const code = DICTIONARY_CODES.find((candidate) => candidate === value);
                   // Другой справочник — другой поиск, другая вкладка, первая страница.
@@ -247,6 +249,8 @@ function ReferenceListCard({ canManage }: { canManage: boolean }) {
               </Alert>
             ) : !data ? (
               <div className="flex flex-col gap-2" aria-busy="true">
+                {/* Для программ чтения с экрана: серые полосы ничего не говорят. */}
+                <span className="sr-only">{common("loading")}</span>
                 {Array.from({ length: SKELETON_ROWS }, (_, i) => (
                   <Skeleton key={i} className="h-10" />
                 ))}
@@ -400,21 +404,37 @@ function PageFooter({
 }) {
   const t = useTranslations("references");
   const format = useFormat();
+  // Недоступная кнопка остаётся в порядке Tab и сохраняет фокус (`aria-disabled`, а не `disabled`): нажатие на
+  // «Далее», которое привело на последнюю страницу, не уводит фокус в никуда. Нажатие на неё Base UI не пропускает.
+  const edge = "aria-disabled:pointer-events-none aria-disabled:opacity-50";
   const previous = (
-    <Button variant={compact ? "outline" : "ghost"} disabled={page <= 1} onClick={() => onPage(page - 1)}>
+    <Button
+      variant={compact ? "outline" : "ghost"}
+      className={edge}
+      disabled={page <= 1}
+      focusableWhenDisabled
+      onClick={() => onPage(page - 1)}
+    >
       <ChevronLeftIcon aria-hidden="true" />
       {t("previous")}
     </Button>
   );
   const next = (
-    <Button variant={compact ? "outline" : "ghost"} disabled={page >= pages} onClick={() => onPage(page + 1)}>
+    <Button
+      variant={compact ? "outline" : "ghost"}
+      className={edge}
+      disabled={page >= pages}
+      focusableWhenDisabled
+      onClick={() => onPage(page + 1)}
+    >
       {t("next")}
       <ChevronRightIcon aria-hidden="true" />
     </Button>
   );
   return (
     <div className={cn("flex gap-3", compact ? "flex-col items-stretch" : "items-center justify-between")}>
-      <p className={cn("text-sm text-muted-foreground tabular-nums", compact && "text-center")}>
+      {/* aria-live: смена страницы объявляется («Показано 51–100 из 120»). */}
+      <p aria-live="polite" className={cn("text-sm text-muted-foreground tabular-nums", compact && "text-center")}>
         {t("shown", { from: format.number(from), to: format.number(to), total: format.number(total) })}
       </p>
       {compact ? (

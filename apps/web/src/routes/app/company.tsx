@@ -1,5 +1,6 @@
 import { can, type CompanyPage as Company } from "@imbc/contracts";
 import { useQuery } from "@tanstack/react-query";
+import { cn } from "cn";
 import { ArrowLeftIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, useLocation, useParams } from "react-router";
@@ -44,7 +45,7 @@ export function CompanyPage() {
     <div className="mx-auto flex max-w-5xl flex-col gap-4">
       <PageTitle title={company ? names(company, locale)[0] : t("title")} />
       <div>
-        <Link className={buttonVariants({ variant: "ghost", size: "sm" })} to={back}>
+        <Link className={cn(buttonVariants({ variant: "ghost", size: "sm" }))} to={back}>
           <ArrowLeftIcon />
           {t("back")}
         </Link>
@@ -58,7 +59,7 @@ export function CompanyPage() {
             <EmptyDescription>{t("notFound")}</EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
-            <Link className={buttonVariants({ variant: "outline" })} to="/catalog">
+            <Link className={cn(buttonVariants({ variant: "outline" }))} to="/catalog">
               {nav("catalog")}
             </Link>
           </EmptyContent>

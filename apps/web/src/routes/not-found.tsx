@@ -1,3 +1,4 @@
+import { cn } from "cn";
 import { Link } from "react-router";
 import { useTranslations } from "use-intl";
 
@@ -19,7 +20,7 @@ export function NotFoundPage() {
           <CardDescription>{t("description")}</CardDescription>
         </CardHeader>
         <CardFooter>
-          <Link className={buttonVariants()} to="/">
+          <Link className={cn(buttonVariants())} to="/">
             {t("home")}
           </Link>
         </CardFooter>

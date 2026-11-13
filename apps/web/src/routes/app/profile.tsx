@@ -1,5 +1,6 @@
 import type { OwnProfile } from "@imbc/contracts";
 import { useQuery } from "@tanstack/react-query";
+import { cn } from "cn";
 import { Building2Icon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
@@ -56,7 +57,7 @@ export function ProfilePage() {
       <div className="flex flex-col items-start gap-2 text-sm text-muted-foreground">
         <p>{t("readOnlyHint")}</p>
         <p>{t("accountHint")}</p>
-        <Link className={buttonVariants({ variant: "outline" })} to="/account">
+        <Link className={cn(buttonVariants({ variant: "outline" }))} to="/account">
           {nav("account")}
         </Link>
       </div>

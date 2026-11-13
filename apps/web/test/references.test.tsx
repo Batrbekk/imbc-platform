@@ -132,10 +132,32 @@ const summaryOf = (code: DictionaryCode, list: DictionaryEntry[]): DictionarySum
   retired: list.filter((e) => e.retiredAt).length,
 });
 
-const FILE_ID = "00000000-0000-4000-8000-0000000000f1";
-const PNG_ID = "00000000-0000-4000-8000-0000000000f2";
+/** Страница значений справочника так, как её отдаёт сервер: поиск, вкладка и страница из адреса. */
+function listResponse(store: Store, code: DictionaryCode, url: URL): Response {
+  const list = store[code];
+  if (!list) return problemResponse(404, "not_found");
+  const q = (url.searchParams.get("q") ?? "").toLowerCase();
+  const status = url.searchParams.get("status") ?? "active";
+  const page = Number(url.searchParams.get("page") ?? "1");
+  const matching = list
+    .filter((e) => (status === "all" ? true : status === "retired" ? !!e.retiredAt : !e.retiredAt))
+    .filter(
+      (e) =>
+        !q || e.code.toLowerCase().startsWith(q) || Object.values(e.names).some((n) => n?.toLowerCase().includes(q)),
+    );
+  const result: DictionaryEntriesPage = {
+    dictionary: summaryOf(code, list),
+    items: matching.slice((page - 1) * 50, page * 50),
+    total: matching.length,
+    page,
+    pageSize: 50,
+  };
+  return Response.json(result);
+}
+
+/** Файл образца: у каждого имени свой id; проверяемый и прошедший проверку файл с одним именем — один и тот же файл. */
 const sampleFile = (scanState: "passed" | "pending" | "rejected", name = "Образец оргструктуры.pdf") => ({
-  fileId: scanState === "passed" ? FILE_ID : PNG_ID,
+  fileId: idOf("sample", name),
   originalName: name,
   byteSize: 1_572_864,
   mediaType: "application/pdf",
@@ -173,30 +195,7 @@ function stubBackend(
     [
       "GET",
       /^\/api\/v1\/dictionaries\/(\w+)\/entries$/,
-      (url, _init, m) => {
-        const code = m[1] as DictionaryCode;
-        const list = store[code];
-        if (!list) return problemResponse(404, "not_found");
-        const q = (url.searchParams.get("q") ?? "").toLowerCase();
-        const status = url.searchParams.get("status") ?? "active";
-        const page = Number(url.searchParams.get("page") ?? "1");
-        const matching = list
-          .filter((e) => (status === "all" ? true : status === "retired" ? !!e.retiredAt : !e.retiredAt))
-          .filter(
-            (e) =>
-              !q ||
-              e.code.toLowerCase().startsWith(q) ||
-              Object.values(e.names).some((n) => n?.toLowerCase().includes(q)),
-          );
-        const result: DictionaryEntriesPage = {
-          dictionary: summaryOf(code, list),
-          items: matching.slice((page - 1) * 50, page * 50),
-          total: matching.length,
-          page,
-          pageSize: 50,
-        };
-        return Response.json(result);
-      },
+      (url, _init, m) => listResponse(store, m[1] as DictionaryCode, url),
     ],
     [
       "GET",
@@ -644,7 +643,7 @@ describe("справочники: добавление значения (ADM-08,
     expect(dialog.getByText(t.codeHint.other)).toBeTruthy();
     cleanup();
 
-    // Типы товаров: «Группа» из действующих групп; без выбора — ошибка у поля.
+    // Типы товаров: «Группа» из действующих групп; первый пункт — «Без группы» (группа необязательна).
     const groups = stubBackend();
     const types = renderRoute("/references?list=commodity_type", { locale: "ru" });
     await types.user.click(await screen.findByRole("button", { name: t.add }));
@@ -654,15 +653,38 @@ describe("справочники: добавление значения (ADM-08,
     await types.user.type(dialog.getByLabelText(t.nameKk), "Сыйымдылық");
     await types.user.type(dialog.getByLabelText(t.nameRu), "Ёмкости");
     await types.user.type(dialog.getByLabelText(t.nameEn), "Tanks");
-    await types.user.click(dialog.getByRole("button", { name: t.add }));
-    expect(await dialog.findByText(t.fieldErrors.group)).toBeTruthy();
-    expect(requests(groups, "POST", /\/entries$/)).toEqual([]);
     await choose(types.user, t.groupLabel, "B · Группа B");
     await types.user.click(dialog.getByRole("button", { name: t.add }));
     expect(await screen.findByText(fill(t.added, { code: "TANK" }))).toBeTruthy();
     expect(jsonBodies(requests(groups, "POST", /\/commodity_type\/entries$/))).toEqual([
       { code: "TANK", parentCode: "B", names: { kk: "Сыйымдылық", ru: "Ёмкости", en: "Tanks" } },
     ]);
+  });
+
+  it("«Обязательный тип»: флажок стоит у своей подписи, пояснение — под подписью (поле с флажком из реестра shadcn)", async () => {
+    stubBackend();
+    const { user } = renderRoute("/references?list=certificate_type", { locale: "ru" });
+    const t = ru.references;
+
+    await user.click(await screen.findByRole("button", { name: t.add }));
+    const dialog = within(await screen.findByRole("dialog", { name: t.addTitle }));
+    const checkbox = dialog.getByRole("checkbox", { name: t.mandatoryType });
+    // Field horizontal с FieldContent: именно он включает `items-start` (флажок у первой строки), у простого
+    // div флажок центрировался по высоте блока и оказывался на уровне пояснения.
+    const field = checkbox.closest<HTMLElement>('[data-slot="field"]')!;
+    expect(field.dataset.orientation).toBe("horizontal");
+    expect(checkbox.parentElement).toBe(field);
+    const content = field.querySelector<HTMLElement>(':scope > [data-slot="field-content"]')!;
+    expect(content).toBeTruthy();
+    const label = within(content).getByText(t.mandatoryType);
+    const hint = within(content).getByText(t.mandatoryHint);
+    expect(label.tagName).toBe("LABEL");
+    // Подпись выше пояснения; пояснение связано с флажком.
+    expect(label.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(checkbox.getAttribute("aria-describedby")).toBe(hint.id);
+    // Подпись по-прежнему переключает флажок.
+    await user.click(label);
+    expect(checkbox.getAttribute("aria-checked")).toBe("true");
   });
 
   it("409 entry_exists и 400 code_format — у поля кода, диалог открыт, фокус на коде; прочие ошибки — Alert в диалоге", async () => {
@@ -886,8 +908,13 @@ describe("справочники: обязательность типов (ADM-0
     const { user } = renderRoute("/references?list=certificate_type", { locale: "ru" });
     const t = ru.references;
 
-    const iso = await screen.findByRole("switch", { name: `${t.mandatory}: ${ISO}` });
-    iso.focus();
+    const stKz = await screen.findByRole("switch", { name: `${t.mandatory}: ${ST_KZ}` });
+    const iso = screen.getByRole("switch", { name: `${t.mandatory}: ${ISO}` });
+    // Tab идёт по строке: переключатель, меню действий, переключатель следующей строки.
+    stKz.focus();
+    await user.tab();
+    expect(document.activeElement).toBe(menuButton(ru, ST_KZ));
+    await user.tab();
     expect(document.activeElement).toBe(iso);
     await user.keyboard(" ");
     await waitFor(() => expect(jsonBodies(requests(api, "PUT", /\/mandatory$/))).toEqual([{ mandatory: true }]));
@@ -1103,6 +1130,7 @@ describe("образец оргструктуры (ADM-11)", () => {
     // Состояние перечитано: проверка идёт, а текущий образец остаётся доступным.
     expect(await sampleCard().findByText(t.pending)).toBeTruthy();
     expect(sampleCard().getByText(t.pendingHint)).toBeTruthy();
+    expect(sampleCard().getByText(t.pendingDuration)).toBeTruthy();
     expect(sampleCard().getByRole("link", { name: t.download }).getAttribute("href")).toBe(
       "/api/v1/org-chart-sample/current/content",
     );
@@ -1134,6 +1162,8 @@ describe("образец оргструктуры (ADM-11)", () => {
     await waitFor(() => expect(screen.queryByText(t.pending)).toBeNull());
     expect(await screen.findByText("Новый образец.pdf")).toBeTruthy();
     expect(screen.queryByText("Прежний образец.pdf")).toBeNull();
+    // Строка итога объявила результат проверки (U1): образец стал текущим.
+    expect(screen.getByText(t.checkPassed).closest("[aria-live]")!.getAttribute("aria-live")).toBe("polite");
     const after = polls();
     await vi.advanceTimersByTimeAsync(15_000);
     expect(polls()).toBe(after);
@@ -1363,7 +1393,7 @@ describe("узкий экран, 390 px: список вместо таблиц�
     expect(await screen.findByText(fill(t.shown, { from: "1", to: "50", total: "120" }))).toBeTruthy();
     expect(screen.getByText(fill(t.pageOf, { page: "1", pages: "3" }))).toBeTruthy();
     expect(screen.queryByRole("button", { name: fill(t.page, { page: "2" }) })).toBeNull();
-    expect((screen.getByRole("button", { name: t.previous }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: t.previous }).getAttribute("aria-disabled")).toBe("true");
     await user.click(screen.getByRole("button", { name: t.next }));
     await waitFor(() => expect(router.state.location.search).toBe("?list=tn_ved&page=2"));
     expect(await screen.findByText(fill(t.pageOf, { page: "2", pages: "3" }))).toBeTruthy();
@@ -1387,5 +1417,634 @@ describe("узкий экран, 390 px: список вместо таблиц�
     expect(screen.queryByRole("button", { name: /^Действия:/ })).toBeNull();
     const iso = screen.getByText("Сертификат ISO 9001").closest("li")!;
     expect(within(iso).queryByText(t.mandatory)).toBeNull();
+  });
+});
+
+describe("справочники: группа типа товара необязательна (ADM-08)", () => {
+  /** Временный тип товара без группы — такие значения стоят на стенде. */
+  const withUngrouped = () => {
+    const store = freshStore();
+    store.commodity_type.push(entry("commodity_type", "TEMP", { name: "Временный тип", parentCode: null }));
+    return store;
+  };
+
+  const fillNames = async (user: UserEvent, dialog: ReturnType<typeof within>, code?: string) => {
+    if (code) await user.type(dialog.getByLabelText(ru.references.code), code);
+    await user.type(dialog.getByLabelText(ru.references.nameKk), "Сыйымдылық");
+    await user.type(dialog.getByLabelText(ru.references.nameRu), "Ёмкости");
+    await user.type(dialog.getByLabelText(ru.references.nameEn), "Tanks");
+  };
+
+  it("добавление без группы: первый пункт списка — «Без группы», он выбран, ошибки нет, parentCode: null", async () => {
+    const api = stubBackend();
+    const { user } = renderRoute("/references?list=commodity_type", { locale: "ru" });
+    const t = ru.references;
+
+    await user.click(await screen.findByRole("button", { name: t.add }));
+    const dialog = within(await screen.findByRole("dialog", { name: t.addTitle }));
+    const group = dialog.getByRole("combobox", { name: t.groupLabel });
+    expect(group.textContent).toContain(t.noGroup);
+    await user.click(group);
+    const options = (await screen.findAllByRole("option")).map((option) => option.textContent);
+    expect(options).toEqual([t.noGroup, "A · Группа A", "B · Группа B", "C · Группа C"]);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
+
+    await fillNames(user, dialog, "TANK");
+    await user.click(dialog.getByRole("button", { name: t.add }));
+    expect(await screen.findByText(fill(t.added, { code: "TANK" }))).toBeTruthy();
+    expect(jsonBodies(requests(api, "POST", /\/commodity_type\/entries$/))).toEqual([
+      { code: "TANK", parentCode: null, names: { kk: "Сыйымдылық", ru: "Ёмкости", en: "Tanks" } },
+    ]);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("добавление: выбрал группу, вернулся к «Без группы» — уходит null; выбрал группу — уходит её код", async () => {
+    const api = stubBackend();
+    const { user } = renderRoute("/references?list=commodity_type", { locale: "ru" });
+    const t = ru.references;
+
+    await user.click(await screen.findByRole("button", { name: t.add }));
+    const dialog = within(await screen.findByRole("dialog", { name: t.addTitle }));
+    await fillNames(user, dialog, "TANK");
+    await choose(user, t.groupLabel, "B · Группа B");
+    expect(dialog.getByRole("combobox", { name: t.groupLabel }).textContent).toContain("B · Группа B");
+    await choose(user, t.groupLabel, t.noGroup);
+    expect(dialog.getByRole("combobox", { name: t.groupLabel }).textContent).toContain(t.noGroup);
+    await user.click(dialog.getByRole("button", { name: t.add }));
+    expect(await screen.findByText(fill(t.added, { code: "TANK" }))).toBeTruthy();
+    expect(jsonBodies(requests(api, "POST", /\/commodity_type\/entries$/))).toEqual([
+      { code: "TANK", parentCode: null, names: { kk: "Сыйымдылық", ru: "Ёмкости", en: "Tanks" } },
+    ]);
+  });
+
+  it("правка типа без группы: можно переименовать, не назначая группу; в таблице — прочерк; уходит parentCode: null", async () => {
+    const api = stubBackend({ store: withUngrouped() });
+    const { user } = renderRoute("/references?list=commodity_type", { locale: "ru" });
+    const t = ru.references;
+
+    const row = within((await screen.findByText("Временный тип")).closest("tr")!);
+    expect(row.getByText("—")).toBeTruthy();
+    await openMenu(user, ru, "TEMP");
+    await user.click(menuItem(t.edit));
+    const dialog = within(await screen.findByRole("dialog", { name: fill(t.editTitle, { code: "TEMP" }) }));
+    expect(dialog.getByRole("combobox", { name: t.groupLabel }).textContent).toContain(t.noGroup);
+    expect((dialog.getByRole("button", { name: t.save }) as HTMLButtonElement).disabled).toBe(true);
+    await user.clear(dialog.getByLabelText(t.nameRu));
+    await user.type(dialog.getByLabelText(t.nameRu), "Старый тип");
+    await user.click(dialog.getByRole("button", { name: t.save }));
+
+    expect(await screen.findByText(fill(t.updated, { code: "TEMP" }))).toBeTruthy();
+    expect(jsonBodies(requests(api, "PUT", /\/commodity_type\/entries\/[\w-]+$/))).toEqual([
+      {
+        names: { kk: "Временный тип (kk)", ru: "Старый тип", en: "Временный тип (en)" },
+        sortOrder: 0,
+        parentCode: null,
+      },
+    ]);
+    expect(await screen.findByText("Старый тип")).toBeTruthy();
+  });
+
+  it("правка типа с группой: «Без группы» снимает группу; возврат к прежней группе делает форму неизменённой", async () => {
+    const api = stubBackend();
+    const { user } = renderRoute("/references?list=commodity_type", { locale: "ru" });
+    const t = ru.references;
+
+    await screen.findByText("Насосы");
+    await openMenu(user, ru, "PUMP");
+    await user.click(menuItem(t.edit));
+    const dialog = within(await screen.findByRole("dialog", { name: fill(t.editTitle, { code: "PUMP" }) }));
+    const save = dialog.getByRole("button", { name: t.save }) as HTMLButtonElement;
+    expect(dialog.getByRole("combobox", { name: t.groupLabel }).textContent).toContain("A · Группа A");
+    expect(save.disabled).toBe(true);
+
+    await choose(user, t.groupLabel, t.noGroup);
+    expect(save.disabled).toBe(false);
+    await choose(user, t.groupLabel, "A · Группа A");
+    expect(save.disabled).toBe(true);
+    await choose(user, t.groupLabel, t.noGroup);
+    await user.click(save);
+
+    expect(await screen.findByText(fill(t.updated, { code: "PUMP" }))).toBeTruthy();
+    expect(jsonBodies(requests(api, "PUT", /\/commodity_type\/entries\/[\w-]+$/))).toEqual([
+      { names: { kk: "Насосы (kk)", ru: "Насосы", en: "Насосы (en)" }, sortOrder: 0, parentCode: null },
+    ]);
+    // Группа снята: в таблице у «Насосы» прочерк.
+    await waitFor(() => expect(within(screen.getByText("Насосы").closest("tr")!).queryByText("A")).toBeNull());
+    expect(within(screen.getByText("Насосы").closest("tr")!).getByText("—")).toBeTruthy();
+  });
+
+  it("список групп не загрузился: сообщение с «Повторить»; значение без группы всё равно можно добавить", async () => {
+    let fail = true;
+    const api = stubBackend({
+      overrides: [
+        [
+          "GET",
+          /\/dictionaries\/commodity_group\/choices$/,
+          () =>
+            fail
+              ? problemResponse(500, "internal")
+              : Response.json({
+                  items: [{ id: idOf("commodity_group", "A"), code: "A", name: "Группа A", parentCode: null }],
+                  total: 1,
+                  page: 1,
+                  pageSize: 50,
+                }),
+        ],
+      ],
+    });
+    const { user } = renderRoute("/references?list=commodity_type", { locale: "ru" });
+    const t = ru.references;
+
+    await user.click(await screen.findByRole("button", { name: t.add }));
+    const dialog = within(await screen.findByRole("dialog", { name: t.addTitle }));
+    const message = await dialog.findByText(t.groupLoadError);
+    expect(message.closest('[role="alert"]')).toBeTruthy();
+    // «Повторить» — рядом с сообщением, в диалоге.
+    fail = false;
+    await user.click(dialog.getByRole("button", { name: ru.common.retry }));
+    await waitFor(() => expect(dialog.queryByText(t.groupLoadError)).toBeNull());
+    expect(dialog.queryByRole("button", { name: ru.common.retry })).toBeNull();
+    expect(requests(api, "GET", /\/commodity_group\/choices(\?|$)/)).toHaveLength(2);
+    await choose(user, t.groupLabel, "A · Группа A");
+    expect(dialog.getByRole("combobox", { name: t.groupLabel }).textContent).toContain("A · Группа A");
+  });
+
+  it("колонка и подпись поля называются одинаково: «Товарная группа»", async () => {
+    stubBackend();
+    const { user } = renderRoute("/references?list=commodity_type", { locale: "ru" });
+    const t = ru.references;
+
+    expect(t.group).toBe("Товарная группа");
+    expect(t.groupLabel).toBe(t.group);
+    expect(await screen.findByRole("columnheader", { name: t.group })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: t.add }));
+    expect(await screen.findByRole("combobox", { name: t.group })).toBeTruthy();
+  });
+});
+
+describe("справочники: отказ сервера и конец сеанса посреди действия (ADM-08, DATA-04, GEN-08)", () => {
+  /** Ответ /me: пока `expired` не выставлен — администратор; потом — 401 за воротами, которые тест открывает сам. */
+  function sessionOverride() {
+    const state = { expired: false };
+    const gate = deferred<void>();
+    const override: [string, RegExp, Handler] = [
+      "GET",
+      /^\/api\/auth\/me$/,
+      async () => {
+        if (!state.expired) return Response.json(ADMIN);
+        await gate.promise;
+        return problemResponse(401, "unauthorized");
+      },
+    ];
+    return { state, gate, override };
+  }
+
+  it("«Вернуть в оборот»: отказ сервера — сообщение в строке итога, значение остаётся выведенным", async () => {
+    const api = stubBackend({
+      overrides: [["POST", /\/restore$/, () => problemResponse(503, "busy")]],
+    });
+    const { user } = renderRoute("/references?list=certificate_type&status=retired", { locale: "ru" });
+    const t = ru.references;
+
+    await screen.findByText("Прежний сертификат");
+    await openMenu(user, ru, OLD);
+    await user.click(menuItem(t.restore));
+
+    const status = (await screen.findByText(t.errors.busy)).closest<HTMLElement>("[aria-live]")!;
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(screen.queryByText(fill(t.restoredDone, { code: OLD }))).toBeNull();
+    expect(requests(api, "POST", /\/restore$/)).toHaveLength(1);
+    // Состояние не изменилось: значение в той же вкладке «Выведенные», счётчики прежние, на сервере оно выведено.
+    expect(screen.getByText("Прежний сертификат")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: fill(t.status.retired, { count: "1" }) })).toBeTruthy();
+    expect(api.store.certificate_type.find((e) => e.code === OLD)!.retiredAt).not.toBeNull();
+    // Кнопка меню снова доступна: действие можно повторить.
+    expect(menuButton(ru, OLD).getAttribute("aria-busy")).toBeNull();
+    expect(await openMenu(user, ru, OLD)).toEqual([t.edit, t.restore, t.delete]);
+  });
+
+  it("сохранение названий: отказ сервера — Alert в диалоге, диалог открыт, введённое сохранено, список прежний", async () => {
+    let fail = true;
+    const api = stubBackend({
+      overrides: [
+        [
+          "PUT",
+          /\/certificate_type\/entries\/[\w-]+$/,
+          (_url, init) => {
+            if (fail) return problemResponse(503, "busy");
+            const target = api.store.certificate_type.find((e) => e.code === ISO)!;
+            Object.assign(target, { names: JSON.parse(String(init?.body)).names });
+            return Response.json({ entry: target });
+          },
+        ],
+      ],
+    });
+    const { user } = renderRoute("/references?list=certificate_type", { locale: "ru" });
+    const t = ru.references;
+
+    await screen.findByText("Сертификат ISO 9001");
+    await openMenu(user, ru, ISO);
+    await user.click(menuItem(t.edit));
+    const dialog = within(await screen.findByRole("dialog", { name: fill(t.editTitle, { code: ISO }) }));
+    await user.clear(dialog.getByLabelText(t.nameRu));
+    await user.type(dialog.getByLabelText(t.nameRu), "ISO 9001 новый");
+    await user.click(dialog.getByRole("button", { name: t.save }));
+
+    const alert = await dialog.findByText(t.errors.busy);
+    expect(alert.closest('[data-slot="alert"]')).toBeTruthy();
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect((dialog.getByLabelText(t.nameRu) as HTMLInputElement).value).toBe("ISO 9001 новый");
+    expect(screen.queryByText(fill(t.updated, { code: ISO }))).toBeNull();
+    // В таблице под диалогом прежнее название; на сервере — тоже.
+    expect(screen.getAllByText("Сертификат ISO 9001").length).toBeGreaterThan(0);
+    expect(screen.queryByText("ISO 9001 новый", { selector: "td" })).toBeNull();
+    expect(api.store.certificate_type.find((e) => e.code === ISO)!.names.ru).toBe("Сертификат ISO 9001");
+    expect((dialog.getByRole("button", { name: t.save }) as HTMLButtonElement).disabled).toBe(false);
+
+    // Повтор после отказа проходит.
+    fail = false;
+    await user.click(dialog.getByRole("button", { name: t.save }));
+    expect(await screen.findByText(fill(t.updated, { code: ISO }))).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(await screen.findByText("ISO 9001 новый")).toBeTruthy();
+    expect(requests(api, "PUT", /\/entries\/[\w-]+$/)).toHaveLength(2);
+  });
+
+  it("401 посреди действия: /me перечитан, сообщение о сеансе видно, затем вход с возвратом на страницу (как на /admin/accounts)", async () => {
+    const session = sessionOverride();
+    const api = stubBackend({
+      overrides: [session.override, ["POST", /\/retire$/, () => problemResponse(401, "unauthenticated")]],
+    });
+    const { router, user } = renderRoute("/references?list=certificate_type&status=all", { locale: "ru" });
+    const t = ru.references;
+    const meCalls = () => requests(api, "GET", /^\/api\/auth\/me$/).length;
+
+    await screen.findByText("Сертификат ISO 9001");
+    const before = meCalls();
+    session.state.expired = true;
+    await openMenu(user, ru, ISO);
+    await user.click(menuItem(t.retire));
+
+    // Итог объявлен, значение не изменилось, а сеанс перечитывается.
+    expect(await screen.findByText(t.errors.session)).toBeTruthy();
+    await waitFor(() => expect(meCalls()).toBeGreaterThan(before));
+    expect(api.store.certificate_type.find((e) => e.code === ISO)!.retiredAt).toBeNull();
+    expect(router.state.location.pathname).toBe("/references");
+
+    // /me ответил 401: AppShell уводит на вход и помнит, куда вернуться.
+    session.gate.resolve();
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+    expect(router.state.location.search).toBe(
+      `?error=session_expired&returnTo=${encodeURIComponent("/references?list=certificate_type&status=all")}`,
+    );
+  });
+
+  it("401 при сохранении названий: сообщение о сеансе в диалоге, затем вход", async () => {
+    const session = sessionOverride();
+    const api = stubBackend({
+      overrides: [session.override, ["PUT", /\/entries\/[\w-]+$/, () => problemResponse(401, "unauthenticated")]],
+    });
+    const { router, user } = renderRoute("/references?list=region", { locale: "ru" });
+    const t = ru.references;
+
+    await screen.findByText("Алматы");
+    session.state.expired = true;
+    await openMenu(user, ru, "KZ-ALA");
+    await user.click(menuItem(t.edit));
+    const dialog = within(await screen.findByRole("dialog", { name: fill(t.editTitle, { code: "KZ-ALA" }) }));
+    await user.clear(dialog.getByLabelText(t.nameRu));
+    await user.type(dialog.getByLabelText(t.nameRu), "Алма-Ата");
+    await user.click(dialog.getByRole("button", { name: t.save }));
+
+    expect(await dialog.findByText(t.errors.session)).toBeTruthy();
+    expect(api.store.region.find((e) => e.code === "KZ-ALA")!.names.ru).toBe("Алматы");
+    session.gate.resolve();
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+    expect(router.state.location.search).toBe(
+      `?error=session_expired&returnTo=${encodeURIComponent("/references?list=region")}`,
+    );
+  });
+});
+
+describe("справочники: прежние строки не показываются чужому справочнику (ADM-08)", () => {
+  /** Ответ сервера на список, который тест держит «в пути» до своего сигнала. */
+  const slow = (store: Store, code: DictionaryCode, when: (url: URL) => boolean) => {
+    const wait = deferred<void>();
+    const handler: Handler = async (url) => {
+      if (when(url)) await wait.promise;
+      return listResponse(store, code, url);
+    };
+    return { wait, handler };
+  };
+
+  it("смена справочника: пока новый грузится — скелет, строк прежнего справочника нет; затем строки нового", async () => {
+    const store = freshStore();
+    const held = slow(store, "region", () => true);
+    stubBackend({ store, overrides: [["GET", /\/dictionaries\/region\/entries$/, held.handler]] });
+    const { router, user } = renderRoute("/references?list=certificate_type", { locale: "ru" });
+    const t = ru.references;
+
+    await screen.findByText("Сертификат ISO 9001");
+    await choose(user, t.listLabel, t.list.region);
+    await waitFor(() => expect(router.state.location.search).toBe("?list=region"));
+    expect(await screen.findByRole("heading", { level: 2, name: t.list.region })).toBeTruthy();
+
+    // Запрос регионов в пути: прежних строк (и таблицы вообще) нет, вместо них скелет.
+    const panel = await screen.findByRole("tabpanel");
+    await waitFor(() => expect(panel.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(8));
+    expect(screen.queryByText("Сертификат ISO 9001")).toBeNull();
+    expect(screen.queryByText("Сертификат соответствия СТ-КЗ")).toBeNull();
+    expect(screen.queryByRole("table")).toBeNull();
+    // Счётчики вкладок прежнего справочника тоже не показываются: «—» до ответа.
+    expect(screen.getByRole("tab", { name: fill(t.status.active, { count: "—" }) })).toBeTruthy();
+
+    held.wait.resolve();
+    expect(await screen.findByText("Алматы")).toBeTruthy();
+    expect(screen.queryByText("Сертификат ISO 9001")).toBeNull();
+  });
+
+  it("смена поиска в том же справочнике: прежние строки остаются приглушёнными до ответа, без скелета", async () => {
+    const store = freshStore();
+    const held = slow(store, "certificate_type", (url) => url.searchParams.get("q") === "ISO");
+    stubBackend({ store, overrides: [["GET", /\/dictionaries\/certificate_type\/entries$/, held.handler]] });
+    const { router, user } = renderRoute("/references?list=certificate_type", { locale: "ru" });
+    const t = ru.references;
+
+    await screen.findByText("Сертификат ISO 9001");
+    await user.type(screen.getByRole("textbox", { name: t.search }), "ISO");
+    await waitFor(() => expect(router.state.location.search).toBe("?list=certificate_type&q=ISO"));
+
+    // Запрос с q в пути: старые строки на месте, скелета нет.
+    const table = screen.getByRole("table", { name: t.list.certificate_type });
+    await waitFor(() => expect(table.closest(".opacity-60")).toBeTruthy());
+    expect(screen.getByText("Сертификат соответствия СТ-КЗ")).toBeTruthy();
+    expect(screen.getByText("Сертификат ISO 9001")).toBeTruthy();
+    expect(document.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(0);
+
+    held.wait.resolve();
+    await waitFor(() => expect(screen.queryByText("Сертификат соответствия СТ-КЗ")).toBeNull());
+    expect(screen.getByText("Сертификат ISO 9001")).toBeTruthy();
+  });
+
+  it("смена вкладки в том же справочнике: прежние строки остаются до ответа, затем строки вкладки", async () => {
+    const store = freshStore();
+    const held = slow(store, "certificate_type", (url) => url.searchParams.get("status") === "retired");
+    stubBackend({ store, overrides: [["GET", /\/dictionaries\/certificate_type\/entries$/, held.handler]] });
+    const { router, user } = renderRoute("/references?list=certificate_type", { locale: "ru" });
+    const t = ru.references;
+
+    await screen.findByText("Сертификат ISO 9001");
+    await user.click(screen.getByRole("tab", { name: fill(t.status.retired, { count: "1" }) }));
+    await waitFor(() => expect(router.state.location.search).toBe("?list=certificate_type&status=retired"));
+
+    const table = screen.getByRole("table", { name: t.list.certificate_type });
+    await waitFor(() => expect(table.closest(".opacity-60")).toBeTruthy());
+    expect(screen.getByText("Сертификат ISO 9001")).toBeTruthy();
+    expect(document.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(0);
+
+    held.wait.resolve();
+    expect(await screen.findByText("Прежний сертификат")).toBeTruthy();
+    expect(screen.queryByText("Сертификат ISO 9001")).toBeNull();
+  });
+
+  it("между выбором справочника и записью адреса заголовок, колонки и строки принадлежат одному справочнику", async () => {
+    stubBackend();
+    const { user } = renderRoute("/references?list=certificate_type", { locale: "ru" });
+    const t = ru.references;
+
+    await screen.findByText("Сертификат ISO 9001");
+    // Каждое изменение страницы видно наблюдателю: ни в одном состоянии нет строк сертификатов под колонками
+    // типов товаров и наоборот (колонки и заголовок брались из состояния nuqs, а данные — из адреса).
+    const seen: string[] = [];
+    const observer = new MutationObserver(() => {
+      const rows = [...document.querySelectorAll("tbody tr")].map((row) => row.getAttribute("data-entry"));
+      const heads = [...document.querySelectorAll("th")].map((head) => head.textContent);
+      const title = document.querySelector('[role="heading"][aria-level="2"]')?.textContent;
+      if (rows.includes(ST_KZ) && (heads.includes(t.group) || title === t.list.commodity_type))
+        seen.push(`${title}: ${heads.join("|")} / ${rows.join(",")}`);
+      if (rows.includes("PUMP") && (heads.includes(t.mandatory) || title === t.list.certificate_type))
+        seen.push(`${title}: ${heads.join("|")} / ${rows.join(",")}`);
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
+    await choose(user, t.listLabel, t.list.commodity_type);
+    await screen.findByText("Насосы");
+    observer.disconnect();
+    expect(seen).toEqual([]);
+  });
+});
+
+describe("образец оргструктуры: итог проверки в строке состояния (ADM-11, DATA-07)", () => {
+  const sampleCard = () =>
+    within(
+      screen.getByRole("heading", { name: ru.references.sample.title }).closest<HTMLElement>('[data-slot="card"]')!,
+    );
+  /** Строка итога страницы: aria-live над карточками. */
+  const statusLine = () => document.querySelector<HTMLElement>("[aria-live='polite'][aria-atomic='true']")!;
+
+  it("проверка закончилась успешно: «Образец прошёл проверку и стал текущим», тон успеха; прежнее «проверяется» заменено", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const sample: Backend["sample"] = {
+      current: sampleFile("passed", "Прежний образец.pdf") as never,
+      latest: null,
+    };
+    stubBackend({ sample });
+    const { user } = renderRoute("/references", { locale: "ru" });
+    const t = ru.references.sample;
+
+    await screen.findByRole("link", { name: t.download });
+    // Загрузка: итог «загружен и проверяется», сервер отвечает 202; затем проверка идёт.
+    await user.upload(
+      document.querySelector<HTMLInputElement>('input[type="file"]')!,
+      new File(["%PDF-1.4"], "Новый образец.pdf", { type: "application/pdf" }),
+    );
+    expect(await within(statusLine()).findByText(t.uploaded)).toBeTruthy();
+    expect(await sampleCard().findByText(t.pending)).toBeTruthy();
+
+    // Проверка прошла: новая загрузка стала текущей, последней загрузки нет.
+    sample.current = sampleFile("passed", "Новый образец.pdf") as never;
+    sample.latest = null;
+    await vi.advanceTimersByTimeAsync(5_500);
+    const done = await within(statusLine()).findByText(t.checkPassed);
+    expect(within(statusLine()).queryByText(t.uploaded)).toBeNull();
+    // Тон успеха: не красный.
+    expect(done.closest('[data-slot="alert"]')!.className).not.toContain("text-destructive");
+    expect(await sampleCard().findByText("Новый образец.pdf")).toBeTruthy();
+    expect(sampleCard().queryByText(t.pending)).toBeNull();
+  });
+
+  it("первый образец прошёл проверку (текущего не было): тоже «стал текущим»", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const sample: Backend["sample"] = { current: null, latest: sampleFile("pending", "Первый.pdf") as never };
+    stubBackend({ sample });
+    renderRoute("/references", { locale: "ru" });
+    const t = ru.references.sample;
+
+    expect(await screen.findByText(t.pendingFirstHint)).toBeTruthy();
+    expect(within(statusLine()).queryByText(t.checkPassed)).toBeNull();
+    sample.current = sampleFile("passed", "Первый.pdf") as never;
+    sample.latest = null;
+    await vi.advanceTimersByTimeAsync(5_500);
+    expect(await within(statusLine()).findByText(t.checkPassed)).toBeTruthy();
+  });
+
+  it("проверка не пройдена: «Файл не прошёл проверку. Текущий образец не изменился», тон ошибки", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const sample: Backend["sample"] = {
+      current: sampleFile("passed", "Прежний образец.pdf") as never,
+      latest: sampleFile("pending", "Вирус.pdf") as never,
+    };
+    stubBackend({ sample });
+    renderRoute("/references", { locale: "ru" });
+    const t = ru.references.sample;
+
+    expect(await screen.findByText(t.pending)).toBeTruthy();
+    // Пока проверка идёт, в строке итога ничего нет.
+    expect(statusLine().textContent).toBe("");
+    sample.latest = sampleFile("rejected", "Вирус.pdf") as never;
+    await vi.advanceTimersByTimeAsync(5_500);
+
+    const failed = await within(statusLine()).findByText(`${t.checkRejected} ${t.keptCurrent}`);
+    expect(failed.closest('[data-slot="alert"]')!.className).toContain("text-destructive");
+    expect(await sampleCard().findByText(t.rejected)).toBeTruthy();
+    // Текущий образец прежний.
+    expect(sampleCard().getByText("Прежний образец.pdf")).toBeTruthy();
+  });
+
+  it("не пройдена проверка первого образца: без слов о неизменившемся текущем", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const sample: Backend["sample"] = { current: null, latest: sampleFile("pending", "Вирус.pdf") as never };
+    stubBackend({ sample });
+    renderRoute("/references", { locale: "ru" });
+    const t = ru.references.sample;
+
+    await screen.findByText(t.pending);
+    sample.latest = sampleFile("rejected", "Вирус.pdf") as never;
+    await vi.advanceTimersByTimeAsync(5_500);
+    expect(await within(statusLine()).findByText(t.checkRejected)).toBeTruthy();
+    expect(within(statusLine()).queryByText(t.keptCurrent, { exact: false })).toBeNull();
+  });
+
+  it("страница открыта на уже закончившейся проверке: итога нет, объявляется только смена, увиденная опросом", async () => {
+    stubBackend({
+      sample: {
+        current: sampleFile("passed", "Прежний образец.pdf") as never,
+        latest: sampleFile("rejected", "Вирус.pdf") as never,
+      },
+    });
+    renderRoute("/references", { locale: "ru" });
+    const t = ru.references.sample;
+
+    expect(await screen.findByText(t.rejected)).toBeTruthy();
+    expect(statusLine().textContent).toBe("");
+  });
+
+  it("новая проверка — «Обычно это занимает до минуты» под отметкой, для первого образца тоже", async () => {
+    stubBackend({ sample: { current: null, latest: sampleFile("pending", "Первый.pdf") as never } });
+    renderRoute("/references", { locale: "ru" });
+    const t = ru.references.sample;
+
+    await screen.findByText(t.pendingFirstHint);
+    const hint = sampleCard().getByText(t.pendingDuration);
+    const badge = sampleCard().getByText(t.pending);
+    // Пояснение — после отметки «Проверяется антивирусом».
+    expect(badge.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(ru.references.sample.pendingDuration).toContain("до минуты");
+    expect(ru.references.sample.pendingDuration).toContain("Страницу можно закрыть");
+  });
+
+  it("не принят: администратору — «Загрузите другой», директору (загрузки нет) — «Текущий образец не изменился»", async () => {
+    const t = ru.references.sample;
+    const sample = {
+      current: sampleFile("passed", "Прежний образец.pdf") as never,
+      latest: sampleFile("rejected", "Вирус.pdf") as never,
+    };
+
+    stubBackend({ sample });
+    renderRoute("/references", { locale: "ru" });
+    expect(await screen.findByText(t.rejectedHint)).toBeTruthy();
+    expect(screen.getByText(t.keptCurrent)).toBeTruthy();
+    cleanup();
+
+    stubBackend({ me: DIRECTOR, sample });
+    renderRoute("/references", { locale: "ru" });
+    expect(await screen.findByText(`${t.rejectedPlain} ${t.keptCurrent}`)).toBeTruthy();
+    expect(screen.queryByText(t.rejectedHint)).toBeNull();
+    expect(screen.queryByText(/Загрузите другой/)).toBeNull();
+    cleanup();
+
+    // Директор, текущего образца нет: нечему «не изменяться» — только «Файл не принят.».
+    stubBackend({ me: DIRECTOR, sample: { current: null, latest: sample.latest } });
+    renderRoute("/references", { locale: "ru" });
+    expect(await screen.findByText(t.rejectedPlain)).toBeTruthy();
+    expect(screen.queryByText(t.keptCurrent)).toBeNull();
+    expect(screen.queryByText(/Загрузите другой/)).toBeNull();
+  });
+});
+
+describe("справочники: доступность списка и страниц (ADM-08)", () => {
+  it("скелет загрузки читается программой чтения с экрана: «Загрузка…»", async () => {
+    const wait = deferred<Response>();
+    stubBackend({ overrides: [["GET", /\/dictionaries\/region\/entries$/, () => wait.promise]] });
+    renderRoute("/references?list=region", { locale: "ru" });
+
+    const panel = await screen.findByRole("tabpanel");
+    await waitFor(() => expect(panel.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(8));
+    const busy = panel.querySelector<HTMLElement>('[aria-busy="true"]')!;
+    const text = within(busy).getByText(ru.common.loading);
+    expect(text.className).toContain("sr-only");
+    wait.resolve(
+      Response.json({
+        dictionary: summaryOf("region", []),
+        items: [],
+        total: 0,
+        page: 1,
+        pageSize: 50,
+      }),
+    );
+    await waitFor(() => expect(within(screen.getByRole("tabpanel")).queryByText(ru.common.loading)).toBeNull());
+  });
+
+  it("«Показано …–… из …» — в области aria-live=polite: смена страницы объявляется", async () => {
+    stubBackend();
+    renderRoute("/references?list=tn_ved", { locale: "ru" });
+    const t = ru.references;
+
+    const shown = await screen.findByText(fill(t.shown, { from: "1", to: "50", total: "120" }));
+    expect(shown.closest("[aria-live]")!.getAttribute("aria-live")).toBe("polite");
+  });
+
+  it("«Далее» на последней странице не теряет фокус: aria-disabled вместо disabled, нажатие ничего не меняет", async () => {
+    stubBackend();
+    const { router, user } = renderRoute("/references?list=tn_ved&page=2", { locale: "ru" });
+    const t = ru.references;
+
+    await screen.findByText(fill(t.shown, { from: "51", to: "100", total: "120" }));
+    const next = screen.getByRole("button", { name: t.next });
+    next.focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(router.state.location.search).toBe("?list=tn_ved&page=3"));
+    await screen.findByText(fill(t.shown, { from: "101", to: "120", total: "120" }));
+
+    // Последняя страница: кнопка недоступна для действия, но остаётся в фокусе (не disabled).
+    const last = screen.getByRole("button", { name: t.next });
+    expect(last.getAttribute("aria-disabled")).toBe("true");
+    expect((last as HTMLButtonElement).disabled).toBe(false);
+    expect(document.activeElement).toBe(last);
+    await user.keyboard("{Enter}");
+    await user.click(last);
+    expect(router.state.location.search).toBe("?list=tn_ved&page=3");
+    expect(screen.getByText(fill(t.shown, { from: "101", to: "120", total: "120" }))).toBeTruthy();
+    expect(document.activeElement).toBe(last);
+    // «Назад» на последней странице доступна, на первой — недоступна так же.
+    expect(screen.getByRole("button", { name: t.previous }).getAttribute("aria-disabled")).not.toBe("true");
+    await user.click(screen.getByRole("button", { name: t.previous }));
+    await waitFor(() => expect(router.state.location.search).toBe("?list=tn_ved&page=2"));
+    await user.click(screen.getByRole("button", { name: t.previous }));
+    await waitFor(() => expect(router.state.location.search).toBe("?list=tn_ved"));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: t.previous }).getAttribute("aria-disabled")).toBe("true"),
+    );
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: t.previous }));
   });
 });

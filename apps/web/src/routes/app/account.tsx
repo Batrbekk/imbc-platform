@@ -1,3 +1,4 @@
+import { cn } from "cn";
 import { KeyRoundIcon, ShieldCheckIcon, UserRoundIcon } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 
@@ -62,7 +63,7 @@ export function AccountPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Сброс пароля обслуживает BFF, а не SPA: обычная ссылка с видом кнопки. */}
-          <a className={buttonVariants({ variant: "outline" })} href={passwordResetUrl("/account", locale)}>
+          <a className={cn(buttonVariants({ variant: "outline" }))} href={passwordResetUrl("/account", locale)}>
             <KeyRoundIcon className="size-4" />
             {t("resetPassword")}
           </a>

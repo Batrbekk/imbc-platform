@@ -10,26 +10,23 @@ import {
   type UpdateDictionaryEntryInput,
 } from "@imbc/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { type ComponentProps, type ReactElement, type RefObject, useId, useRef, useState } from "react";
+import { type ReactElement, type RefObject, useId, useRef, useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
 
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { DialogContent } from "@/components/ui/dialog";
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { useFormat } from "@/i18n/format";
 import { api } from "@/lib/api";
 import { hasMandatoryMark, parentDictionaryOf } from "@/lib/references-params";
 
 import { type Action } from "./admin-actions";
-import { AdminDialog, DialogForm, SelectField, TextField } from "./admin-dialogs";
+import { AdminDialog, DialogForm, type FinalFocus, SelectField, TextField } from "./admin-dialogs";
 import { problemCode, REFERENCES_KEY, useReferenceAction, useReferenceProblemMessage } from "./references-actions";
-
-/** Куда уходит фокус при закрытии диалога: ссылка на элемент или функция (Base UI `finalFocus`). */
-type FinalFocus = ComponentProps<typeof DialogContent>["finalFocus"];
 
 const NAME_LOCALES = ["kk", "ru", "en"] as const;
 const NAME_LABELS = { kk: "nameKk", ru: "nameRu", en: "nameEn" } as const;
-type FieldName = "code" | "kk" | "ru" | "en" | "group" | "sortOrder";
+type FieldName = "code" | "kk" | "ru" | "en" | "sortOrder";
 
 /** Введённое в форму, уже без пробелов по краям; порядок — число (только в правке). */
 interface Values {
@@ -46,7 +43,7 @@ const codeHintKey = (dictionary: DictionaryCode) =>
 
 /**
  * Значения родительского справочника для выбора группы (только действующие): запрос идёт, пока открыт диалог.
- * Название — на языке интерфейса, рядом код группы.
+ * Название — на языке интерфейса, рядом код группы. Группа необязательна: сервер принимает `parentCode: null`.
  */
 function useParentChoices(parent: DictionaryCode | null) {
   const locale = useLocale() as Locale;
@@ -157,8 +154,10 @@ export function EditEntryDialog({
 
 /**
  * Форма значения. Коды — только текст: поле `type="text"`, ведущие нули не теряются (DATA-03). Все три названия
- * обязательны (форма администратора); у закрытых справочников диалога добавления нет. Ошибка сервера у кода
- * (`entry_exists`, `code_format`) и у группы (`parent_invalid`) — у своего поля, с фокусом на нём; остальные — Alert.
+ * обязательны (форма администратора); группа типа товара — нет: первый пункт списка «Без группы» (`null`), такие
+ * значения есть и на стенде, и их нужно уметь править. У закрытых справочников диалога добавления нет. Ошибка
+ * сервера у кода (`entry_exists`, `code_format`) и у группы (`parent_invalid`) — у своего поля, с фокусом на нём;
+ * остальные — Alert.
  * Тело запроса собирает вызывающий (`toInput`): создание и правка отправляют разные поля.
  */
 function EntryForm<TInput>({
@@ -177,6 +176,7 @@ function EntryForm<TInput>({
   close: () => void;
 }) {
   const t = useTranslations("references");
+  const common = useTranslations("common");
   const format = useFormat();
   const problem = useReferenceProblemMessage();
   const id = useId();
@@ -225,7 +225,6 @@ function EntryForm<TInput>({
       else if (!DICTIONARY_CODE_PATTERNS[dictionary].test(trimmed)) errors.code = t("errors.code_format");
     }
     for (const locale of NAME_LOCALES) if (!names[locale].trim()) errors[locale] = t("fieldErrors.name");
-    if (parent && !parentCode) errors.group = t("fieldErrors.group");
     const order = Number(sortOrder.trim());
     if (mode === "edit" && !(/^\d+$/.test(sortOrder.trim()) && order <= DICTIONARY_SORT_ORDER_MAX))
       errors.sortOrder = t("fieldErrors.sortOrder", { max: format.number(DICTIONARY_SORT_ORDER_MAX) });
@@ -246,8 +245,13 @@ function EntryForm<TInput>({
     );
   };
 
+  const chooseGroup = (next: string | null) => {
+    setParentCode(next);
+    if (action.isError) action.reset();
+  };
+
   const codeError = invalid.code ?? (codeFromServer ? t(`errors.${serverCode}`) : undefined);
-  const groupError = invalid.group ?? (groupFromServer ? t("errors.parent_invalid") : undefined);
+  const groupError = groupFromServer ? t("errors.parent_invalid") : undefined;
   const groupOptions = choices.data ?? [];
   // Группа правки может быть вне списка действующих (выведена): тогда она остаётся выбранной и видна.
   const groupItems =
@@ -313,14 +317,31 @@ function EntryForm<TInput>({
           id={`${id}-group`}
           label={t("groupLabel")}
           value={parentCode}
-          placeholder={t("groupPlaceholder")}
+          emptyOption={{ label: t("noGroup"), onSelect: () => chooseGroup(null) }}
           options={groupItems}
           disabled={choices.isPending}
-          onChange={(next) => edit("group", () => setParentCode(next))}
-          error={groupError ?? (choices.isError ? t("loadError") : undefined)}
+          onChange={chooseGroup}
+          error={groupError ?? (choices.isError ? t("groupLoadError") : undefined)}
+          errorAction={
+            choices.isError ? (
+              <div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={choices.isFetching}
+                  onClick={() => void choices.refetch()}
+                >
+                  {common("retry")}
+                </Button>
+              </div>
+            ) : undefined
+          }
         />
       )}
       {mode === "create" && hasMandatoryMark(dictionary) && (
+        // Поле с флажком из реестра shadcn (field-checkbox): FieldContent включает `items-start` у Field, флажок
+        // стоит у первой строки — подписи, а пояснение идёт под ней.
         <Field orientation="horizontal">
           <Checkbox
             id={`${id}-mandatory`}
@@ -328,12 +349,10 @@ function EntryForm<TInput>({
             onCheckedChange={(checked) => setMandatory(checked === true)}
             aria-describedby={`${id}-mandatory-help`}
           />
-          <div className="flex flex-col gap-0.5">
-            <FieldLabel htmlFor={`${id}-mandatory`} className="font-normal">
-              {t("mandatoryType")}
-            </FieldLabel>
+          <FieldContent>
+            <FieldLabel htmlFor={`${id}-mandatory`}>{t("mandatoryType")}</FieldLabel>
             <FieldDescription id={`${id}-mandatory-help`}>{t("mandatoryHint")}</FieldDescription>
-          </div>
+          </FieldContent>
         </Field>
       )}
     </DialogForm>
