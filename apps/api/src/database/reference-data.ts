@@ -199,9 +199,9 @@ export async function loadReferenceFile(
 
 /**
  * Коды значений справочника, которые удалял администратор (DATA-04), в нижнем регистре: запись аудита
- * `dictionary.entry_deleted` хранит справочник и прежний код (`diff: { dictionary, code, names }`). Одно чтение
- * на файл; у роли приложения на журнал аудита есть SELECT. Фильтр `object_type` идёт по индексу
- * `audit_entries_object_idx`.
+ * `dictionary.entry_deleted` с исходом `ok` хранит справочник и прежний код (`diff: { dictionary, code, names }`);
+ * запись с другим исходом удалением не считается. Одно чтение на файл; у роли приложения на журнал аудита есть
+ * SELECT. Фильтр `object_type` идёт по индексу `audit_entries_object_idx`.
  */
 async function deletedCodes(tx: Executor, code: DictionaryCode): Promise<Set<string>> {
   const rows = await tx
@@ -211,6 +211,7 @@ async function deletedCodes(tx: Executor, code: DictionaryCode): Promise<Set<str
       and(
         eq(auditEntries.objectType, 'dictionary_entry'),
         eq(auditEntries.action, 'dictionary.entry_deleted'),
+        eq(auditEntries.outcome, 'ok'),
         sql`${auditEntries.diff} ->> 'dictionary' = ${code}`,
       ),
     );

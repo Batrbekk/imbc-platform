@@ -1,5 +1,5 @@
 import { type AddressInfo, createServer, type Server, type Socket } from 'node:net';
-import { Readable } from 'node:stream';
+import { PassThrough, pipeline, Readable } from 'node:stream';
 import { inspect } from 'node:util';
 import {
   CopyObjectCommand,
@@ -165,6 +165,42 @@ describe('S3ObjectStorage: ошибки клиента без бакета и к
     (await held.get(BUCKET, KEY)).destroy();
     await new Promise((resolve) => setImmediate(resolve));
     expect(idle.destroyed).toBe(true);
+  });
+
+  it('get: тело упало раньше, чем потребитель подписался (FilesService.open ещё пишет аудит), — необработанного error нет; подключившись, потребитель получает ObjectStorageError: Nest — по stream.errored, скан — через pipeline, чтение — исключением', async () => {
+    const uncaught: unknown[] = [];
+    const onUncaught = (error: unknown) => uncaught.push(error);
+    process.on('uncaughtException', onUncaught);
+    try {
+      /** Тело ответа, которое хранилище обрывает на следующем шаге цикла событий. */
+      const failingBody = () => {
+        const body = new Readable({ read() {} });
+        setImmediate(() =>
+          body.destroy(Object.assign(new Error(`read ECONNRESET ${BUCKET}/${KEY}`), { name: 'TimeoutError' })),
+        );
+        return body;
+      };
+      const { storage } = fakeClient(async () => ({ Body: failingBody() }));
+      const forReply = await storage.get(BUCKET, KEY);
+      const forScan = await storage.get(BUCKET, KEY);
+      const forReader = await storage.get(BUCKET, KEY);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(uncaught).toEqual([]);
+
+      const timeout = { operation: 'get', reason: 'TimeoutError', missing: false };
+      // ExpressAdapter.reply сначала смотрит stream.errored и отдаёт ошибку обработчику StreamableFile.
+      expect(forReply.errored).toBeInstanceOf(ObjectStorageError);
+      expect(forReply.errored).toMatchObject(timeout);
+      // Скан (scanCounted): pipeline, подключённый позже, получает ту же ошибку и разрушает ею приёмник.
+      const counted = new PassThrough();
+      const piped = new Promise<unknown>((resolve) => pipeline(forScan, counted, resolve));
+      expect(await failure(() => drain(counted))).toMatchObject(timeout);
+      expect(await piped).toBeInstanceOf(ObjectStorageError);
+      expect(await failure(() => drain(forReader))).toMatchObject(timeout);
+      expect(inspect(forReply.errored, { depth: 10, showHidden: true })).not.toContain(KEY);
+    } finally {
+      process.off('uncaughtException', onUncaught);
+    }
   });
 });
 

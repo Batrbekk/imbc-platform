@@ -105,9 +105,15 @@ export function createS3Client(settings: S3Settings, timeouts: S3Timeouts = S3_T
  * Тело объекта для потребителя. Сбой чтения после заголовков (обрыв, `socketTimeout` на застывшем теле) приходит
  * из потока, а не из `send`, — его тоже заменяет `ObjectStorageError` без бакета и ключа. Закрытие потока
  * потребителем (клиент ушёл, скан закончен) закрывает тело ответа и соединение.
+ *
+ * Слушатель-заглушка на обёртке: тело может упасть раньше, чем потребитель подпишется (`FilesService.open` между
+ * `get` и `StreamableFile` пишет аудит), а `error` без слушателя роняет процесс. Ошибка при этом не теряется:
+ * она остаётся в `errored` — её проверяет `ExpressAdapter.reply` перед отдачей, а `pipeline` скана и чтение
+ * потока, подключённые позже, получают её сами.
  */
 function storageStream(body: Readable): Readable {
   const out = new PassThrough();
+  out.on('error', () => undefined);
   body.on('error', (error) => out.destroy(new ObjectStorageError('get', reasonOf(error))));
   out.on('close', () => body.destroy());
   body.pipe(out);

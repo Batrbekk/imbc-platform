@@ -372,6 +372,26 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
     expect(await counts()).toEqual(before);
   });
 
+  it('пропускает только состоявшееся удаление: запись dictionary.entry_deleted с исходом denied загрузку значения не подавляет, с исходом ok — подавляет (DATA-04, AUD-01)', async () => {
+    const deletion = (code: string, outcome: 'ok' | 'denied') =>
+      pool.query(
+        `insert into audit_entries (action, object_type, object_id, outcome, diff)
+         values ('dictionary.entry_deleted', 'dictionary_entry', $1, $2, $3)`,
+        [randomUUID(), outcome, JSON.stringify({ dictionary: 'legal_form', code, names: {} })],
+      );
+    await deletion('LLC', 'denied');
+    await deletion('JSC', 'ok');
+
+    const results = await loadReferenceDirectory(db, RELEASE, 'release');
+    expect(results.find((r) => r.dictionary === 'legal_form')).toEqual({
+      dictionary: 'legal_form',
+      inserted: 2,
+      translationsAdded: 6,
+      skippedDeleted: 1,
+    });
+    expect((await entries('legal_form')).map((e) => e.code).sort()).toEqual(['LLC', 'LLP']);
+  });
+
   it('удаление в одном справочнике не мешает загрузке того же кода в другом: удалённый process/X-1 пропускается, equipment_type/X-1 загружается (ADM-08)', async () => {
     const admin = await administrator();
     const service = dictionaries();
