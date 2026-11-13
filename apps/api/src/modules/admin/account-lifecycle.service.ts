@@ -195,9 +195,11 @@ export class AccountLifecycleService {
         });
       } catch (error) {
         // `before.email` прочитан без блокировки, а исход COMMIT при обрыве неизвестен: возврат — быстрая
-        // мера, а задание приводит Keycloak к строке БД, что бы в ней ни оказалось.
+        // мера, а задание приводит Keycloak к строке БД, что бы в ней ни оказалось. Без выхода из IdP:
+        // неудачная попытка не завершает сеансы производителя; если COMMIT всё же прошёл, его задание
+        // с `logout: true` уже поставлено в транзакции.
         await this.restoreIdentityEmail(subject, before.email);
-        await this.queueSync(id, true);
+        await this.queueSync(id, false);
         if (uniqueViolation(error) === 'user_accounts_email_uq') throw emailExists();
         throw error;
       }

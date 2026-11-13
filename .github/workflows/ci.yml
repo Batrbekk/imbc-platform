@@ -45,13 +45,14 @@ jobs:
       # их выполнение проверяет job integration.
       - run: pnpm test
       - run: pnpm build
-      # Скрипты развёртывания dev-стенда (deploy-dev.yml, deploy.sh, setup-github-deploy.sh):
-      # аргументы, синхронизация, строка результата, порядок настройки. Docker, curl, az и gh —
-      # заглушки, несколько секунд.
+      # Скрипты развёртывания dev-стенда (deploy-dev.yml, deploy.sh, setup-github-deploy.sh, sync-realm.py):
+      # аргументы, синхронизация, строка результата, порядок настройки, профиль пользователя realm.
+      # Docker, curl, az и gh — заглушки, несколько секунд.
       - name: Deployment script self-test
         run: |
           bash infrastructure/azure/test/vm-deploy.test.sh
           bash infrastructure/azure/test/setup-github-deploy.test.sh
+          python3 infrastructure/azure/test/sync-realm.test.py
       # Синтаксис web.conf — nginx из того же образа, что в web.Dockerfile: ошибка в файле
       # останавливает сборку, а не развёртывание.
       - name: nginx -t for web.conf

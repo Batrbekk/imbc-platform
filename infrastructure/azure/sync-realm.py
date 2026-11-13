@@ -36,6 +36,9 @@ PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 # registrationEmailAsUsername the username follows it. Everyone keeps seeing both.
 ADMIN_EDIT_ONLY = ("email", "username")
 VIEWERS = ("admin", "user")
+# The platform keeps the person's name itself (user_accounts.full_name); registration and the
+# invitation ask nothing else (MAN-01, MAN-03, ADM-01), so Keycloak must not demand a name step.
+OPTIONAL_NAMES = ("firstName", "lastName")
 
 
 class SyncError(Exception):
@@ -100,19 +103,27 @@ def desired_settings(source: dict[str, Any], env: dict[str, str], theme: str) ->
     return realm, realm_patch, client_patch
 
 
-def restrict_login_attributes(profile: Any) -> tuple[dict[str, Any], list[str]]:
-    """Return the user profile with email and username editable only by admin, and the names changed.
+def managed_user_profile(profile: Any) -> tuple[dict[str, Any], list[str], list[str]]:
+    """Return the user profile as the platform needs it and what changed.
 
-    Only `permissions` of those two attributes change; validations, other attributes, groups and
-    every other key of the profile are kept as they are, so a second run changes nothing.
+    Email and username become editable only by admin (both still viewable by admin and user);
+    `required` is removed from firstName and lastName when present. Nothing else changes —
+    validations, other attributes, groups and every other key are kept — so a second run changes
+    nothing. Returns (profile, attributes made admin-only, names made optional).
     """
     if not isinstance(profile, dict) or not isinstance(profile.get("attributes"), list):
         raise SyncError("Current user profile is invalid")
     updated = copy.deepcopy(profile)
     found: set[str] = set()
     changed: list[str] = []
+    optional: list[str] = []
     for attribute in updated["attributes"]:
-        if not isinstance(attribute, dict) or attribute.get("name") not in ADMIN_EDIT_ONLY:
+        if not isinstance(attribute, dict):
+            continue
+        if attribute.get("name") in OPTIONAL_NAMES and "required" in attribute:
+            del attribute["required"]
+            optional.append(attribute["name"])
+        if attribute.get("name") not in ADMIN_EDIT_ONLY:
             continue
         name = attribute["name"]
         found.add(name)
@@ -127,7 +138,7 @@ def restrict_login_attributes(profile: Any) -> tuple[dict[str, Any], list[str]]:
             changed.append(name)
     if found != set(ADMIN_EDIT_ONLY):
         raise SyncError("Current user profile lacks the email or username attribute")
-    return updated, sorted(changed)
+    return updated, sorted(changed), sorted(optional)
 
 
 def run(command: list[str], *, operation: str, root: Path, data: str | None = None) -> str:
@@ -185,11 +196,11 @@ def synchronize(root: Path, theme: str) -> None:
         # kcadm accepts '-f -' for JSON on stdin. No desired users or client secrets are submitted.
         run(cli + ["update", f"realms/{realm}", "--config", config_path, "-f", "-"], operation="Update managed realm settings", root=root, data=json.dumps(realm_patch))
         run(cli + ["update", client_path, "--config", config_path, "-r", realm, "-f", "-"], operation="Update managed client settings", root=root, data=json.dumps(client_patch))
-        # Declarative user profile: read it whole, change two permissions, write it back only if needed.
+        # Declarative user profile: read it whole, change only the managed keys, write it back only if needed.
         profile = parse_result(run(cli + ["get", "users/profile", "--config", config_path, "-r", realm], operation="Read user profile", root=root), "Read user profile")
-        restricted, profile_changes = restrict_login_attributes(profile)
-        if profile_changes:
-            run(cli + ["update", "users/profile", "--config", config_path, "-r", realm, "-f", "-"], operation="Update user profile", root=root, data=json.dumps(restricted))
+        managed, admin_only, made_optional = managed_user_profile(profile)
+        if admin_only or made_optional:
+            run(cli + ["update", "users/profile", "--config", config_path, "-r", realm, "-f", "-"], operation="Update user profile", root=root, data=json.dumps(managed))
     except BaseException as error:
         original_error = error
         raise
@@ -204,7 +215,11 @@ def synchronize(root: Path, theme: str) -> None:
                 print("ERROR: Temporary admin configuration cleanup also failed", file=sys.stderr)
     print("Updated realm settings: " + ", ".join(sorted(realm_patch)))
     print("Updated imbc-bff settings: " + ", ".join(sorted(client_patch)))
-    print("User profile: email and username editable by admin only (" + ("updated: " + ", ".join(profile_changes) if profile_changes else "already set") + ")")
+    profile_changes = "; ".join(part for part in (
+        "updated: " + ", ".join(admin_only) if admin_only else "",
+        "optional: " + ", ".join(made_optional) if made_optional else "",
+    ) if part) or "already set"
+    print(f"User profile: email and username editable by admin only, first and last name optional ({profile_changes})")
     print("Realm synchronization complete; existing users, client secrets and unrelated settings preserved")
 
 

@@ -715,7 +715,8 @@ describe.skipIf(!databaseUrl)(
       });
       expect(keycloak.updateUser.mock.calls.at(-1)).toEqual([target.idpSubject, { email: target.email }]);
       // После любого сбоя транзакции — identity-sync: Keycloak сходится к строке БД, что бы ни случилось.
-      expect(await syncJobs(target.id)).toEqual([{ accountId: target.id, logout: true }]);
+      // Без выхода: чужая неудачная попытка не завершает сеансы производителя (backchannel logout BFF).
+      expect(await syncJobs(target.id)).toEqual([{ accountId: target.id, logout: false }]);
 
       // Возврат Keycloak тоже не удался: задание identity-sync приведёт Keycloak к строке БД.
       keycloak.updateUser.mockReset();
@@ -730,8 +731,8 @@ describe.skipIf(!databaseUrl)(
         code: 'email_exists',
       });
       expect(await syncJobs(target.id)).toEqual([
-        { accountId: target.id, logout: true },
-        { accountId: target.id, logout: true },
+        { accountId: target.id, logout: false },
+        { accountId: target.id, logout: false },
       ]);
 
       // Keycloak недоступен: 503, БД без изменений; исход записи в Keycloak неизвестен — задание вернёт его к БД.
@@ -761,11 +762,11 @@ describe.skipIf(!databaseUrl)(
       });
       expect(keycloak.updateUser.mock.calls.at(-1)).toEqual([target.idpSubject, { email: target.email }]);
       const jobs = await syncJobs(target.id);
-      expect(jobs).toEqual([{ accountId: target.id, logout: true }]);
+      expect(jobs).toEqual([{ accountId: target.id, logout: false }]);
 
       await jobHandlers().syncIdentity(jobs[0]!);
       expect(keycloak.updateUser.mock.calls.at(-1)).toEqual([target.idpSubject, { enabled: true, email: other }]);
-      expect(keycloak.logoutUser).toHaveBeenCalledExactlyOnceWith(target.idpSubject);
+      expect(keycloak.logoutUser).not.toHaveBeenCalled();
     });
 
     it('не производитель — 409 not_manufacturer_account; без субъекта — 409 identity_not_bound', async () => {
