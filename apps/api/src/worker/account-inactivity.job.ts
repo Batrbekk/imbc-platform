@@ -16,12 +16,14 @@ import { type AccountJob, PLATFORM_TZ, QUEUES } from '../jobs/queues.js';
 const BATCH = 200;
 
 /**
- * Три календарных месяца без входа к дню `now` по Asia/Almaty (AUTH-07, DATA-08): от дня последнего входа,
- * у ни разу не входившего — от дня создания. Тот же день месяца или последний день месяца, если такого
- * дня нет (правило NOT-31): `date + interval '3 months'` в PostgreSQL так и считает.
+ * Три календарных месяца без входа к дню `now` по Asia/Almaty (AUTH-07, DATA-08): от более поздней даты из
+ * последнего входа (у ни разу не входившего — создания) и последней смены пароля — иначе возврат новым
+ * паролем без входа (событие пароля) отменила бы следующая ночь. `greatest` пропускает NULL. Тот же день
+ * месяца или последний день месяца, если такого дня нет (правило NOT-31): `date + interval '3 months'`
+ * в PostgreSQL так и считает. Одно условие для выборки и для повторной проверки под блокировкой.
  */
 const threeMonthsWithoutSignIn = (now: Date): SQL =>
-  sql`(timezone(${PLATFORM_TZ}::text, coalesce(${userAccounts.lastSignInAt}, ${userAccounts.createdAt}))::date + interval '3 months')::date <= timezone(${PLATFORM_TZ}::text, ${now.toISOString()}::timestamptz)::date`;
+  sql`(timezone(${PLATFORM_TZ}::text, greatest(coalesce(${userAccounts.lastSignInAt}, ${userAccounts.createdAt}), ${userAccounts.credentialsChangedAt}))::date + interval '3 months')::date <= timezone(${PLATFORM_TZ}::text, ${now.toISOString()}::timestamptz)::date`;
 
 /**
  * Суточное задание неактивности (AUTH-07, NOT-26). Аккаунт `active` без входа три месяца становится
@@ -105,6 +107,7 @@ export class AccountInactivityJob {
           action: 'account.became_inactive',
           objectType: 'account',
           objectId: id,
+          diff: { from: 'active' },
           isAccountEvent: true,
         },
         tx,

@@ -177,10 +177,12 @@ export class JobHandlers {
   }
 
   /**
-   * Аккаунт стал inactive (AUTH-07, NOT-26): Keycloak требует новый пароль, сеансы IdP завершаются, письмо
-   * NOT-01 ссылкой сброса (72 часа, AUTH-01) — на языке атрибута `locale` пользователя Keycloak. Пользователь
-   * остаётся включённым — иначе ссылка не сработает; вход отклоняет BFF по состоянию в БД. Аккаунт уже не
-   * inactive или без субъекта (seed до первого входа: письмо слать не через что) — выход. Повтор безвреден.
+   * Аккаунт стал inactive (AUTH-07, NOT-26): сеансы IdP завершаются, письмо NOT-01 ссылкой сброса (72 часа,
+   * AUTH-01) — на языке атрибута `locale` пользователя Keycloak. Обязательное действие `UPDATE_PASSWORD`
+   * пользователю не ставится — оно только в токене ссылки: иначе вход со старым паролем сразу просил бы новый
+   * и возвращал аккаунт мимо ящика. Вход со старым паролем отклоняет BFF (`account_inactive`). Пользователь
+   * остаётся включённым — иначе ссылка не сработает. Аккаунт уже не inactive или без субъекта — выход.
+   * Повтор безвреден.
    */
   async sendInactivityReset({ accountId }: AccountJob): Promise<void> {
     const [account] = await this.db
@@ -188,7 +190,6 @@ export class JobHandlers {
       .from(userAccounts)
       .where(eq(userAccounts.id, accountId));
     if (account?.state !== 'inactive' || !account.subject) return;
-    await this.keycloak.updateUser(account.subject, { requiredActions: ['UPDATE_PASSWORD'] });
     await this.keycloak.logoutUser(account.subject);
     await this.keycloak.sendPasswordEmail(account.subject, ['UPDATE_PASSWORD']);
   }

@@ -295,6 +295,15 @@ az vm run-command invoke -g imbc-dev-rg -n imbc-dev --command-id RunShellScript 
 
    Ожидается `createdb-ok`, `restore-ok`, две одинаковые строки чисел и `dropdb-ok`. Запишите эти два числа: по ним проверяется восстановление при откате. Если числа разошлись, а между копией и проверкой на стенде регистрировались или создавались профили, повторите шаги 4 и 5. Если `restore-ok` нет, копия негодна: снимите её заново и не выкатывайте, пока пробное восстановление не пройдёт. `dropdb` здесь удаляет только пробную базу `imbc_restore_check`.
 
+6. Аккаунтов в состоянии `inactive` нет — ожидается `0`. Колонки `inactive_since` до выката ещё нет (её добавляет `0007`), а вернуть аккаунт `inactive` без этой отметки новым паролем нельзя (AUTH-07: возврат — пароль, заданный не раньше `inactive_since`); ни одна прежняя версия такие аккаунты не создавала:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -At -v ON_ERROR_STOP=1 -c "
+     select count(*) from user_accounts where state = 'inactive';" </dev/null
+   ```
+
+   Если не `0` — выкат остановить и разобрать эти аккаунты с владельцем.
+
 ### Что делает выкат
 
 Шаги одинаковы для `./infrastructure/azure/deploy.sh redeploy` и для [конвейера](#конвейер-развёртывания): оба запускают на VM `infrastructure/azure/vm-deploy.sh`. Отдельной команды для перехода нет.
@@ -323,6 +332,15 @@ sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql 
 ```
 
 Ожидается: в `role` — `{manufacturer,expert,administrator,director,operator,observer}`, в `organization_type` — `{manufacturer,operator,observer,imbc}`, в `update_status` — `{active,outdated,unresponsive}`, четыре последние колонки пусты; третий запрос возвращает одну строку `observer@observer.local | observer`.
+
+Неактивность (AUTH-07): аккаунт `inactive` без `inactive_since` никогда не вернётся новым паролем — код таких не создаёт, ожидается `0`:
+
+```bash
+sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -At -v ON_ERROR_STOP=1 -c "
+  select count(*) from user_accounts where state = 'inactive' and inactive_since is null;" </dev/null
+```
+
+Первые переходы в `inactive` на стенде случатся не раньше 09.02.2027: аккаунты не старше 09.11.2026. С этого дня задание `inactivity-reset` шлёт письма сброса на настоящие адреса аккаунтов через почтовый отправитель стенда (адреса `.local` остаются в Mailpit).
 
 Ожидаемый вход: `observer@observer.local` с прежним паролем демо-аккаунтов (`KEYCLOAK_DEV_USER_PASSWORD`) и кодом `000000` открывает `/dashboard`; страница компании не показывает focal point.
 

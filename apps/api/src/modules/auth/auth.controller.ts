@@ -134,8 +134,15 @@ export class AuthController {
     }
 
     // Неактивный (AUTH-07) входит, если пароль задан после перехода: событие Keycloak worker мог ещё не прочесть.
-    if (account.state === 'inactive' && !(await this.reactivatedByPassword(account.id, identity.subject)))
+    if (account.state === 'inactive' && !(await this.reactivatedByPassword(account.id, identity.subject))) {
+      // Возврат — только ссылкой сброса (AUTH-07): SSO-сеанс отклонённого входа не должен мешать «Забыли пароль».
+      try {
+        await this.keycloak.logoutUser(identity.subject);
+      } catch {
+        this.logger.warn('inactive account: IdP logout after refused sign-in failed');
+      }
       return res.redirect(302, '/login?error=account_inactive');
+    }
     if (
       account.credentialsChangedAt &&
       identity.authTime.getTime() < Math.floor(account.credentialsChangedAt.getTime() / 1000) * 1000

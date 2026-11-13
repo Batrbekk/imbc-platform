@@ -11,7 +11,9 @@ import type { Env } from '../src/config/env.js';
 import type { Database } from '../src/database/database.module.js';
 import * as schema from '../src/database/schema/index.js';
 import { type AccountJob, QUEUES } from '../src/jobs/queues.js';
+import { AccountLifecycleService } from '../src/modules/admin/account-lifecycle.service.js';
 import { AuthController } from '../src/modules/auth/auth.controller.js';
+import type { AuthUser } from '../src/modules/auth/auth.types.js';
 import { sign } from '../src/modules/auth/crypto.js';
 import type { KeycloakAdminService } from '../src/modules/auth/keycloak-admin.service.js';
 import { postLoginPath } from '../src/modules/auth/post-login.js';
@@ -113,6 +115,7 @@ describe.skipIf(!databaseUrl)(
         subject?: string | null;
         lastSignInAt?: Date | null;
         createdAt?: Date;
+        credentialsChangedAt?: Date;
       } = {},
     ): Promise<Account> {
       const role = opts.role ?? 'operator';
@@ -139,6 +142,7 @@ describe.skipIf(!databaseUrl)(
           idpSubject: opts.subject === undefined ? randomUUID() : opts.subject,
           lastSignInAt: opts.lastSignInAt ?? null,
           ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
+          ...(opts.credentialsChangedAt ? { credentialsChangedAt: opts.credentialsChangedAt } : {}),
         })
         .returning();
       return created!;
@@ -199,8 +203,12 @@ describe.skipIf(!databaseUrl)(
     }
 
     /** Один вход на `signedInAt`: накануне первого дня по Алматы — active, с 00:00 первого дня — inactive. */
-    async function expectBoundary(signedInAt: Date, firstInactiveDay: string) {
-      const target = await account({ lastSignInAt: signedInAt });
+    async function expectBoundary(
+      signedInAt: Date,
+      firstInactiveDay: string,
+      extra: { credentialsChangedAt?: Date } = {},
+    ) {
+      const target = await account({ lastSignInAt: signedInAt, ...extra });
       const boundary = almatyMidnight(firstInactiveDay);
       await job().run(secondBefore(boundary));
       expect((await row(target.id)).state).toBe('active');
@@ -223,6 +231,7 @@ describe.skipIf(!databaseUrl)(
       });
       await boss.start();
       await boss.createQueue(QUEUES.inactivityReset, { retryLimit: 10, retryDelay: 0 });
+      await boss.createQueue(QUEUES.identitySync, { retryLimit: 5, retryDelay: 0 });
       sessions = new SessionService(db, env);
       imbcId = (await db.query.organizations.findFirst({ where: eq(schema.organizations.type, 'imbc') }))!.id;
     }, 60000);
@@ -272,6 +281,17 @@ describe.skipIf(!databaseUrl)(
       await expectBoundary(new Date('2028-02-29T07:00:00Z'), '2028-05-29');
     });
 
+    it('отсчёт — от более поздней даты из входа и смены пароля: пароль сменён 15.09.2026 без входа после — inactive с 15.12.2026 (AUTH-07)', async () => {
+      // Вход 01.08.2026, пароль — 12:00 15.09.2026 по Алматы; входа после смены пароля нет.
+      await expectBoundary(new Date('2026-08-01T07:00:00Z'), '2026-12-15', {
+        credentialsChangedAt: new Date('2026-09-15T07:00:00Z'),
+      });
+      // Смена пароля раньше входа отсчёт не сдвигает.
+      await expectBoundary(new Date('2026-09-15T07:00:00Z'), '2026-12-15', {
+        credentialsChangedAt: new Date('2026-08-01T07:00:00Z'),
+      });
+    });
+
     it('active без входа — от created_at; invited и blocked не меняются', async () => {
       const createdAt = new Date('2026-08-01T07:00:00Z');
       const neverSignedIn = await account({ createdAt });
@@ -307,7 +327,7 @@ describe.skipIf(!databaseUrl)(
       expect(await sessionCount(target.id)).toBe(0);
       expect(await sessions.resolve(first.token)).toBeNull();
       expect(await audits('account.became_inactive', target.id)).toEqual([
-        { diff: null, is_account_event: true, object_type: 'account', user_id: target.id },
+        { diff: { from: 'active' }, is_account_event: true, object_type: 'account', user_id: target.id },
       ]);
       expect(await resetJobs(target.id)).toEqual([{ data: { accountId: target.id }, singleton_key: target.id }]);
 
@@ -413,7 +433,7 @@ describe.skipIf(!databaseUrl)(
       expect((await row(failing.id)).state).toBe('inactive');
     });
 
-    it("inactivity-reset: requiredActions UPDATE_PASSWORD, logoutUser, sendPasswordEmail(subject, ['UPDATE_PASSWORD']); аккаунт уже active или без субъекта — ни одного вызова", async () => {
+    it("inactivity-reset: logoutUser и sendPasswordEmail(subject, ['UPDATE_PASSWORD']), обязательного действия у пользователя нет; аккаунт уже active или без субъекта — ни одного вызова", async () => {
       const target = await account({ lastSignInAt: new Date('2026-08-01T07:00:00Z') });
       const unbound = await account({ subject: null, lastSignInAt: new Date('2026-08-01T07:00:00Z') });
       expect(await job().run(almatyMidnight('2026-11-01'))).toEqual({ deactivated: 2 });
@@ -422,14 +442,10 @@ describe.skipIf(!databaseUrl)(
       const keycloak = keycloakMock();
       const [queued] = await resetJobs(target.id);
       await worker(keycloak).sendInactivityReset(queued!.data);
-      expect(keycloak.updateUser).toHaveBeenCalledExactlyOnceWith(target.idpSubject, {
-        requiredActions: ['UPDATE_PASSWORD'],
-      });
+      // Вход со старым паролем не должен вести к новому паролю мимо ящика: действие — только в ссылке (AUTH-07).
+      expect(keycloak.updateUser).not.toHaveBeenCalled();
       expect(keycloak.logoutUser).toHaveBeenCalledExactlyOnceWith(target.idpSubject);
       expect(keycloak.sendPasswordEmail).toHaveBeenCalledExactlyOnceWith(target.idpSubject, ['UPDATE_PASSWORD']);
-      expect(keycloak.updateUser.mock.invocationCallOrder[0]).toBeLessThan(
-        keycloak.sendPasswordEmail.mock.invocationCallOrder[0]!,
-      );
 
       const idle = keycloakMock();
       const [unboundJob] = await resetJobs(unbound.id);
@@ -478,6 +494,71 @@ describe.skipIf(!databaseUrl)(
       expect(await audits('account.reactivated', returning.id)).toHaveLength(1);
     });
 
+    it('возврат по событию пароля держится: на следующую ночь аккаунт остаётся active и второго письма нет (AUTH-07)', async () => {
+      const target = await account({ lastSignInAt: new Date('2026-08-01T07:00:00Z') });
+      const day = almatyMidnight('2026-11-01');
+      expect(await job().run(day)).toEqual({ deactivated: 1 });
+      // Вечером человек задаёт пароль по ссылке и закрывает вкладку — входа нет.
+      const evening = new Date('2026-11-01T15:00:00Z');
+      await worker({
+        securityEvents: vi.fn(async () => [
+          { id: randomUUID(), type: 'UPDATE_PASSWORD', userId: target.idpSubject, time: evening.getTime() },
+        ]),
+      }).keycloakEvents();
+      expect(await row(target.id)).toMatchObject({ state: 'active', credentialsChangedAt: evening });
+
+      expect(await job().run(almatyMidnight('2026-11-02'))).toEqual({ deactivated: 0 });
+      expect(await row(target.id)).toMatchObject({ state: 'active', inactiveSince: null });
+      expect(await resetJobs(target.id)).toHaveLength(1);
+      expect(await audits('account.became_inactive', target.id)).toHaveLength(1);
+      // Новый отсчёт — от дня пароля: 01.02.2027.
+      await job().run(secondBefore(almatyMidnight('2027-02-01')));
+      expect((await row(target.id)).state).toBe('active');
+      await job().run(almatyMidnight('2027-02-01'));
+      expect((await row(target.id)).state).toBe('inactive');
+    });
+
+    it('blocked с inactive_since: задание не трогает, событие пароля не возвращает, после разблокировки — inactive и возврат по общему правилу (ADM-02, AUTH-07)', async () => {
+      const target = await account({ lastSignInAt: new Date('2026-08-01T07:00:00Z') });
+      const day = almatyMidnight('2026-11-01');
+      await job().run(day);
+      // Исполнитель входил недавно для запусков этого теста: задание его не трогает.
+      const administrator = await account({ role: 'administrator', lastSignInAt: new Date('2027-05-31T07:00:00Z') });
+      const actor: AuthUser = {
+        id: administrator.id,
+        email: administrator.email,
+        fullName: administrator.fullName,
+        role: 'administrator',
+        organizationId: administrator.organizationId,
+        organizationType: 'imbc',
+        locale: administrator.locale,
+      };
+      const lifecycle = new AccountLifecycleService(
+        pool,
+        boss,
+        { updateUser: vi.fn(), logoutUser: vi.fn() } as never,
+        new AuditService(db),
+      );
+      await lifecycle.block(actor, target.id);
+      expect(await row(target.id)).toMatchObject({ state: 'blocked', inactiveSince: day });
+
+      // Пароль по ссылке, пока аккаунт заблокирован: сеансы отзываются, но blocked не снимается.
+      const reset = new Date('2026-11-01T15:00:00Z');
+      await sessions.revokeForPasswordChange(target.idpSubject!, reset, `password:${randomUUID()}`);
+      await job().run(almatyMidnight('2027-06-01'));
+      expect(await row(target.id)).toMatchObject({ state: 'blocked', inactiveSince: day });
+      expect(await audits('account.reactivated', target.id)).toHaveLength(0);
+      expect(await resetJobs(target.id)).toHaveLength(1);
+
+      await lifecycle.unblock(actor, target.id);
+      expect(await row(target.id)).toMatchObject({ state: 'inactive', inactiveSince: day });
+      await job().run(almatyMidnight('2027-06-01'));
+      expect(await resetJobs(target.id)).toHaveLength(1);
+      // Пароль, заданный после inactive_since, возвращает входом.
+      expect(await sessions.reactivateAfterReset(target.id, reset, 'sign_in')).toBe(true);
+      expect(await row(target.id)).toMatchObject({ state: 'active', inactiveSince: null });
+    });
+
     it('часы Keycloak чуть позади: пароль за секунды до inactive_since возвращает, за две минуты — нет', async () => {
       const close = await account({ lastSignInAt: new Date('2026-08-01T07:00:00Z') });
       const early = await account({ lastSignInAt: new Date('2026-08-01T07:00:00Z') });
@@ -501,21 +582,28 @@ describe.skipIf(!databaseUrl)(
       const notReset = await account({ lastSignInAt: new Date('2026-08-01T07:00:00Z') });
       const noPassword = await account({ lastSignInAt: new Date('2026-08-01T07:00:00Z') });
       const unavailable = await account({ lastSignInAt: new Date('2026-08-01T07:00:00Z') });
-      // Аккаунт seed без субъекта: вход по почте спрашивает Keycloak о субъекте из токена.
+      const logoutFails = await account({ lastSignInAt: new Date('2026-08-01T07:00:00Z') });
+      // Аккаунт без субъекта (на практике не встречается: markSignedIn привязывает): Keycloak спрашивается
+      // о субъекте из токена.
       const unbound = await account({ subject: null, lastSignInAt: new Date('2026-08-01T07:00:00Z') });
-      expect(await job().run(now)).toEqual({ deactivated: 5 });
+      expect(await job().run(now)).toEqual({ deactivated: 6 });
 
-      const signIn = async (target: Account, passwordUpdatedAt: Keycloak['passwordUpdatedAt'], subject?: string) => {
-        const keycloak = keycloakMock(passwordUpdatedAt);
+      const signIn = async (
+        target: Account,
+        passwordUpdatedAt: Keycloak['passwordUpdatedAt'],
+        subject?: string,
+        keycloak = keycloakMock(passwordUpdatedAt),
+      ) => {
         const result = await callback({ email: target.email, subject: subject ?? target.idpSubject! }, keycloak);
         expect(keycloak.passwordUpdatedAt).toHaveBeenCalledExactlyOnceWith(subject ?? target.idpSubject);
-        return result;
+        return { ...result, keycloak };
       };
       const after = new Date(now.getTime() + 3600_000);
       const verify = `/auth/verify?returnTo=${encodeURIComponent(postLoginPath('operator', '/profile'))}`;
 
       const ok = await signIn(reset, async () => after);
       expect(ok.location).toBe(verify);
+      expect(ok.keycloak.logoutUser).not.toHaveBeenCalled();
       expect(ok.token).toBeDefined();
       expect(await sessions.resolve(ok.token)).not.toBeNull();
       expect(await row(reset.id)).toMatchObject({ state: 'active', inactiveSince: null });
@@ -527,13 +615,22 @@ describe.skipIf(!databaseUrl)(
       expect(await sessions.resolve(ok.token)).not.toBeNull();
       expect(await audits('account.reactivated', reset.id)).toHaveLength(1);
 
-      for (const [target, passwordUpdatedAt] of [
-        [notReset, async () => new Date('2026-10-01T07:00:00Z')],
-        [noPassword, async () => null],
-        [unavailable, async () => Promise.reject(new Error('Keycloak credentials: 503'))],
+      const failingLogout = keycloakMock(async () => new Date('2026-10-01T07:00:00Z'));
+      failingLogout.logoutUser.mockRejectedValue(new Error('Keycloak logout user: 503'));
+      for (const [target, passwordUpdatedAt, keycloak] of [
+        [notReset, async () => new Date('2026-10-01T07:00:00Z'), undefined],
+        [noPassword, async () => null, undefined],
+        [unavailable, async () => Promise.reject(new Error('Keycloak credentials: 503')), undefined],
+        // Сбой выхода из IdP ответа не меняет.
+        [logoutFails, failingLogout.passwordUpdatedAt, failingLogout],
       ] as const) {
-        const refused = await signIn(target, passwordUpdatedAt);
-        expect(refused).toEqual({ location: '/login?error=account_inactive', token: undefined });
+        const refused = await signIn(target, passwordUpdatedAt, undefined, keycloak);
+        expect({ location: refused.location, token: refused.token }).toEqual({
+          location: '/login?error=account_inactive',
+          token: undefined,
+        });
+        // SSO-сеанс отклонённого входа завершается: не мешает «Забыли пароль» и ссылке сброса.
+        expect(refused.keycloak.logoutUser).toHaveBeenCalledExactlyOnceWith(target.idpSubject);
         expect(await row(target.id)).toMatchObject({ state: 'inactive', inactiveSince: now });
         expect(await sessionCount(target.id)).toBe(0);
         expect(await audits('account.reactivated', target.id)).toHaveLength(0);
