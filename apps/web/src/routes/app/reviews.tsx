@@ -5,7 +5,7 @@ import { parseAsStringLiteral, useQueryState } from "nuqs";
 import { useTranslations } from "use-intl";
 
 import { PageTitle } from "@/components/app/page-title";
-import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
@@ -86,11 +86,11 @@ export function ReviewsPage() {
       {result.isError ? (
         <Alert variant="destructive">
           <AlertDescription>{t("loadError")}</AlertDescription>
-          <AlertAction>
+          <div className="mt-2">
             <Button size="sm" variant="outline" onClick={() => void result.refetch()}>
               {common("retry")}
             </Button>
-          </AlertAction>
+          </div>
         </Alert>
       ) : (
         <div className={cn("rounded-lg border", result.isFetching && "opacity-70 transition-opacity")}>

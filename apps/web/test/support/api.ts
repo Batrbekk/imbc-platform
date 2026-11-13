@@ -1,7 +1,10 @@
 import { afterEach, type Mock, vi } from "vitest";
 
 /** Ответ подменённого BFF: тело JSON со статусом (по умолчанию 200) или своя функция. */
-export type ApiReply = { status?: number; body?: unknown } | ((url: URL, init?: RequestInit) => Response);
+export type ApiReply =
+  | { status?: number; body?: unknown }
+  // Ответ можно отложить: промис, который тест завершает сам (запрос «в пути»).
+  | ((url: URL, init?: RequestInit) => Response | Promise<Response>);
 
 const json = (status: number, body: unknown, type = "application/json") =>
   new Response(status === 204 || body === undefined ? null : JSON.stringify(body), {

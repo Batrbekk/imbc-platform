@@ -332,9 +332,15 @@
       "observer": "Observer",
       "manufacturer": "Manufacturer"
     },
+    "typeGroup": {
+      "imbc": "IMBC",
+      "operator": "Operators",
+      "observer": "Observers",
+      "manufacturer": "Manufacturers"
+    },
     "majorOperator": "Major operator",
     "email": "Email",
-    "name": "Name",
+    "name": "Full name",
     "role": "Role",
     "stateValue": {
       "invited": "Invited",
@@ -366,13 +372,14 @@
     "invitationResent": "The invitation email has been queued.",
     "block": "Block",
     "blockConfirmTitle": "Block {email}?",
-    "blockConfirmText": "The account's open sessions end at once. The person cannot sign in until the account is unblocked.",
+    "blockConfirmText": "The account's open sessions end at once and trust in its devices is removed: after unblocking, sign-in will need the emailed code again. The person cannot sign in until the account is unblocked.",
     "unblock": "Unblock",
     "changeRole": "Change role",
     "changeRoleHint": "Open sessions end at once; the person signs in again with the new role.",
     "changeEmail": "Change login email",
     "changeEmailHint": "Open sessions end. The next sign-in sends a code to the new address.",
     "changeEmailInvitedHint": "The password email will be sent to the new address.",
+    "changeEmailHintIdle": "The code at the next sign-in will go to the new address. No email is sent to it now: the account is inactive or blocked.",
     "newEmail": "New login email",
     "save": "Save",
     "cancel": "Cancel",
@@ -387,6 +394,7 @@
     "blocked": "{email} has been blocked.",
     "unblocked": "{email} has been unblocked.",
     "unblockedInactive": "{email} has been unblocked. The account is inactive: the person restores access with “Forgot password?” on the sign-in page.",
+    "unblockedInvited": "{email} has been unblocked. Send the invitation again if the earlier link has expired.",
     "roleChanged": "The role of {email} has been changed.",
     "emailChanged": "The login email has been changed to {email}.",
     "fieldErrors": {
@@ -422,13 +430,13 @@
     "inviteRoleHint": "Operator and observer organisations have one role.",
     "lastSignInAt": "Last sign-in: {date}",
     "stateHint": {
-      "invited": "Password not set yet",
+      "invited": "Not signed in yet",
       "inactive": "No sign-in for three months; returns through a password reset",
       "blocked": "Cannot sign in until unblocked"
     },
     "accountCount": "{count, plural, one {{total} account} other {{total} accounts}}",
     "noAccountsInvite": "Invite a user into this organisation.",
-    "noAccountsManufacturer": "The manufacturer's account is created at registration.",
+    "manufacturersWithoutAccount": "{count, plural, one {{total} more manufacturer has no account — an account appears at registration.} other {{total} more manufacturers have no account — an account appears at registration.}}",
     "you": "You",
     "dismiss": "Hide message"
   },

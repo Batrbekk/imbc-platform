@@ -176,6 +176,8 @@ describe("свой профиль производителя (MAN-46, IMBC-22)",
     const { user } = renderRoute("/profile", { locale: "en" });
 
     expect(await screen.findByText(en.profile.loadError)).toBeTruthy();
+    // Кнопка «Повторить» — под текстом, а не в AlertAction: у того справа 4,5rem, на 390 px кнопка легла бы на текст.
+    expect(document.querySelector('[data-slot="alert-action"]')).toBeNull();
     expect(screen.getAllByRole("heading", { level: 1 }).map((h) => h.textContent)).toEqual([en.nav.profile]);
     fail = false;
     await user.click(screen.getByRole("button", { name: en.common.retry }));
@@ -360,6 +362,8 @@ describe("данные Adata своего профиля (MAN-06, MAN-07, GEN-11
 
     const card = await adataCard(en.profile.adata.title);
     expect(await within(card).findByText(en.profile.adata.loadError)).toBeTruthy();
+    // Кнопка «Повторить» — под текстом, а не в AlertAction: у того справа 4,5rem, на 390 px кнопка легла бы на текст.
+    expect(card.querySelector('[data-slot="alert-action"]')).toBeNull();
     expect(field(en.profile.company)).toBe(DEMO.organizationName);
     expect(screen.queryByText(en.profile.loadError)).toBeNull();
 

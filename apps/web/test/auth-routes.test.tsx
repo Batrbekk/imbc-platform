@@ -674,6 +674,8 @@ describe("регистрация производителя (MAN-01, MAN-02, FC-
     await user.type(await screen.findByLabelText(kk.register.companyName), "ТОО Тест");
 
     expect(await screen.findByText(kk.register.termsLoadError)).toBeTruthy();
+    // Кнопка «Повторить» — под текстом, а не в AlertAction: у того справа 4,5rem, на 390 px кнопка легла бы на текст.
+    expect(document.querySelector('[data-slot="alert-action"]')).toBeNull();
     const submit = screen.getByRole("button", { name: kk.register.submit }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
     expect(describedBy(submit)).toContain(kk.register.termsLoadError);

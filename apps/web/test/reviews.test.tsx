@@ -155,6 +155,8 @@ describe("очередь проверки SME (REV-04)", () => {
 
     const alert = await screen.findByRole("alert");
     expect(within(alert).getByText(kk.reviews.loadError)).toBeTruthy();
+    // Кнопка «Повторить» — под текстом, а не в AlertAction: у того справа 4,5rem, на 390 px кнопка легла бы на текст.
+    expect(alert.querySelector('[data-slot="alert-action"]')).toBeNull();
     expect(screen.queryByText(kk.reviews.empty)).toBeNull();
     fail = false;
     await user.click(within(alert).getByRole("button", { name: kk.common.retry }));

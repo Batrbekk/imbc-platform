@@ -1,4 +1,4 @@
-// Кабинет администратора: организации и аккаунты (ADM-01, ADM-02, ADM-03, ADM-05, ADM-06, GEN-05, AUTH-06).
+// Кабинет администратора: организации и аккаунты (ADM-01, ADM-02, ADM-03, ADM-05, ADM-06, GEN-05, AUTH-06, AUTH-07).
 import { ADMIN_PROBLEM_CODES, type AdminAccount, type AdminAccounts } from "@imbc/contracts";
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import type { UserEvent } from "@testing-library/user-event";
@@ -131,6 +131,32 @@ const ACCOUNTS: AdminAccounts = {
 
 const ACCOUNTS_PATH = "/api/v1/admin/accounts";
 
+type Organization = AdminAccounts["organizations"][number];
+
+/** Организация без аккаунтов: у наблюдателя в карточке есть «Пригласить пользователя». */
+const EMPTY_OBSERVER: Organization = {
+  id: "00000000-0000-4000-8000-000000000025",
+  name: "Наблюдатель (пустой)",
+  type: "observer",
+  isMajorOperator: false,
+  accounts: [],
+};
+
+/** Производитель без аккаунта: в списке его карточки нет, он только учитывается в строке под разделом. */
+const emptyManufacturer = (n: number): Organization => ({
+  id: `00000000-0000-4000-8000-0000000001${String(n).padStart(2, "0")}`,
+  name: `ТОО «Без аккаунта ${n}»`,
+  type: "manufacturer",
+  isMajorOperator: false,
+  accounts: [],
+});
+
+/** Ответ списка с добавленными организациями. */
+const withOrganizations = (extra: Organization[]): AdminAccounts => ({
+  ...ACCOUNTS,
+  organizations: [...ACCOUNTS.organizations, ...extra],
+});
+
 const accountOf = (id: string): AdminAccount =>
   ACCOUNTS.organizations.flatMap((o) => o.accounts).find((a) => a.id === id)!;
 
@@ -210,19 +236,18 @@ describe("организации и аккаунты администратор�
     expect(await screen.findByRole("heading", { level: 1, name: ru.adminAccounts.title })).toBeTruthy();
     expect(document.title).toBe(`${ru.adminAccounts.title} · ${ru.common.appName}`);
     await screen.findByText("Оператор (демо)");
-    // Карточки — ящик IMBC, затем организации в порядке ответа: по типу, затем по имени.
+    // Карточки — ящик IMBC, затем организации по разделам; производитель без аккаунта карточки не получает.
     expect([...document.querySelectorAll('[data-slot="card-title"]')].map((title) => title.textContent)).toEqual([
       ru.adminAccounts.imbcMailbox,
       "IMBC",
       "Оператор (демо)",
       "Наблюдатель (демо)",
-      "ТОО «Демо Агро Өнім»",
       "ТОО «Станок»",
     ]);
     expect(typeOf("IMBC")).toBe(ru.adminAccounts.typeValue.imbc);
     expect(typeOf("Оператор (демо)")).toBe(ru.adminAccounts.typeValue.operator);
     expect(typeOf("Наблюдатель (демо)")).toBe(ru.adminAccounts.typeValue.observer);
-    expect(typeOf("ТОО «Демо Агро Өнім»")).toBe(ru.adminAccounts.typeValue.manufacturer);
+    expect(typeOf("ТОО «Станок»")).toBe(ru.adminAccounts.typeValue.manufacturer);
     // Бейдж только у крупного оператора.
     expect(within(cardOf("Оператор (демо)")).getByText(ru.adminAccounts.majorOperator)).toBeTruthy();
     expect(screen.getAllByText(ru.adminAccounts.majorOperator)).toHaveLength(1);
@@ -268,9 +293,10 @@ describe("организации и аккаунты администратор�
       ru.adminAccounts.stateHint.blocked,
       never,
     ]);
+    // Имя совпадает с подписью роли («Наблюдатель») — выводится один раз, а не «Наблюдатель · Наблюдатель».
     expect(parts("observer@observer.local")).toEqual([
       "observer@observer.local",
-      `Наблюдатель · ${ru.roles.observer}`,
+      ru.roles.observer,
       state.inactive,
       ru.adminAccounts.stateHint.inactive,
       never,
@@ -299,17 +325,18 @@ describe("организации и аккаунты администратор�
     expect(screen.getAllByText(at(ru, ru.adminAccounts.never))).toHaveLength(3);
   });
 
-  it("организация без аккаунтов — «Аккаунтов пока нет» и что делать дальше", async () => {
-    stubAdmin();
+  it("организация IMBC, оператора или наблюдателя без аккаунтов — «Аккаунтов пока нет» и приглашение; производитель без аккаунта карточки не получает (ADM-06)", async () => {
+    stubAdmin({}, withOrganizations([EMPTY_OBSERVER]));
     renderRoute("/admin/accounts", { locale: "en" });
 
-    await screen.findByText("ТОО «Демо Агро Өнім»");
-    const view = within(cardOf("ТОО «Демо Агро Өнім»"));
+    await screen.findByText(EMPTY_OBSERVER.name);
+    const view = within(cardOf(EMPTY_OBSERVER.name));
     expect(view.getByText(en.adminAccounts.noAccounts)).toBeTruthy();
-    // Аккаунт производителя создаёт регистрация: пригласить в эту организацию нельзя.
-    expect(view.getByText(en.adminAccounts.noAccountsManufacturer)).toBeTruthy();
-    expect(view.queryByRole("button")).toBeNull();
+    expect(view.getByText(en.adminAccounts.noAccountsInvite)).toBeTruthy();
+    expect(view.getByRole("button", { name: en.adminAccounts.inviteUser })).toBeTruthy();
     expect(view.queryByRole("list")).toBeNull();
+    // Пустая карточка производителя не выводится: ни названия, ни рамки, ни кнопки приглашения.
+    expect(screen.queryByText("ТОО «Демо Агро Өнім»")).toBeNull();
     expect(screen.getAllByText(en.adminAccounts.noAccounts)).toHaveLength(1);
   });
 
@@ -759,9 +786,14 @@ describe("кабинет администратора: действия (ADM-01,
         accounts: o.accounts.map((a) => ({ ...a, idpSubject: "kc-subject-1" })),
       })),
     };
-    stubAdmin({}, leaky);
+    const api = stubAdmin({}, leaky);
     const { user } = renderRoute("/admin/accounts", { locale: "ru" });
     await screen.findByText("ТОО «Станок»");
+
+    // Запросы: при открытии уходят ровно два GET — сеанс (/me) и список организаций с ящиком IMBC в одном ответе;
+    // запросов профилей, каталога и компаний нет ни при открытии, ни при открытии диалога приглашения.
+    const requests = () => api.mock.calls.map(([url, init]) => `${init?.method ?? "GET"} ${String(url)}`);
+    expect(requests().sort()).toEqual(["GET /api/auth/me", `GET ${ACCOUNTS_PATH}`].sort());
 
     const text = () => document.body.textContent ?? "";
     for (const forbidden of [
@@ -776,6 +808,8 @@ describe("кабинет администратора: действия (ADM-01,
     // И в диалоге приглашения — только почта, имя, организация и роль.
     await user.click(screen.getByRole("button", { name: ru.adminAccounts.inviteUser }));
     const dialog = await screen.findByRole("dialog");
+    expect(requests().filter((request) => /profile|catalog|compan/i.test(request))).toEqual([]);
+    expect(requests().filter((request) => request.startsWith("GET "))).toHaveLength(2);
     expect(within(dialog).queryByText(ru.register.bin)).toBeNull();
     expect(
       within(dialog)
@@ -865,5 +899,384 @@ describe("кабинет администратора: действия (ADM-01,
       expect(confirm.getByRole("button", { name: t.cancel }), locale).toBeTruthy();
       cleanup();
     }
+  });
+});
+
+describe("кабинет администратора: разделы и состояния (ADM-02, ADM-06, AUTH-07)", () => {
+  const SECOND_OPERATOR: Organization = {
+    id: "00000000-0000-4000-8000-000000000012",
+    name: "Оператор (второй)",
+    type: "operator",
+    isMajorOperator: false,
+    accounts: [],
+  };
+  const MORE: Organization[] = [EMPTY_OBSERVER, SECOND_OPERATOR, emptyManufacturer(1), emptyManufacturer(2)];
+  const headings = () => screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+  const titlesIn = (section: string) =>
+    [
+      ...within(screen.getByRole("region", { name: section })).getAllByText(/./, {
+        selector: '[data-slot="card-title"]',
+      }),
+    ].map((title) => title.textContent);
+
+  it("разделы по типу: IMBC, операторы, наблюдатели, производители; h2 с числом организаций; порядок не зависит от порядка ответа", async () => {
+    // Ответ в обратном порядке: страница всё равно ставит разделы IMBC → операторы → наблюдатели → производители.
+    const reversed = {
+      ...withOrganizations(MORE),
+      organizations: [...withOrganizations(MORE).organizations].reverse(),
+    };
+    stubAdmin({}, reversed);
+    renderRoute("/admin/accounts", { locale: "ru" });
+    await screen.findByText("Оператор (демо)");
+    const t = ru.adminAccounts;
+
+    // Производителей четыре, карточки — у одного: число в заголовке — число карточек.
+    expect(headings()).toEqual([
+      `${t.typeGroup.imbc} 1`,
+      `${t.typeGroup.operator} 2`,
+      `${t.typeGroup.observer} 2`,
+      `${t.typeGroup.manufacturer} 1`,
+    ]);
+    expect(titlesIn(`${t.typeGroup.imbc} 1`)).toEqual(["IMBC"]);
+    expect(titlesIn(`${t.typeGroup.operator} 2`)).toEqual(["Оператор (второй)", "Оператор (демо)"]);
+    expect(titlesIn(`${t.typeGroup.observer} 2`)).toEqual([EMPTY_OBSERVER.name, "Наблюдатель (демо)"]);
+    expect(titlesIn(`${t.typeGroup.manufacturer} 1`)).toEqual(["ТОО «Станок»"]);
+    // Ящик IMBC — над разделами, не внутри них.
+    expect(within(screen.getByRole("region", { name: `${t.typeGroup.imbc} 1` })).queryByText(t.imbcMailbox)).toBeNull();
+  });
+
+  it("пустой раздел не выводится: без наблюдателей нет заголовка «Наблюдатели», без производителей — ни заголовка, ни строки о них", async () => {
+    const t = en.adminAccounts;
+    stubAdmin({}, { ...ACCOUNTS, organizations: ACCOUNTS.organizations.filter((o) => o.type !== "observer") });
+    renderRoute("/admin/accounts", { locale: "en" });
+    await screen.findByText("Оператор (демо)");
+    expect(headings()).toEqual([`${t.typeGroup.imbc} 1`, `${t.typeGroup.operator} 1`, `${t.typeGroup.manufacturer} 1`]);
+    cleanup();
+
+    stubAdmin({}, { ...ACCOUNTS, organizations: ACCOUNTS.organizations.filter((o) => o.type !== "manufacturer") });
+    renderRoute("/admin/accounts", { locale: "en" });
+    await screen.findByText("Оператор (демо)");
+    expect(headings()).toEqual([`${t.typeGroup.imbc} 1`, `${t.typeGroup.operator} 1`, `${t.typeGroup.observer} 1`]);
+    expect(screen.queryByText(/appears at registration/)).toBeNull();
+  });
+
+  it("производитель без аккаунта не выводится, под разделом — строка с верным счётчиком (ADM-06)", async () => {
+    const maker = ACCOUNTS.organizations.find((o) => o.id === "00000000-0000-4000-8000-000000000040")!;
+    const empties = (n: number) => Array.from({ length: n }, (_, i) => emptyManufacturer(i + 1));
+    // Склонение по числу производителей без аккаунта; карточка — только у «Станок».
+    const cases = [
+      ["ru", ru, 1, "Ещё 1 производитель без аккаунта — аккаунт появляется при регистрации."],
+      ["ru", ru, 3, "Ещё 3 производителя без аккаунта — аккаунт появляется при регистрации."],
+      ["ru", ru, 5, "Ещё 5 производителей без аккаунта — аккаунт появляется при регистрации."],
+      ["ru", ru, 21, "Ещё 21 производитель без аккаунта — аккаунт появляется при регистрации."],
+      ["en", en, 1, "1 more manufacturer has no account — an account appears at registration."],
+      ["en", en, 3, "3 more manufacturers have no account — an account appears at registration."],
+      ["kk", kk, 3, "Тағы 3 өндірушіде аккаунт жоқ — аккаунт тіркелу кезінде пайда болады."],
+    ] as const;
+    for (const [locale, m, hidden, line] of cases) {
+      stubAdmin({}, { ...ACCOUNTS, organizations: [maker, ...empties(hidden)] });
+      renderRoute("/admin/accounts", { locale });
+      await screen.findByText("ТОО «Станок»");
+      expect(screen.getByText(line), `${locale}: ${hidden}`).toBeTruthy();
+      // Карточки пустых производителей нет, пригласить в них нельзя.
+      expect(cards().map((c) => c.querySelector('[data-slot="card-title"]')?.textContent)).toEqual([
+        m.adminAccounts.imbcMailbox,
+        "ТОО «Станок»",
+      ]);
+      expect(screen.queryByText(/Без аккаунта/)).toBeNull();
+      expect(
+        within(screen.getByRole("region", { name: `${m.adminAccounts.typeGroup.manufacturer} 1` })).queryByRole(
+          "button",
+          { name: m.adminAccounts.inviteUser },
+        ),
+      ).toBeNull();
+      // У операторов, наблюдателей и IMBC без аккаунтов карточка остаётся — строки о производителях там нет.
+      expect(screen.getAllByText(line)).toHaveLength(1);
+      cleanup();
+    }
+  });
+
+  it("состояние — бейдж: «Активен» спокойный, приглашён и неактивен — контурные, заблокирован — красный", async () => {
+    stubAdmin();
+    renderRoute("/admin/accounts", { locale: "ru" });
+    await screen.findByText("Оператор (демо)");
+    const state = ru.adminAccounts.stateValue;
+    const variant = (email: string, label: string) => row(email).getByText(label).getAttribute("data-variant");
+    expect(variant("maker@maker.local", state.active)).toBe("secondary");
+    expect(variant("expert@imbc.local", state.invited)).toBe("outline");
+    expect(variant("observer@observer.local", state.inactive)).toBe("outline");
+    expect(variant("operator@operator.local", state.blocked)).toBe("destructive");
+  });
+
+  it("имя, совпадающее с подписью роли, выводится один раз; другое имя — перед ролью", async () => {
+    const accounts: AdminAccounts = {
+      ...ACCOUNTS,
+      organizations: ACCOUNTS.organizations.map((o) => ({
+        ...o,
+        accounts: o.accounts.map((a) =>
+          a.id === EXPERT_ID ? { ...a, fullName: ` ${ru.roles.expert.toUpperCase()} ` } : a,
+        ),
+      })),
+    };
+    stubAdmin({}, accounts);
+    renderRoute("/admin/accounts", { locale: "ru" });
+    await screen.findByText("Оператор (демо)");
+    const description = (email: string) => rowOf(email).querySelector('[data-slot="item-description"]')?.textContent;
+    expect(description("expert@imbc.local")).toBe(ru.roles.expert);
+    expect(description("operator@operator.local")).toBe(`Специалист оператора · ${ru.roles.operator}`);
+  });
+
+  it("подписи из брифа: «Электронная почта», «Имя и фамилия», «Ещё не входил» и последствие блокировки — на трёх языках", () => {
+    expect([kk, ru, en].map((m) => m.adminAccounts.email)).toEqual(["Электрондық пошта", "Электронная почта", "Email"]);
+    expect([kk, ru, en].map((m) => m.adminAccounts.name)).toEqual(["Аты-жөні", "Имя и фамилия", "Full name"]);
+    expect([kk, ru, en].map((m) => m.adminAccounts.stateHint.invited)).toEqual([
+      "Әлі кірмеген",
+      "Ещё не входил",
+      "Not signed in yet",
+    ]);
+    // Блокировка снимает доверие к устройствам: после разблокировки нужен код из письма.
+    expect(ru.adminAccounts.blockConfirmText).toContain("доверие к устройствам");
+    expect(ru.adminAccounts.blockConfirmText).toContain("код из письма");
+    expect(en.adminAccounts.blockConfirmText).toContain("trust in its devices");
+    expect(en.adminAccounts.blockConfirmText).toContain("emailed code");
+    expect(kk.adminAccounts.blockConfirmText).toContain("құрылғыларға");
+    expect(kk.adminAccounts.blockConfirmText).toContain("код");
+  });
+
+  it("разблокировка не входившего: итог просит отправить приглашение снова, как у неактивного — путь возврата", async () => {
+    stubAdmin({
+      [`POST ${ACCOUNTS_PATH}/${OPERATOR_ACCOUNT_ID}/unblock`]: {
+        body: { account: { ...accountOf(OPERATOR_ACCOUNT_ID), state: "invited" } },
+      },
+    });
+    const { user } = renderRoute("/admin/accounts", { locale: "en" });
+    const t = en.adminAccounts;
+    await screen.findByText("Оператор (демо)");
+    await openMenu(user, en, "operator@operator.local");
+    await user.click(screen.getByRole("menuitem", { name: t.unblock }));
+    const text = fill(t.unblockedInvited, { email: "operator@operator.local" });
+    expect(await screen.findByText(text)).toBeTruthy();
+    expect(text).toContain("Send the invitation again if the earlier link has expired.");
+  });
+
+  it("подсказка смены почты: письмо на новый адрес — только у приглашённого; у неактивного и заблокированного оно не обещано", async () => {
+    const t = ru.adminAccounts;
+    const expected = {
+      active: t.changeEmailHint,
+      invited: `${t.changeEmailHint} ${t.changeEmailInvitedHint}`,
+      inactive: t.changeEmailHintIdle,
+      blocked: t.changeEmailHintIdle,
+    } as const;
+    for (const state of ["active", "invited", "inactive", "blocked"] as const) {
+      stubAdmin(
+        {},
+        {
+          ...ACCOUNTS,
+          organizations: ACCOUNTS.organizations.map((o) => ({
+            ...o,
+            accounts: o.accounts.map((a) => (a.id === MAKER_ID ? { ...a, state } : a)),
+          })),
+        },
+      );
+      const { user } = renderRoute("/admin/accounts", { locale: "ru" });
+      await screen.findByText("Оператор (демо)");
+      await openMenu(user, ru, "maker@maker.local");
+      await user.click(screen.getByRole("menuitem", { name: t.changeEmail }));
+      const dialog = within(await screen.findByRole("dialog"));
+      expect(dialog.getByText(expected[state]), state).toBeTruthy();
+      if (state === "inactive" || state === "blocked") {
+        expect(dialog.queryByText(t.changeEmailHint), state).toBeNull();
+        expect(dialog.queryByText(new RegExp(t.changeEmailInvitedHint)), state).toBeNull();
+      }
+      cleanup();
+    }
+  });
+});
+
+describe("кабинет администратора: диалоги и строка состояния (ADM-01, ADM-02, ADM-05, AUTH-06)", () => {
+  it("«Сохранить» недоступна, пока значение не изменено: ящик IMBC (адрес с точностью до регистра и пробелов) и роль", async () => {
+    const mailboxPath = "/api/v1/admin/imbc-mailbox";
+    const rolePath = `${ACCOUNTS_PATH}/${EXPERT_ID}/role`;
+    const api = stubAdmin(
+      {
+        [`PUT ${mailboxPath}`]: { body: { imbcMailbox: "other@demo.local" } },
+        [`PUT ${rolePath}`]: { body: { account: { ...accountOf(EXPERT_ID), role: "director" } } },
+      },
+      { ...ACCOUNTS, imbcMailbox: "imbc-mail@demo.local" },
+    );
+    const { user } = renderRoute("/admin/accounts", { locale: "en" });
+    const t = en.adminAccounts;
+    await screen.findByText("Оператор (демо)");
+
+    await user.click(within(cardOf(t.imbcMailbox)).getByRole("button", { name: t.change }));
+    let dialog = within(await screen.findByRole("dialog", { name: t.imbcMailbox }));
+    const save = () => dialog.getByRole("button", { name: t.save }) as HTMLButtonElement;
+    const field = dialog.getByLabelText(t.email);
+    expect(save().disabled).toBe(true);
+    // Enter в неизменённом поле ничего не отправляет.
+    await user.type(field, "{Enter}");
+    expect(sent(api, "PUT", mailboxPath)).toEqual([]);
+    await user.type(field, "x");
+    expect(save().disabled).toBe(false);
+    await user.clear(field);
+    await user.type(field, " IMBC-Mail@demo.local ");
+    expect(save().disabled).toBe(true);
+    await user.clear(field);
+    expect(save().disabled).toBe(false);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    await openMenu(user, en, "expert@imbc.local");
+    await user.click(screen.getByRole("menuitem", { name: t.changeRole }));
+    dialog = within(await screen.findByRole("dialog"));
+    // Роль не менялась — сохранять нечего; вернули прежнюю — снова нечего.
+    expect(save().disabled).toBe(true);
+    await choose(user, t.role, en.roles.director);
+    expect(save().disabled).toBe(false);
+    await choose(user, t.role, en.roles.expert);
+    expect(save().disabled).toBe(true);
+    await choose(user, t.role, en.roles.director);
+    await user.click(save());
+    expect(await screen.findByText(fill(t.roleChanged, { email: "expert@imbc.local" }))).toBeTruthy();
+    expect(sent(api, "PUT", rolePath)).toEqual([{ role: "director" }]);
+    expect(sent(api, "PUT", mailboxPath)).toEqual([]);
+  });
+
+  it("пока запрос в пути, диалог формы не закрывается (Escape, подложка, «Отмена»); итог приходит на открытый диалог", async () => {
+    const path = "/api/v1/admin/imbc-mailbox";
+    let finish!: (response: Response) => void;
+    const api = stubAdmin({
+      [`PUT ${path}`]: () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    const { user } = renderRoute("/admin/accounts", { locale: "en" });
+    const t = en.adminAccounts;
+    await screen.findByText("Оператор (демо)");
+
+    await user.click(within(cardOf(t.imbcMailbox)).getByRole("button", { name: t.change }));
+    const dialog = within(await screen.findByRole("dialog", { name: t.imbcMailbox }));
+    await user.type(dialog.getByLabelText(t.email), "imbc-mail@demo.local");
+    await user.click(dialog.getByRole("button", { name: t.save }));
+    await waitFor(() => expect(sent(api, "PUT", path)).toHaveLength(1));
+
+    expect((dialog.getByRole("button", { name: t.cancel }) as HTMLButtonElement).disabled).toBe(true);
+    await user.keyboard("{Escape}");
+    await user.click(document.querySelector<HTMLElement>('[data-slot="dialog-overlay"]')!);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+
+    finish(Response.json({ imbcMailbox: "imbc-mail@demo.local" }));
+    expect(await screen.findByText(t.mailboxSaved)).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(sent(api, "PUT", path)).toHaveLength(1);
+  });
+
+  it("пока запрос блокировки в пути, подтверждение не закрывается (Escape, «Отмена»)", async () => {
+    const path = `${ACCOUNTS_PATH}/${MAKER_ID}/block`;
+    let finish!: (response: Response) => void;
+    stubAdmin({
+      [`POST ${path}`]: () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    const { user } = renderRoute("/admin/accounts", { locale: "en" });
+    const t = en.adminAccounts;
+    await screen.findByText("Оператор (демо)");
+
+    await openMenu(user, en, "maker@maker.local");
+    await user.click(screen.getByRole("menuitem", { name: t.block }));
+    const confirm = within(await screen.findByRole("alertdialog"));
+    await user.click(confirm.getByRole("button", { name: t.block }));
+    await waitFor(() =>
+      expect((confirm.getByRole("button", { name: t.cancel }) as HTMLButtonElement).disabled).toBe(true),
+    );
+    await user.keyboard("{Escape}");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByRole("alertdialog")).not.toBeNull();
+
+    finish(Response.json({ account: { ...accountOf(MAKER_ID), state: "blocked" } }));
+    expect(await screen.findByText(fill(t.blocked, { email: "maker@maker.local" }))).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  });
+
+  it("одинаковый итог дважды подряд объявляется заново: строка состояния — новый элемент", async () => {
+    const path = `${ACCOUNTS_PATH}/${EXPERT_ID}/invitation`;
+    const api = stubAdmin({ [`POST ${path}`]: { status: 202, body: { status: "password_email_queued" } } });
+    const { user } = renderRoute("/admin/accounts", { locale: "en" });
+    const t = en.adminAccounts;
+    await screen.findByText("Оператор (демо)");
+    const status = () => document.querySelector('[aria-live="polite"]')!;
+
+    await openMenu(user, en, "expert@imbc.local");
+    await user.click(screen.getByRole("menuitem", { name: t.resendInvitation }));
+    const first = (await screen.findByText(t.invitationResent)).closest('[data-slot="alert"]')!;
+    await waitFor(() => expect(listCalls(api)).toHaveLength(2));
+
+    await openMenu(user, en, "expert@imbc.local");
+    await user.click(screen.getByRole("menuitem", { name: t.resendInvitation }));
+    await waitFor(() => expect(sent(api, "POST", path)).toHaveLength(2));
+    // Тот же текст, но прежний элемент заменён: программа чтения с экрана видит добавление и читает снова.
+    await waitFor(() => expect(first.isConnected).toBe(false));
+    const second = status().querySelector('[data-slot="alert"]')!;
+    expect(second.textContent).toBe(t.invitationResent);
+    expect(second).not.toBe(first);
+    expect(status().querySelectorAll('[data-slot="alert"]')).toHaveLength(1);
+  });
+
+  it("приглашение из пустой карточки: кнопка исчезает, фокус — на заголовке карточки; отмена возвращает фокус на кнопку", async () => {
+    const before = withOrganizations([EMPTY_OBSERVER]);
+    const email = "obs-new@demo.local";
+    const created = {
+      id: "00000000-0000-4000-8000-000000000061",
+      email,
+      fullName: "Новый наблюдатель",
+      role: "observer",
+      state: "invited",
+      lastSignInAt: null,
+    } as const;
+    const after: AdminAccounts = {
+      ...before,
+      organizations: before.organizations.map((o) => (o.id === EMPTY_OBSERVER.id ? { ...o, accounts: [created] } : o)),
+    };
+    let invited = false;
+    stubAdmin(
+      {
+        [`GET ${ACCOUNTS_PATH}`]: () => Response.json(invited ? after : before),
+        [`POST ${ACCOUNTS_PATH}`]: () => {
+          invited = true;
+          return Response.json({ account: created }, { status: 201 });
+        },
+      },
+      before,
+    );
+    const { user } = renderRoute("/admin/accounts", { locale: "en" });
+    const t = en.adminAccounts;
+    await screen.findByText(EMPTY_OBSERVER.name);
+    const trigger = () => within(cardOf(EMPTY_OBSERVER.name)).getByRole("button", { name: t.inviteUser });
+
+    // Отмена — фокус на кнопке, с которой диалог открыли.
+    await user.click(trigger());
+    await screen.findByRole("dialog", { name: t.inviteUser });
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(trigger()));
+
+    await user.click(trigger());
+    const dialog = within(await screen.findByRole("dialog", { name: t.inviteUser }));
+    await user.type(dialog.getByLabelText(t.email), email);
+    await user.type(dialog.getByLabelText(t.name), "Новый наблюдатель");
+    await user.click(dialog.getByRole("button", { name: t.invite }));
+    expect(await screen.findByText(fill(t.invited, { email }))).toBeTruthy();
+    await waitFor(() => expect(rowOf(email)).toBeTruthy());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    // Пустой карточки больше нет, кнопка исчезла — фокус не потерян в body.
+    expect(within(cardOf(EMPTY_OBSERVER.name)).queryByRole("button", { name: t.inviteUser })).toBeNull();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(cardOf(EMPTY_OBSERVER.name).querySelector('[data-slot="card-title"]')),
+    );
   });
 });

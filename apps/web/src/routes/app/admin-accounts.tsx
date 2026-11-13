@@ -1,7 +1,7 @@
-import type { AccountState, AdminAccount, AdminAccounts, AdminOrganization } from "@imbc/contracts";
+import type { AccountState, AdminAccount, AdminAccounts, AdminOrganization, OrganizationType } from "@imbc/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { CircleAlertIcon, CircleCheckIcon, XIcon } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 
 import { PageTitle } from "@/components/app/page-title";
@@ -28,13 +28,35 @@ import { AccountActions, MajorOperatorToggle } from "./admin-account-actions";
 import { type ActionResult, ADMIN_ACCOUNTS_KEY, AnnounceContext } from "./admin-actions";
 import { CreateOrganizationDialog, ImbcMailboxDialog, InviteDialog } from "./admin-dialogs";
 
-/** Бейдж состояния аккаунта: активный — основной, заблокированный — красный, прочие — спокойные. */
+/**
+ * Бейдж состояния аккаунта: обычное состояние («Активен») — спокойное, самым ярким пятном страницы остаётся
+ * только блокировка (красный); приглашён и неактивен — контурные.
+ */
 const STATE_BADGE: Record<AccountState, "default" | "secondary" | "outline" | "destructive"> = {
-  active: "default",
-  invited: "secondary",
+  active: "secondary",
+  invited: "outline",
   inactive: "outline",
   blocked: "destructive",
 };
+
+/** Порядок разделов страницы: IMBC, операторы, наблюдатели, производители. */
+const TYPE_ORDER: readonly OrganizationType[] = ["imbc", "operator", "observer", "manufacturer"];
+
+/**
+ * Организации по разделам в порядке `TYPE_ORDER`. Производитель без аккаунта карточки не получает —
+ * приглашать в его организацию нельзя (GEN-01, ADM-06), аккаунт появляется при регистрации, — он лишь
+ * учитывается в `hidden`. Раздел без организаций к показу не попадает.
+ */
+function groupOrganizations(organizations: readonly AdminOrganization[]) {
+  return TYPE_ORDER.map((type) => {
+    const all = organizations.filter((organization) => organization.type === type);
+    const shown = type === "manufacturer" ? all.filter((organization) => organization.accounts.length > 0) : all;
+    return { type, shown, hidden: all.length - shown.length };
+  }).filter((group) => group.shown.length > 0 || group.hidden > 0);
+}
+
+/** Итог последнего действия с номером объявления: тот же итог дважды подряд — новое объявление. */
+type Status = ActionResult & { id: number };
 
 /**
  * Кабинет администратора IMBC: организации и аккаунты (ADM-01, ADM-02, ADM-03, ADM-05, GEN-05).
@@ -45,14 +67,18 @@ const STATE_BADGE: Record<AccountState, "default" | "secondary" | "outline" | "d
 export function AdminAccountsPage() {
   const t = useTranslations("adminAccounts");
   const common = useTranslations("common");
-  const [status, setStatus] = useState<ActionResult | null>(null);
-  const announce = useCallback((result: ActionResult) => setStatus(result), []);
+  const [status, setStatus] = useState<Status | null>(null);
+  const announce = useCallback(
+    (result: ActionResult) => setStatus((current) => ({ ...result, id: (current?.id ?? 0) + 1 })),
+    [],
+  );
 
   const result = useQuery({
     queryKey: ADMIN_ACCOUNTS_KEY,
     queryFn: () => api<AdminAccounts>("/v1/admin/accounts"),
   });
   const organizations = result.data?.organizations ?? [];
+  const groups = groupOrganizations(organizations);
 
   return (
     <AnnounceContext.Provider value={announce}>
@@ -60,8 +86,9 @@ export function AdminAccountsPage() {
         <PageTitle title={t("title")} />
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
+          {/* На узком экране кнопки — столбцом во всю ширину, как кнопки диалогов; с `sm` — в ряд справа. */}
           {result.data && (
-            <div className="flex flex-wrap gap-2">
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
               <CreateOrganizationDialog />
               <InviteDialog organizations={organizations} />
             </div>
@@ -69,10 +96,17 @@ export function AdminAccountsPage() {
         </div>
 
         {/* Итог последнего действия: виден и после прокрутки к нужной карточке (липкий), читается программой
-            чтения с экрана (aria-live polite) и остаётся до следующего действия или до «Скрыть». */}
+            чтения с экрана (aria-live polite) и остаётся до следующего действия или до «Скрыть». Alert —
+            с ключом объявления: тот же текст дважды подряд — новый элемент, его читают заново; он же коротко
+            проявляется, и видно, что действие выполнено ещё раз. */}
         <div aria-live="polite" aria-atomic="true" className="sticky top-2 z-20 empty:-mt-4">
           {status && (
-            <Alert role={undefined} variant={status.tone === "error" ? "destructive" : "default"} className="shadow-md">
+            <Alert
+              key={status.id}
+              role={undefined}
+              variant={status.tone === "error" ? "destructive" : "default"}
+              className="shadow-md animate-in fade-in-0 duration-200"
+            >
               {status.tone === "error" ? (
                 <CircleAlertIcon aria-hidden="true" />
               ) : (
@@ -111,9 +145,11 @@ export function AdminAccountsPage() {
                 </EmptyHeader>
               </Empty>
             ) : (
-              organizations.map((organization) => (
-                <OrganizationCard key={organization.id} organization={organization} organizations={organizations} />
-              ))
+              <div className="flex flex-col gap-6">
+                {groups.map((group) => (
+                  <OrganizationGroup key={group.type} {...group} organizations={organizations} />
+                ))}
+              </div>
             )}
           </>
         )}
@@ -145,6 +181,43 @@ function MailboxCard({ mailbox }: { mailbox: string | null }) {
   );
 }
 
+/**
+ * Раздел страницы — организации одного типа: заголовок h2 с числом карточек и сами карточки. Под разделом
+ * производителей — строка о тех, у кого аккаунта ещё нет: их карточки пусты и прятали бы настоящие аккаунты.
+ */
+function OrganizationGroup({
+  type,
+  shown,
+  hidden,
+  organizations,
+}: {
+  type: OrganizationType;
+  shown: readonly AdminOrganization[];
+  hidden: number;
+  organizations: readonly AdminOrganization[];
+}) {
+  const t = useTranslations("adminAccounts");
+  const format = useFormat();
+  const headingId = useId();
+  return (
+    <section aria-labelledby={headingId} className="flex flex-col gap-3">
+      <h2 id={headingId} className="flex items-baseline gap-2 text-lg font-semibold tracking-tight">
+        {t(`typeGroup.${type}`)}
+        {/* Пробел нужен имени заголовка («Операторы 2»): у flex-элементов его не видно, программа чтения его слышит. */}{" "}
+        <span className="text-sm font-normal text-muted-foreground tabular-nums">{format.number(shown.length)}</span>
+      </h2>
+      {shown.map((organization) => (
+        <OrganizationCard key={organization.id} organization={organization} organizations={organizations} />
+      ))}
+      {hidden > 0 && (
+        <p className="text-sm text-muted-foreground">
+          {t("manufacturersWithoutAccount", { count: hidden, total: format.number(hidden) })}
+        </p>
+      )}
+    </section>
+  );
+}
+
 function OrganizationCard({
   organization,
   organizations,
@@ -156,11 +229,20 @@ function OrganizationCard({
   const format = useFormat();
   const me = useMe();
   const count = organization.accounts.length;
+  // После приглашения из пустой карточки кнопка-триггер исчезает (в карточке появляется аккаунт):
+  // фокус уходит на заголовок карточки, а не теряется в body.
+  const title = useRef<HTMLDivElement>(null);
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="wrap-anywhere">{organization.name}</CardTitle>
+        <CardTitle
+          ref={title}
+          tabIndex={-1}
+          className="rounded-sm wrap-anywhere outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        >
+          {organization.name}
+        </CardTitle>
         <CardDescription>
           <span>{t(`typeValue.${organization.type}`)}</span>
           <span aria-hidden="true"> · </span>
@@ -176,22 +258,19 @@ function OrganizationCard({
         {count === 0 ? (
           <div className="flex flex-col items-start gap-2 rounded-lg border border-dashed p-4 text-sm">
             <p className="font-medium">{t("noAccounts")}</p>
-            {organization.type === "manufacturer" ? (
-              <p className="text-muted-foreground">{t("noAccountsManufacturer")}</p>
-            ) : (
-              <>
-                <p className="text-muted-foreground">{t("noAccountsInvite")}</p>
-                <InviteDialog
-                  organizations={organizations}
-                  organizationId={organization.id}
-                  trigger={
-                    <Button variant="outline" size="sm">
-                      {t("inviteUser")}
-                    </Button>
-                  }
-                />
-              </>
-            )}
+            {/* Пустая карточка бывает только у IMBC, оператора и наблюдателя: производитель без аккаунта
+                карточки не получает (`groupOrganizations`), а приглашать в его организацию нельзя (ADM-06). */}
+            <p className="text-muted-foreground">{t("noAccountsInvite")}</p>
+            <InviteDialog
+              organizations={organizations}
+              organizationId={organization.id}
+              invitedFocus={title}
+              trigger={
+                <Button variant="outline" size="sm">
+                  {t("inviteUser")}
+                </Button>
+              }
+            />
           </div>
         ) : (
           <ItemGroup className="gap-2">
@@ -233,6 +312,9 @@ function AccountRow({
   const roles = useTranslations("roles");
   const format = useFormat();
   const hint = account.state === "active" ? null : t(`stateHint.${account.state}`);
+  const role = roles(account.role);
+  // У демо-аккаунтов имя совпадает с подписью роли («Администратор IMBC») — тогда оно выводится один раз.
+  const showName = !!account.fullName && account.fullName.trim().toLowerCase() !== role.toLowerCase();
 
   return (
     <Item
@@ -249,13 +331,13 @@ function AccountRow({
           {isSelf && <Badge variant="outline">{t("you")}</Badge>}
         </ItemTitle>
         <ItemDescription className="line-clamp-none">
-          {account.fullName && (
+          {showName && (
             <>
               <span>{account.fullName}</span>
               <span aria-hidden="true"> · </span>
             </>
           )}
-          <span>{roles(account.role)}</span>
+          <span>{role}</span>
         </ItemDescription>
       </ItemContent>
       <ItemActions className="col-start-2 row-start-1 justify-end md:col-start-4">
