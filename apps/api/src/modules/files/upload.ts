@@ -163,7 +163,12 @@ export async function acceptUpload(file: Express.Multer.File | undefined): Promi
   const mediaType = await detectMediaType(bytes);
   if (!mediaType) throw typeNotAllowed();
   if (!fileExtensionMatches(originalName, mediaType)) throw typeMismatch();
-  if (OOXML_TYPES.has(mediaType) && zipStructureIssue(bytes) !== null) throw structureUnsupported();
+  const structure = OOXML_TYPES.has(mediaType) ? zipStructureIssue(bytes) : null;
+  if (structure !== null) {
+    // Причина — для разбора ложных отказов законным документам; имени файла в журнале нет.
+    logger.log({ reason: structure }, 'File upload: ZIP structure not accepted');
+    throw structureUnsupported();
+  }
   return {
     originalName,
     declaredMediaType: cleanDeclaredType(file.mimetype),

@@ -1,14 +1,22 @@
 /**
- * Структура ZIP документа DOCX или XLSX до хранилища (DATA-06, DATA-07). ClamAV 1.4 не разбирает записи ZIP64
- * (проверено на живом clamd: EICAR в записи с ZIP64 только в локальном заголовке — «OK»), то есть такой архив
- * антивирус целиком не проверит, и платформа его не принимает. Повреждённая структура — тоже отказ: что не
- * разобрать здесь, не обязательно разберёт и антивирус. Разбор — по буферу загрузки, без распаковки.
+ * Структура ZIP документа DOCX или XLSX до хранилища (DATA-06, DATA-07). Антивирус и Office читают архив
+ * по-разному: Word, Excel, LibreOffice и .NET — по центральному каталогу, а libclamav (`unzip.c`) при сброшенном
+ * бите 3 флагов берёт размеры и метод сжатия из локального заголовка и запись с нулевым или «переполняющим»
+ * размером пропускает. Запись, у которой локальный заголовок расходится с каталогом, может пройти мимо антивируса и
+ * быть прочитана Office (ZIP64 — частный случай: на живом clamd EICAR в записи с ZIP64 только в локальном
+ * заголовке — «OK»). Поэтому платформа принимает только архив, который обе стороны читают одинаково: без ZIP64,
+ * без комментария, с совпадающими локальными заголовками и записями каталога. Разбор — по буферу, без распаковки.
  */
 
-/** Почему архив не принят. Признаки ZIP64 — `zip64_*`, прочее — повреждённая или необычная структура. */
+/** Почему архив не принят — для журнала и тестов; клиенту уходит один код `file_structure_unsupported`. */
 export type ZipStructureIssue =
-  /** Нет записи конца центрального каталога, которая заканчивает файл (усечённый или не ZIP). */
+  /** В последних 64 КиБ нет целой записи конца каталога (усечённый архив или не ZIP). */
   | 'end_record_missing'
+  /**
+   * Запись конца каталога не занимает ровно последние 22 байта файла с пустым комментарием: у архива комментарий,
+   * после записи есть байты или в комментарии подделана вторая запись. Office комментарий не пишет.
+   */
+  | 'archive_comment'
   /** Перед записью конца каталога — локатор конца каталога ZIP64 (`0x07064b50`). */
   | 'zip64_locator'
   /** Между каталогом и записью его конца — запись конца каталога ZIP64 (`0x06064b50`). */
@@ -31,6 +39,19 @@ export type ZipStructureIssue =
   | 'central_entry_malformed'
   /** Локальный заголовок без сигнатуры, за пределами данных или с дополнительными полями за своей длиной. */
   | 'local_header_malformed'
+  /** Шифрование: бит 0, 6 или 13 флагов в локальном заголовке или в записи каталога. */
+  | 'encrypted'
+  /** Бит 3 флагов (описатель данных) в локальном заголовке и в записи каталога не совпадает. */
+  | 'descriptor_flag_mismatch'
+  /** Метод сжатия в локальном заголовке и в записи каталога не совпадает. */
+  | 'method_mismatch'
+  /** Метод сжатия не 0 (stored) и не 8 (deflate). */
+  | 'method_unsupported'
+  /**
+   * Размеры в локальном заголовке расходятся с каталогом: без описателя данных — не равны, с описателем — не нули
+   * и не равны.
+   */
+  | 'local_sizes_mismatch'
   /** Данные двух записей перекрываются (так строят архивные бомбы). */
   | 'entries_overlap';
 
@@ -48,18 +69,24 @@ const END_RECORD = 22;
 const CENTRAL_HEADER = 46;
 const LOCAL_HEADER = 30;
 const ZIP64_LOCATOR = 20;
+/** Бит 0 — шифрование, бит 6 — сильное шифрование, бит 13 — зашифрованный каталог (маскирует локальные заголовки). */
+const ENCRYPTION_FLAGS = 0x0001 | 0x0040 | 0x2000;
+/** Бит 3 — размеры и CRC в описателе данных после записи, в локальном заголовке нули. */
+const DESCRIPTOR_FLAG = 0x0008;
+const STORED = 0;
+const DEFLATE = 8;
 
 /**
- * Запись конца каталога, которая заканчивает файл: от конца назад, с комментарием ровно до последнего байта.
- * Нет такой — -1.
+ * Запись конца каталога — ровно последние 22 байта файла с пустым комментарием: clamd и читатели Office берут первую
+ * сигнатуру с конца, и это должна быть она же. Иначе — есть ли сигнатура в пределах комментария (64 КиБ) вообще.
  */
-function findEndRecord(bytes: Buffer): number {
-  const last = bytes.length - END_RECORD;
-  for (let at = last; at >= 0 && at >= last - U16_MAX; at--) {
-    if (bytes.readUInt32LE(at) === SIGNATURE.end && at + END_RECORD + bytes.readUInt16LE(at + 20) === bytes.length)
-      return at;
-  }
-  return -1;
+function endRecordIssue(bytes: Buffer): 'end_record_missing' | 'archive_comment' | null {
+  const at = bytes.length - END_RECORD;
+  if (at >= 0 && bytes.readUInt32LE(at) === SIGNATURE.end && bytes.readUInt16LE(at + 20) === 0) return null;
+  // Целая запись (22 байта) не на своём месте — комментарий, байты после неё или подделка; обрывок — усечённый файл.
+  for (let candidate = at; candidate >= 0 && candidate >= at - U16_MAX; candidate--)
+    if (bytes.readUInt32LE(candidate) === SIGNATURE.end) return 'archive_comment';
+  return 'end_record_missing';
 }
 
 /**
@@ -80,14 +107,22 @@ function extraFieldsIssue(bytes: Buffer, start: number, length: number): 'zip64'
 }
 
 /**
- * Проверка структуры ZIP по буферу: null — архив без ZIP64 и с целой структурой (центральный каталог вплотную
- * к записи своего конца, каждая запись каталога и её локальный заголовок в пределах файла, данные записей не
- * перекрываются). Иначе — первый найденный признак. Локальные заголовки проверяются обязательно: Python
- * с `force_zip64` пишет ZIP64 только в локальный заголовок, а в каталоге размеры обычные.
+ * Проверка структуры ZIP по буферу: null — архив принят, иначе — первая найденная причина отказа. Принят архив,
+ * который антивирус и Office читают одинаково:
+ * - запись конца каталога — последние 22 байта файла, комментария нет; ZIP64 нет нигде (записи конца и локатор,
+ *   `0xFFFF` / `0xFFFFFFFF`, поле `0x0001` в каталоге и в локальных заголовках);
+ * - каталог вплотную к записи своего конца, каждая его запись и её локальный заголовок — в пределах файла, данные
+ *   записей не перекрываются;
+ * - у каждой записи локальный заголовок совпадает с каталогом: без шифрования, бит 3 одинаков, метод одинаков и это
+ *   stored или deflate, размеры равны (с описателем данных — нули или равны).
+ * Имена файлов в двух заголовках не сверяются; записи вне каталога и промежутки между записями не проверяются.
+ * Известное ограничение: вложенные архивы (например, `word/embeddings/*.xlsx`) не разбираются — до открытия
+ * загрузок производителю (этап 3).
  */
 export function zipStructureIssue(bytes: Buffer): ZipStructureIssue | null {
-  const end = findEndRecord(bytes);
-  if (end === -1) return 'end_record_missing';
+  const endIssue = endRecordIssue(bytes);
+  if (endIssue) return endIssue;
+  const end = bytes.length - END_RECORD;
   if (end >= ZIP64_LOCATOR && bytes.readUInt32LE(end - ZIP64_LOCATOR) === SIGNATURE.zip64Locator)
     return 'zip64_locator';
 
@@ -113,6 +148,8 @@ export function zipStructureIssue(bytes: Buffer): ZipStructureIssue | null {
   let at = directoryOffset;
   for (let index = 0; index < entries; index++) {
     if (at + CENTRAL_HEADER > end || bytes.readUInt32LE(at) !== SIGNATURE.central) return 'central_entry_malformed';
+    const flags = bytes.readUInt16LE(at + 8);
+    const method = bytes.readUInt16LE(at + 10);
     const compressed = bytes.readUInt32LE(at + 20);
     const uncompressed = bytes.readUInt32LE(at + 24);
     const nameLength = bytes.readUInt16LE(at + 28);
@@ -132,17 +169,29 @@ export function zipStructureIssue(bytes: Buffer): ZipStructureIssue | null {
     // Локальный заголовок этой записи и её данные — до начала каталога.
     if (localOffset + LOCAL_HEADER > directoryOffset || bytes.readUInt32LE(localOffset) !== SIGNATURE.local)
       return 'local_header_malformed';
+    const localFlags = bytes.readUInt16LE(localOffset + 6);
+    const localMethod = bytes.readUInt16LE(localOffset + 8);
     const localCompressed = bytes.readUInt32LE(localOffset + 18);
     const localUncompressed = bytes.readUInt32LE(localOffset + 22);
     const localNameLength = bytes.readUInt16LE(localOffset + 26);
     const localExtraLength = bytes.readUInt16LE(localOffset + 28);
-    if (localCompressed === U32_MAX || localUncompressed === U32_MAX) return 'zip64_local_values';
     const localExtraStart = localOffset + LOCAL_HEADER + localNameLength;
     if (localExtraStart + localExtraLength > directoryOffset) return 'local_header_malformed';
     const localExtra = extraFieldsIssue(bytes, localExtraStart, localExtraLength);
-    if (localExtra === 'zip64') return 'zip64_local_extra';
     if (localExtra === 'malformed') return 'local_header_malformed';
-    // Размер данных — из каталога: при дескрипторе данных (бит 3) в локальном заголовке нули.
+
+    // Локальный заголовок читается антивирусом так же, как каталог — Office.
+    if ((flags | localFlags) & ENCRYPTION_FLAGS) return 'encrypted';
+    if (localCompressed === U32_MAX || localUncompressed === U32_MAX) return 'zip64_local_values';
+    if (localExtra === 'zip64') return 'zip64_local_extra';
+    if ((flags & DESCRIPTOR_FLAG) !== (localFlags & DESCRIPTOR_FLAG)) return 'descriptor_flag_mismatch';
+    if (method !== localMethod) return 'method_mismatch';
+    if (method !== STORED && method !== DEFLATE) return 'method_unsupported';
+    const sameSizes = localCompressed === compressed && localUncompressed === uncompressed;
+    const zeroSizes = localCompressed === 0 && localUncompressed === 0;
+    if (flags & DESCRIPTOR_FLAG ? !(sameSizes || zeroSizes) : !sameSizes) return 'local_sizes_mismatch';
+
+    // Размер данных — из каталога: при описателе данных (бит 3) в локальном заголовке нули.
     const dataEnd = localExtraStart + localExtraLength + compressed;
     if (dataEnd > directoryOffset) return 'local_header_malformed';
     records.push({ start: localOffset, end: dataEnd });

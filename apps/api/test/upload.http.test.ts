@@ -191,12 +191,23 @@ describe('загрузка файла: предел, тип по содержи�
   });
 
   it('DOCX и XLSX с ZIP64 (запись с force_zip64, каталог ZIP64) и усечённый DOCX — 415 file_structure_unsupported; обычные DOCX и XLSX принимаются (DATA-07)', async () => {
-    for (const name of ['zip64-local.docx', 'zip64-local.xlsx', 'zip64-directory.docx', 'truncated.docx']) {
+    const log = vi.spyOn(Logger.prototype, 'log');
+    for (const [name, reason] of [
+      ['zip64-local.docx', 'zip64_local_values'],
+      ['zip64-local.xlsx', 'zip64_local_values'],
+      ['zip64-directory.docx', 'zip64_locator'],
+      ['truncated.docx', 'end_record_missing'],
+    ] as const) {
+      log.mockClear();
       const res = await upload(form(['file', fixture(name), name]));
       expect(res, name).toMatchObject({ status: 415, body: { status: 415, code: 'file_structure_unsupported' } });
       expect(JSON.stringify(res.body), name).not.toContain(name);
+      // Причина различима в журнале, имени файла там нет.
+      expect(log).toHaveBeenCalledWith({ reason }, 'File upload: ZIP structure not accepted');
+      expect(inspect(log.mock.calls)).not.toContain(name);
     }
-    for (const name of ['sample.docx', 'sample.xlsx'])
+    log.mockRestore();
+    for (const name of ['sample.docx', 'sample.xlsx', 'sample-deflated.docx'])
       expect(await upload(form(['file', fixture(name), name])), name).toMatchObject({ status: 200 });
   });
 
