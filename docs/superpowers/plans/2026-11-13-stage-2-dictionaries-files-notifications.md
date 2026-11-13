@@ -49,6 +49,7 @@
 - `file_version`: проверки `version_number > 0`, `byte_size between 1 and 26214400` (DATA-06); уникальный `storage_key`; частичный индекс `pending` для зачистки.
 - `org_chart_sample.is_current` по умолчанию `true` (DBML), но сервис вставляет `false` до прохождения скана (расхождение 13); уникальный `file_object_id`.
 - Индексы поиска, которых нет в DBML: префикс `lower(code) text_pattern_ops`, триграммы `dictionary_entry_translation.name`.
+- `dictionary_entry_translation.dictionary_entry_id` — `ON DELETE CASCADE` (перевод не живёт без значения); `notification.sent_at` — `DEFAULT now()`; `notification_rule_code_uq` — ограничение `UNIQUE` в `CREATE TABLE`, а не индекс (на него ссылается внешний ключ журнала); отдельного префиксного индекса нет — префиксный поиск обслуживает уникальный `dictionary_entry_code_uq (dictionary_id, lower(code) text_pattern_ops)` (задача 1, `ad0de3a`).
 - Скелетные `dictionaries`, `dictionary_entries`, `file_objects`, `file_versions`, `notifications_sent` и тип `scan_state` живут до contract (NFR-06).
 
 ## Права, аудит, уведомления этапа
