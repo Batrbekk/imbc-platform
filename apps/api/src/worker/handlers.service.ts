@@ -1,20 +1,12 @@
-import {
-  CopyObjectCommand,
-  DeleteObjectCommand,
-  DeleteObjectsCommand,
-  GetObjectCommand,
-  type S3Client,
-} from '@aws-sdk/client-s3';
+import { DeleteObjectsCommand, type S3Client } from '@aws-sdk/client-s3';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, eq, isNotNull, lt, sql } from 'drizzle-orm';
-import type { Readable } from 'node:stream';
 import { AuditService } from '../common/audit.service.js';
 import { ENV, type Env } from '../config/env.js';
 import { DB, type Database } from '../database/database.module.js';
 import {
   certificates,
   exportFiles,
-  fileVersions,
   notificationsSent,
   otpCodes,
   sessions,
@@ -32,8 +24,7 @@ import { KeycloakAdminService, KeycloakRequestError } from '../modules/auth/keyc
 import { SessionService } from '../modules/auth/session.service.js';
 import { sha256 } from '../modules/auth/crypto.js';
 import { ManufacturerOnboardingService } from '../modules/registration/onboarding.service.js';
-import type { AccountJob, IdentityJob, IdentitySyncJob, ScanFileJob, SendNotificationJob } from '../jobs/queues.js';
-import { scanStream } from './clamd.js';
+import type { AccountJob, IdentityJob, IdentitySyncJob, SendNotificationJob } from '../jobs/queues.js';
 
 type SecurityEvent = Awaited<ReturnType<KeycloakAdminService['securityEvents']>>[number];
 
@@ -64,43 +55,6 @@ export class JobHandlers {
     private readonly sessions: SessionService,
     private readonly onboarding: ManufacturerOnboardingService,
   ) {}
-
-  /** Файл из карантина проверяется ClamAV и только чистым переносится в рабочий бакет (FILE-03). */
-  async scanFile({ fileVersionId }: ScanFileJob): Promise<void> {
-    const [version] = await this.db.select().from(fileVersions).where(eq(fileVersions.id, fileVersionId));
-    if (!version || version.scanState !== 'pending') return;
-
-    const object = await this.s3.send(new GetObjectCommand({ Bucket: version.bucket, Key: version.objectKey }));
-    const verdict = await scanStream(this.env.CLAMAV_HOST, this.env.CLAMAV_PORT, object.Body as Readable);
-
-    if (verdict.clean) {
-      await this.s3.send(
-        new CopyObjectCommand({
-          Bucket: this.env.S3_BUCKET_FILES,
-          Key: version.objectKey,
-          CopySource: `${version.bucket}/${encodeURIComponent(version.objectKey)}`,
-        }),
-      );
-      await this.db
-        .update(fileVersions)
-        .set({ scanState: 'clean', scannedAt: new Date(), bucket: this.env.S3_BUCKET_FILES })
-        .where(eq(fileVersions.id, fileVersionId));
-    } else {
-      await this.db
-        .update(fileVersions)
-        .set({ scanState: 'infected', scannedAt: new Date() })
-        .where(eq(fileVersions.id, fileVersionId));
-      await this.audit.record({
-        userId: version.uploadedBy,
-        action: 'file.infected',
-        objectType: 'file_version',
-        objectId: fileVersionId,
-        outcome: 'denied',
-        diff: { signature: verdict.signature },
-      });
-    }
-    await this.s3.send(new DeleteObjectCommand({ Bucket: version.bucket, Key: version.objectKey }));
-  }
 
   /** Одно письмо на событие и адрес: уникальный ключ в notifications_sent (NOT-20, ADR-22). */
   async sendNotification(job: SendNotificationJob): Promise<void> {

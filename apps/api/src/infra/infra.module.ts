@@ -5,7 +5,8 @@ import nodemailer, { type Transporter } from 'nodemailer';
 import { PgBoss } from 'pg-boss';
 import { ENV, type Env } from '../config/env.js';
 import { databaseErrorSummary } from '../database/pg-errors.js';
-import { ADATA_QUEUE_OPTIONS, QUEUES } from '../jobs/queues.js';
+import { ADATA_QUEUE_OPTIONS, FILE_SCAN_QUEUE_OPTIONS, QUEUES } from '../jobs/queues.js';
+import { OBJECT_STORAGE, S3ObjectStorage } from '../modules/files/object-storage.js';
 
 export const VALKEY = Symbol('VALKEY');
 export const S3 = Symbol('S3');
@@ -47,6 +48,8 @@ export function logQueueError(logger: Pick<Logger, 'error'>, error: unknown): vo
           credentials: { accessKeyId: env.S3_ACCESS_KEY, secretAccessKey: env.S3_SECRET_KEY },
         }),
     },
+    // Байты файлов — только через этот интерфейс: карантин, рабочий бакет, без presigned URL (NFR-09).
+    { provide: OBJECT_STORAGE, inject: [S3], useFactory: (s3: S3Client) => new S3ObjectStorage(s3) },
     {
       provide: MAILER,
       inject: [ENV],
@@ -66,7 +69,7 @@ export function logQueueError(logger: Pick<Logger, 'error'>, error: unknown): vo
         }),
     },
   ],
-  exports: [VALKEY, S3, MAILER, QUEUE],
+  exports: [VALKEY, S3, OBJECT_STORAGE, MAILER, QUEUE],
 })
 export class InfraModule implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(InfraModule.name);
@@ -94,6 +97,8 @@ export class InfraModule implements OnModuleInit, OnApplicationShutdown {
     await this.queue.createQueue(QUEUES.adataPrefill, ADATA_QUEUE_OPTIONS);
     // Действия администратора ставят identity-sync в своей транзакции (ADM-02, ADM-05); повторы — как у worker.
     await this.queue.createQueue(QUEUES.identitySync, { retryLimit: 5, retryDelay: 30, retryBackoff: true });
+    // Загрузка ставит проверку файла в своей транзакции (DATA-07) — до старта worker.
+    await this.queue.createQueue(QUEUES.fileScan, FILE_SCAN_QUEUE_OPTIONS);
     await this.valkey.connect().catch((error: unknown) => this.logger.warn(`Valkey недоступен: ${String(error)}`));
   }
 

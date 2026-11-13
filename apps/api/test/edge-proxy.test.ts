@@ -1,7 +1,9 @@
 // Консоль аккаунта Keycloak (`/kc/realms/<realm>/account`) закрыта на обоих edge-прокси: стандартный
 // интерфейс IdP не показывается (AGENTS.md), а почту-логин меняет только администратор IMBC (MAN-05, ADM-05).
 // OIDC, действия входа, ресурсы темы и консоль администратора (её закрывает правило @private) правило не задевает.
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const read = (path: string) => readFileSync(new URL(`../../../infrastructure/${path}`, import.meta.url), 'utf8');
@@ -89,5 +91,87 @@ describe('edge: консоль аккаунта Keycloak закрыта (MAN-05,
     const before = 'location ~* ^/kc/realms/[^/]+/account(/|;|$) { return 404; }';
     expect(regexLocations(before)).toEqual([{ quoted: false, source: '^/kc/realms/[^/]+/account(/|;|$)' }]);
     expect(regexLocations(NGINX_LOCATION)).toEqual([{ quoted: true, source: '^/kc/realms/[^/]+/account(/|;|$)' }]);
+  });
+});
+
+// Файлы никогда не доступны напрямую (NFR-09): S3 API RustFS (порт 9000) не опубликован ни на хосте, ни через
+// edge-прокси; байты отдаёт только API после проверки прав (GEN-09). Консоль RustFS (9001) на сервере — только
+// на 127.0.0.1 (доступ администратора через SSH-туннель).
+const repository = (path: string) => readFileSync(new URL(`../../../${path}`, import.meta.url), 'utf8');
+const compose = repository('compose.yaml');
+const composeAzure = repository('compose.azure.yaml');
+
+/** Блок сервиса `name` из `services:` (отступ два пробела) до следующего ключа того же или верхнего уровня. */
+const serviceBlock = (file: string, name: string) => {
+  const lines = file.split('\n');
+  const start = lines.indexOf(`  ${name}:`);
+  if (start === -1) return null;
+  const end = lines.findIndex((line, i) => i > start && /^ {0,2}[^\s#]/.test(line));
+  return lines.slice(start, end === -1 ? undefined : end).join('\n');
+};
+
+/** Значения `ports:` блока сервиса: список строк `- "…"` или строка `ports: [...]`. */
+const publishedPorts = (block: string) => {
+  const lines = block.split('\n');
+  const at = lines.findIndex((line) => /^\s+ports:/.test(line));
+  if (at === -1) return [];
+  const inline = /ports:\s*(?:!override\s*)?\[(.*)\]/.exec(lines[at]!);
+  if (inline) return inline[1]!.split(',').map((port) => port.trim().replace(/^"|"$/g, ''));
+  const ports: string[] = [];
+  for (const line of lines.slice(at + 1)) {
+    const item = /^\s+-\s+"?([^"\s]+)"?\s*$/.exec(line);
+    if (!item) break;
+    ports.push(item[1]!);
+  }
+  return ports;
+};
+
+describe('edge: S3 не опубликован (NFR-09)', () => {
+  it('S3 не опубликован: Caddyfile и nginx.conf не упоминают rustfs и :9000; у rustfs в compose.yaml нет порта 9000, в compose.azure.yaml — только 127.0.0.1:9001 (NFR-09)', () => {
+    for (const [name, conf] of [
+      ['Caddyfile', caddyfile],
+      ['nginx.conf', nginxConf],
+    ] as const) {
+      expect(conf, name).not.toMatch(/rustfs/i);
+      expect(conf, name).not.toContain(':9000');
+    }
+
+    const rustfs = serviceBlock(compose, 'rustfs');
+    expect(rustfs).not.toBeNull();
+    const ports = publishedPorts(rustfs!);
+    expect(ports.length).toBeGreaterThan(0);
+    for (const port of ports) expect(port, port).not.toMatch(/(^|:)9000$/);
+
+    const azureRustfs = serviceBlock(composeAzure, 'rustfs');
+    expect(azureRustfs).not.toBeNull();
+    expect(publishedPorts(azureRustfs!)).toEqual(['127.0.0.1:9001:9001']);
+  });
+
+  it('без подписанных ссылок: API не зависит от s3-request-presigner и не вызывает getSignedUrl', () => {
+    const pkg = JSON.parse(repository('apps/api/package.json')) as Record<string, Record<string, string> | undefined>;
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+    expect(Object.keys(deps).filter((name) => /presign/i.test(name))).toEqual([]);
+    const sources = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory()
+          ? sources(join(dir, entry.name))
+          : entry.name.endsWith('.ts')
+            ? [join(dir, entry.name)]
+            : [],
+      );
+    const src = fileURLToPath(new URL('../src', import.meta.url));
+    const signing = sources(src).filter((path) =>
+      /getSignedUrl|createPresignedPost|s3-request-presigner/.test(readFileSync(path, 'utf8')),
+    );
+    expect(signing).toEqual([]);
+  });
+
+  it('бакеты создаются без публичной политики и ACL; разбор блока сервиса и портов видит прежнюю запись', () => {
+    expect(serviceBlock(compose, 'buckets')).not.toMatch(/bucket-policy|bucket-acl|public-read|anonymous/i);
+    const published =
+      'services:\n  rustfs:\n    image: x\n    ports: ["9000:9000", "9001:9001"]\n  keycloak:\n    ports: ["8180:8080"]\n';
+    expect(publishedPorts(serviceBlock(published, 'rustfs')!)).toEqual(['9000:9000', '9001:9001']);
+    const listed = 'services:\n  rustfs:\n    ports:\n      - "9000:9000"\n      - "127.0.0.1:9001:9001"\n\nvolumes:\n';
+    expect(publishedPorts(serviceBlock(listed, 'rustfs')!)).toEqual(['9000:9000', '127.0.0.1:9001:9001']);
   });
 });

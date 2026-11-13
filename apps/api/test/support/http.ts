@@ -28,6 +28,11 @@ export interface HttpStand {
    * Запрос с чужим Origin тест делает сам через `fetch(\`${base}${path}\`, …)`.
    */
   send(method: 'POST' | 'PUT' | 'DELETE', path: string, role?: Role, body?: unknown): Promise<Response>;
+  /**
+   * Загрузка multipart/form-data: POST со своим Origin, cookie — как у `get`. Заголовок `content-type`
+   * не задаётся — границу частей ставит `fetch` по `form`.
+   */
+  upload(path: string, role: Role | undefined, form: FormData): Promise<Response>;
   close(): Promise<void>;
 }
 
@@ -95,6 +100,12 @@ export async function startHttp(options: {
           ...(role ? { cookie: `${COOKIE}=${role}` } : {}),
         },
         body: body === undefined ? undefined : JSON.stringify(body),
+      }),
+    upload: (path, role, form) =>
+      fetch(`${base}${path}`, {
+        method: 'POST',
+        headers: { origin: ORIGIN, ...(role ? { cookie: `${COOKIE}=${role}` } : {}) },
+        body: form,
       }),
     close: () => app.close(),
   };

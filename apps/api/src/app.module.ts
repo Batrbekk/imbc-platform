@@ -27,6 +27,8 @@ import { CatalogController } from './modules/catalog/catalog.controller.js';
 import { CatalogService } from './modules/catalog/catalog.service.js';
 import { DictionariesController } from './modules/dictionaries/dictionaries.controller.js';
 import { DictionariesService } from './modules/dictionaries/dictionaries.service.js';
+import { FilesController } from './modules/files/files.controller.js';
+import { FilesService } from './modules/files/files.service.js';
 import { HealthController } from './modules/health/health.controller.js';
 import { ProfilesController } from './modules/profiles/profiles.controller.js';
 import { ProfilesService } from './modules/profiles/profiles.service.js';
@@ -56,6 +58,7 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     AccountsController,
     OrganizationsController,
     DictionariesController,
+    FilesController,
   ],
   providers: [
     OidcService,
@@ -70,6 +73,7 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     InvitationsService,
     AccountLifecycleService,
     DictionariesService,
+    FilesService,
     MailService,
     AdataScheduler,
     IdentityProvisioningService,

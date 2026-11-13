@@ -76,7 +76,7 @@ flowchart LR
 | Задание ставится в той же транзакции, что и изменение данных — очередь в PostgreSQL (ADR-06) | `apps/api/src/infra/infra.module.ts`, `src/jobs/queues.ts` |
 | Права — одна матрица ролей и действий из раздела 4 спецификации, общая для API и UI (GEN-10) | `packages/contracts/src/policy.ts`, `SessionGuard` |
 | Поиск каталога, страница компании и все показатели дашборда читают только проекцию видимых профилей `catalog_visible`, отдельного счётчика нет: unresponsive входит в выдачу и в счётчики (UPD-04, OPR-33). Собственный профиль производителя берёт из неё только тир своей строки. Выгрузки и pull API ещё не реализованы (§10) | `catalog.service.ts`, `profiles.service.ts`, `schema/platform.ts` |
-| Файл недоступен, пока ClamAV не признал его чистым (DATA-07) | `worker/handlers.service.ts → scanFile` |
+| Файл недоступен, пока ClamAV не признал его чистым (DATA-07); байты отдаёт только API после проверки прав записи-владельца (GEN-09, NFR-09) | `worker/file-scan.job.ts`, `modules/files/*` (`FilesService.open`, `FILE_READ_RULES`) |
 | Журнал аудита и принятия NDA только дополняются: у роли приложения нет UPDATE/DELETE (AUD-02, FC-02) | `database/app-role.ts` (вызывает `migrate.ts`), `infrastructure/postgres/init.sql` |
 | Уведомления `send-notification` дедуплицируются по событию и адресу (NOT-20, ADR-22) | `notifications_sent` + `sendNotification` |
 | Все расписания — по Asia/Almaty, независимо от часового пояса сервера | `jobs/queues.ts` |
@@ -288,7 +288,7 @@ sequenceDiagram
 
 ### Файл (DATA-05…07)
 
-Для задания `scan-file` worker читает объект из `imbc-quarantine` и передаёт поток в clamd (INSTREAM): чистый файл копируется в `imbc-files`, заражённый помечается `infected` и пишется в аудит; карантинная копия удаляется в обоих случаях. Пользовательские загрузка и скачивание через авторизованный API ещё входят в план разработки профиля.
+Загрузка (`modules/files/upload.ts`): один файл в поле `file`, до 25 МБ (`413 file_too_large`), пустой — `400 file_empty`; тип — по содержимому (`file-type`, только PDF, JPG, PNG, DOCX, XLSX, иначе `415 file_type_not_allowed`), расширение имени обязано ему соответствовать (`415 file_type_mismatch`); имя — базовое, без управляющих символов, до 255 символов (DATA-06). `FilesService.withStagedObject` кладёт байты в `imbc-quarantine` под случайным UUID, `recordNew` / `recordVersion` в транзакции действия пишут `file_object` и `file_version` (`pending`, имя, размер, оба типа, sha256, время; DATA-05) и задание `file-scan`; сбой транзакции удаляет объект. Worker (`FileScanJob`) читает объект из карантина и передаёт поток в clamd (INSTREAM): чистый копируется в `imbc-files` и становится `passed`, найденная сигнатура — `rejected` с аудитом `file.scan_rejected`; карантинная копия удаляется. Ответ clamd, кроме OK и FOUND, и сбой хранилища — ошибка задания, версия остаётся `pending`. Скачивание — только `GET /api/v1/files/:id/content[?version=N]`: правило назначения `FILE_READ_RULES` (файлы профиля — `profile.read` own/all; администратор их не читает, ADM-06; прочие назначения — отказ до своего этапа), отказ — `403` и аудит `file.read`; `pending` и `rejected` — `409`; поток из `imbc-files`, `Content-Disposition: attachment` с `filename*=UTF-8''…`, аудит `file.downloaded`. Маршрутов загрузки для производителя пока нет — они придут с секциями профиля.
 
 ### Задания и расписания (ADR-06)
 
@@ -296,7 +296,8 @@ API ставит задания, выполняет их worker. Для `send-pa
 
 | Очередь | Когда (Asia/Almaty) | Что делает | Состояние |
 |---|---|---|---|
-| `scan-file` | по событию | Проверка ClamAV, перенос из карантина | работает |
+| `file-scan` | загрузка файла; зачистка | Проверка ClamAV, перенос из карантина в рабочий бакет (DATA-07). Очередь `exclusive`: одно задание версии в очереди или в работе | работает |
+| `file-scan-sweep` | каждые 15 минут | Версии `pending` старше 15 минут — снова в `file-scan` | работает |
 | `send-notification` | по событию | Письмо с дедупликацией по коду, ключу и адресу | работает |
 | `send-password-email` | регистрация или повтор приглашения | Вызов Keycloak для подтверждения email и установки пароля приглашённому аккаунту | работает |
 | `cleanup-identity` | неудачная компенсация регистрации | Удаление пользователя IdP, если аккаунт платформы не был создан | работает |

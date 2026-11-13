@@ -14,9 +14,18 @@ import { KeycloakAdminService } from '../modules/auth/keycloak-admin.service.js'
 import { SessionService } from '../modules/auth/session.service.js';
 import { ProfilesService } from '../modules/profiles/profiles.service.js';
 import { ManufacturerOnboardingService } from '../modules/registration/onboarding.service.js';
-import { ADATA_QUEUE_OPTIONS, PLATFORM_TZ, QUEUES, type QueueName, SCHEDULES } from '../jobs/queues.js';
+import { ANTIVIRUS, ClamdAntivirus } from '../modules/files/antivirus.js';
+import {
+  ADATA_QUEUE_OPTIONS,
+  FILE_SCAN_QUEUE_OPTIONS,
+  PLATFORM_TZ,
+  QUEUES,
+  type QueueName,
+  SCHEDULES,
+} from '../jobs/queues.js';
 import { AccountInactivityJob } from './account-inactivity.job.js';
 import { ADATA_CLIENT_FACTORY, ADATA_TIMING, AdataPrefillJob, defaultAdataClientFactory } from './adata-prefill.job.js';
+import { FileScanJob, SCAN_PASSED_HOOKS } from './file-scan.job.js';
 import { JobHandlers } from './handlers.service.js';
 
 @Module({
@@ -45,8 +54,13 @@ import { JobHandlers } from './handlers.service.js';
     ManufacturerOnboardingService,
     AdataPrefillJob,
     AccountInactivityJob,
+    FileScanJob,
     { provide: ADATA_CLIENT_FACTORY, useValue: defaultAdataClientFactory },
     { provide: ADATA_TIMING, useValue: ADATA_DEFAULT_TIMING },
+    // ClamAV вызывает только worker (DATA-07).
+    { provide: ANTIVIRUS, inject: [ENV], useFactory: (env: Env) => new ClamdAntivirus(env) },
+    // Действия назначений после скана; образец оргструктуры добавляет задача 5.
+    { provide: SCAN_PASSED_HOOKS, useValue: {} },
   ],
 })
 export class WorkerModule implements OnApplicationBootstrap {
@@ -57,12 +71,19 @@ export class WorkerModule implements OnApplicationBootstrap {
     private readonly handlers: JobHandlers,
     private readonly adataPrefill: AdataPrefillJob,
     private readonly inactivity: AccountInactivityJob,
+    private readonly fileScan: FileScanJob,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
     const h = this.handlers;
     const routes: Record<QueueName, (data: never) => Promise<void>> = {
-      [QUEUES.scanFile]: (d) => h.scanFile(d),
+      [QUEUES.fileScan]: async (d) => {
+        await this.fileScan.run(d);
+      },
+      // Без аргумента: «сейчас» — часы worker (DATA-08).
+      [QUEUES.fileScanSweep]: async () => {
+        await this.fileScan.sweep();
+      },
       [QUEUES.sendNotification]: (d) => h.sendNotification(d),
       [QUEUES.sendPasswordEmail]: (d) => h.sendPasswordEmail(d),
       [QUEUES.cleanupIdentity]: (d) => h.cleanupIdentity(d),
@@ -91,16 +112,18 @@ export class WorkerModule implements OnApplicationBootstrap {
         queue,
         queue === QUEUES.adataPrefill
           ? ADATA_QUEUE_OPTIONS
-          : {
-              retryLimit:
-                queue === QUEUES.sendPasswordEmail ||
-                queue === QUEUES.cleanupIdentity ||
-                queue === QUEUES.inactivityReset
-                  ? 10
-                  : 5,
-              retryBackoff: true,
-              retryDelay: 30,
-            },
+          : queue === QUEUES.fileScan
+            ? FILE_SCAN_QUEUE_OPTIONS
+            : {
+                retryLimit:
+                  queue === QUEUES.sendPasswordEmail ||
+                  queue === QUEUES.cleanupIdentity ||
+                  queue === QUEUES.inactivityReset
+                    ? 10
+                    : 5,
+                retryBackoff: true,
+                retryDelay: 30,
+              },
       );
       await this.boss.work(queue, async (jobs) => {
         try {
