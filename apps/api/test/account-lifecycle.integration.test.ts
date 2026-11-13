@@ -171,7 +171,7 @@ describe.skipIf(!databaseUrl)(
       });
 
     /** OIDC callback с заглушкой обмена кода (как adata-prefill.integration.test.ts): адрес 302 и cookie сеанса. */
-    async function callback(target: Account, service = sessions, deviceToken?: string) {
+    async function callback(target: Account, service = sessions, deviceToken?: string, identity: object = {}) {
       const oidc = {
         exchange: vi.fn(async () => ({
           subject: target.idpSubject,
@@ -191,7 +191,7 @@ describe.skipIf(!databaseUrl)(
         new AuthRateLimitService(db),
         env,
         onboarding as never,
-        {} as never,
+        identity as never,
       );
       const flow = sign({ v: 'verifier', s: 'state', r: '/profile', exp: Date.now() + 60000 }, env.SESSION_SECRET);
       const req = {
@@ -430,11 +430,11 @@ describe.skipIf(!databaseUrl)(
       expect(await sessionCount(expert.id)).toBe(1);
     });
 
-    it('разблокировка: invited, если не входил; active после входа; inactive_since очищен; прежние сеансы не возвращаются; identity-sync без logout', async () => {
+    it('разблокировка: invited, если не входил; active после входа; inactive_since у не бывшего inactive — null до и после; прежние сеансы не возвращаются; identity-sync без logout', async () => {
       const signedIn = await account();
       const open = await openSession(signedIn.id);
       await lifecycle().block(admin, signedIn.id, IP);
-      await pool.query(`update user_accounts set inactive_since = $2 where id = $1`, [signedIn.id, SIGNED_IN_AT]);
+      expect((await row(signedIn.id)).inactiveSince).toBeNull();
       expect((await lifecycle().unblock(admin, signedIn.id, IP)).account).toMatchObject({
         state: 'active',
         lastSignInAt: SIGNED_IN_AT.toISOString(),
@@ -459,6 +459,40 @@ describe.skipIf(!databaseUrl)(
       expect(await audits('account.unblocked', never.id)).toHaveLength(1);
       expect(await syncJobs(never.id)).toHaveLength(2);
       expect(await problem(lifecycle().unblock(admin, randomUUID(), IP))).toEqual({ status: 404, code: 'not_found' });
+    });
+
+    it('разблокировка аккаунта, ставшего неактивным до блокировки, возвращает inactive и сохраняет inactive_since (AUTH-07)', async () => {
+      const inactiveSince = new Date('2026-11-01T21:00:00Z');
+      const target = await account({ state: 'inactive' });
+      await pool.query('update user_accounts set inactive_since = $2 where id = $1', [target.id, inactiveSince]);
+      expect((await lifecycle().block(admin, target.id, IP)).account.state).toBe('blocked');
+      expect((await audits('account.blocked', target.id))[0]!.diff).toEqual({ from: 'inactive' });
+
+      // Без сброса пароля аккаунт не возвращается в active: снова inactive, отсчёт и отметка прежние.
+      expect((await lifecycle().unblock(admin, target.id, IP)).account).toMatchObject({
+        state: 'inactive',
+        lastSignInAt: SIGNED_IN_AT.toISOString(),
+      });
+      expect(await row(target.id)).toMatchObject({ state: 'inactive', inactiveSince });
+      expect((await audits('account.unblocked', target.id)).map((a) => a.diff)).toEqual([{ to: 'inactive' }]);
+      expect(await syncJobs(target.id)).toEqual([
+        { accountId: target.id, logout: true },
+        { accountId: target.id, logout: false },
+      ]);
+      // Keycloak: пользователь включён — ссылка сброса пароля должна работать.
+      await jobHandlers().syncIdentity({ accountId: target.id, logout: false });
+      expect(keycloak.updateUser).toHaveBeenCalledExactlyOnceWith(target.idpSubject, {
+        enabled: true,
+        email: target.email,
+      });
+      // Вход прежним паролем (задан до inactive_since) по-прежнему отклоняется до сброса (AUTH-07).
+      const passwordUpdatedAt = vi.fn(async () => new Date('2026-07-01T00:00:00Z'));
+      expect(await callback(target, sessions, undefined, { passwordUpdatedAt })).toEqual({
+        location: '/login?error=account_inactive',
+        token: undefined,
+      });
+      expect(passwordUpdatedAt).toHaveBeenCalledExactlyOnceWith(target.idpSubject);
+      expect((await row(target.id)).state).toBe('inactive');
     });
 
     it('смена роли: роль и auth_version, сеансы завершены (AUTH-06); оператор, наблюдатель, производитель — 409 role_fixed; роль вне IMBC — 400 role_not_allowed; та же роль — без записи аудита', async () => {

@@ -49,6 +49,7 @@ interface Target {
   role: Role;
   state: AccountState;
   lastSignInAt: Date | null;
+  inactiveSince: Date | null;
   idpSubject: string | null;
   organizationType: OrganizationType;
 }
@@ -113,14 +114,15 @@ export class AccountLifecycleService {
   }
 
   /**
-   * Разблокировка (ADM-02, план, расхождение 15): не входил — invited, иначе active; отметка inactive
-   * снимается — три месяца без входа снова отсчитает задание неактивности. Прежних сеансов нет.
+   * Разблокировка (ADM-02, план, расхождение 15): аккаунт, ставший inactive до блокировки (`inactive_since`
+   * задан), возвращается в inactive с той же отметкой — вернёт его только новый пароль (AUTH-07); иначе
+   * не входил — invited, входил — active. Прежних сеансов нет.
    */
   async unblock(actor: AuthUser, id: string, ip: string | null = null): Promise<AdminAccountResult> {
     return this.act(actor, id, ADMIN_ROUTES.unblock, ip, async (tx, target) => {
       if (target.state !== 'blocked') return null;
-      const to = target.lastSignInAt === null ? 'invited' : 'active';
-      await tx.update(userAccounts).set({ state: to, inactiveSince: null }).where(eq(userAccounts.id, id));
+      const to = target.inactiveSince !== null ? 'inactive' : target.lastSignInAt === null ? 'invited' : 'active';
+      await tx.update(userAccounts).set({ state: to }).where(eq(userAccounts.id, id));
       return { action: 'account.unblocked', diff: { to }, sync: false };
     });
   }
@@ -238,7 +240,12 @@ export class AccountLifecycleService {
   private async lockTarget(tx: Database, actor: AuthUser, id: string): Promise<Target> {
     if (!(await lockActor(tx, actor.id, id))) throw notFound();
     const [row] = await tx
-      .select({ ...ACCOUNT_COLUMNS, idpSubject: userAccounts.idpSubject, organizationType: organizations.type })
+      .select({
+        ...ACCOUNT_COLUMNS,
+        inactiveSince: userAccounts.inactiveSince,
+        idpSubject: userAccounts.idpSubject,
+        organizationType: organizations.type,
+      })
       .from(userAccounts)
       .innerJoin(organizations, eq(organizations.id, userAccounts.organizationId))
       .where(eq(userAccounts.id, id));
