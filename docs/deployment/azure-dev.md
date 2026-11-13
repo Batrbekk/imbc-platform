@@ -95,7 +95,7 @@ ALLOW_FROM=1.2.3.4/32 ADMIN_ALLOWED_IPS="1.2.3.4/32 127.0.0.1/32 ::1/128" ./infr
 ./infrastructure/azure/deploy.sh info
 ```
 
-Realm Keycloak импортируется только при первом создании. После каждого развёртывания `infrastructure/azure/sync-realm.py --theme imbc` обновляет разрешённый набор настроек темы, политик, событий, SMTP и клиента BFF из `imbc-realm.json` и серверной `.env`. Пользователи, client secrets и посторонние настройки сохраняются. Повторный импорт realm не выполняется. Изменения управляемых полей только в консоли будут заменены следующей синхронизацией.
+Realm Keycloak импортируется только при первом создании. После каждого развёртывания `infrastructure/azure/sync-realm.py --theme imbc` обновляет разрешённый набор настроек темы, политик, событий, SMTP и клиента BFF из `imbc-realm.json` и серверной `.env`. Ещё один шаг — профиль пользователя realm (MAN-05): скрипт читает его (`kcadm.sh get users/profile`), у атрибутов `email` и `username` ставит `edit: ["admin"]` (просмотр — `admin` и `user`), всё остальное оставляет как есть и записывает профиль обратно, только если что-то изменилось; в выводе — строка `User profile: email and username editable by admin only (updated: … | already set)`. Пользователи, client secrets и посторонние настройки сохраняются. Повторный импорт realm не выполняется. Изменения управляемых полей только в консоли будут заменены следующей синхронизацией.
 
 Смена домена или OIDC-секретов требует согласованной миграции Keycloak и серверной `.env`. Скрипт сохраняет существующую конфигурацию и останавливается, если её HTTPS-параметры не соответствуют ожидаемым.
 
@@ -509,6 +509,8 @@ await boss.stop();"
 В `output` неудачного задания — операция и статус Keycloak (`Keycloak update user: 503`, `Keycloak logout user: …`) или сетевая ошибка; почты нет ни в задании, ни в тексте ошибки.
 
 Консоль аккаунта Keycloak закрыта на Caddy: `curl -s -o /dev/null -w '%{http_code}' https://<стенд>/kc/realms/imbc/account/` — `404`, а `…/kc/realms/imbc/.well-known/openid-configuration` — `200`.
+
+Почту-логин сам пользователь в Keycloak не меняет (MAN-05). Проверка после развёртывания: в журнале шага `realm-sync` — строка `User profile: …`; войдите демо-производителем и откройте `https://<стенд>/kc/realms/imbc/protocol/openid-connect/auth?client_id=imbc-bff&response_type=code&scope=openid&redirect_uri=https://<стенд>/api/auth/callback&kc_action=UPDATE_PROFILE` — страница профиля показывает почту текстом, без поля ввода; имя и фамилия редактируются и сохраняются. Профиль realm: консоль `/kc/admin/` → realm `imbc` → Realm settings → User profile → `email` и `username`, «Who can edit» — только Admin.
 
 ## Чтение Adata (IMBC-07, EXT-02)
 

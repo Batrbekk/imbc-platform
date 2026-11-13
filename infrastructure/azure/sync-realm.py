@@ -8,6 +8,7 @@ Only the explicitly allowlisted fields below are sent to the admin API.
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import re
 import subprocess
@@ -31,6 +32,10 @@ REALM_FIELDS = frozenset({
 })
 CLIENT_FIELDS = frozenset({"rootUrl", "baseUrl", "redirectUris", "webOrigins", "attributes", "frontchannelLogout"})
 PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+# The login email is changed only by an IMBC administrator (MAN-05, ADM-05); with
+# registrationEmailAsUsername the username follows it. Everyone keeps seeing both.
+ADMIN_EDIT_ONLY = ("email", "username")
+VIEWERS = ("admin", "user")
 
 
 class SyncError(Exception):
@@ -95,6 +100,36 @@ def desired_settings(source: dict[str, Any], env: dict[str, str], theme: str) ->
     return realm, realm_patch, client_patch
 
 
+def restrict_login_attributes(profile: Any) -> tuple[dict[str, Any], list[str]]:
+    """Return the user profile with email and username editable only by admin, and the names changed.
+
+    Only `permissions` of those two attributes change; validations, other attributes, groups and
+    every other key of the profile are kept as they are, so a second run changes nothing.
+    """
+    if not isinstance(profile, dict) or not isinstance(profile.get("attributes"), list):
+        raise SyncError("Current user profile is invalid")
+    updated = copy.deepcopy(profile)
+    found: set[str] = set()
+    changed: list[str] = []
+    for attribute in updated["attributes"]:
+        if not isinstance(attribute, dict) or attribute.get("name") not in ADMIN_EDIT_ONLY:
+            continue
+        name = attribute["name"]
+        found.add(name)
+        permissions = attribute.setdefault("permissions", {})
+        if not isinstance(permissions, dict):
+            raise SyncError("Current user profile permissions are invalid")
+        view = permissions.get("view") if isinstance(permissions.get("view"), list) else []
+        missing_viewers = [role for role in VIEWERS if role not in view]
+        if permissions.get("edit") != ["admin"] or missing_viewers:
+            permissions["edit"] = ["admin"]
+            permissions["view"] = view + missing_viewers
+            changed.append(name)
+    if found != set(ADMIN_EDIT_ONLY):
+        raise SyncError("Current user profile lacks the email or username attribute")
+    return updated, sorted(changed)
+
+
 def run(command: list[str], *, operation: str, root: Path, data: str | None = None) -> str:
     try:
         result = subprocess.run(command, cwd=root, input=data, text=True, capture_output=True, timeout=90, check=False)
@@ -150,6 +185,11 @@ def synchronize(root: Path, theme: str) -> None:
         # kcadm accepts '-f -' for JSON on stdin. No desired users or client secrets are submitted.
         run(cli + ["update", f"realms/{realm}", "--config", config_path, "-f", "-"], operation="Update managed realm settings", root=root, data=json.dumps(realm_patch))
         run(cli + ["update", client_path, "--config", config_path, "-r", realm, "-f", "-"], operation="Update managed client settings", root=root, data=json.dumps(client_patch))
+        # Declarative user profile: read it whole, change two permissions, write it back only if needed.
+        profile = parse_result(run(cli + ["get", "users/profile", "--config", config_path, "-r", realm], operation="Read user profile", root=root), "Read user profile")
+        restricted, profile_changes = restrict_login_attributes(profile)
+        if profile_changes:
+            run(cli + ["update", "users/profile", "--config", config_path, "-r", realm, "-f", "-"], operation="Update user profile", root=root, data=json.dumps(restricted))
     except BaseException as error:
         original_error = error
         raise
@@ -164,6 +204,7 @@ def synchronize(root: Path, theme: str) -> None:
                 print("ERROR: Temporary admin configuration cleanup also failed", file=sys.stderr)
     print("Updated realm settings: " + ", ".join(sorted(realm_patch)))
     print("Updated imbc-bff settings: " + ", ".join(sorted(client_patch)))
+    print("User profile: email and username editable by admin only (" + ("updated: " + ", ".join(profile_changes) if profile_changes else "already set") + ")")
     print("Realm synchronization complete; existing users, client secrets and unrelated settings preserved")
 
 

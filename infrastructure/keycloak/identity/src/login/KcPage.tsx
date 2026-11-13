@@ -89,6 +89,12 @@ function ProfileField({ attribute: a, kc, t }: { attribute: Attribute; kc: KcCon
   const names: Record<string, string> = { username: t.username, email: t.email, firstName: t.firstName, lastName: t.lastName };
   const label = names[a.name] ?? translated(a.displayName, kc) ?? a.name;
   const options = a.validators.options?.options;
+  // Read-only for the user (the server's profile, e.g. the login email: only an IMBC administrator changes it, MAN-05):
+  // shown as text so the person sees which account this is, and never submitted as a form field.
+  if (a.readOnly) {
+    const shown = (a.multivalued ? a.values ?? [] : [a.value ?? ""]).filter(Boolean).map(value => translated(a.annotations.inputOptionLabels?.[value], kc) || value);
+    return <div className="space-y-1"><p id={`${a.name}-label`} className="text-sm font-medium leading-none">{label}</p><p aria-labelledby={`${a.name}-label`} className="break-all rounded-md border bg-muted/40 px-3 py-2 text-sm">{shown.join(", ") || "—"}</p></div>;
+  }
   return <div className="space-y-2"><Label htmlFor={a.name}>{label}{a.required && <span className="text-destructive" aria-hidden="true"> *</span>}</Label>{options && !a.multivalued ? <Select name={a.name} defaultValue={a.value} required={a.required} disabled={a.readOnly}><SelectTrigger id={a.name} className="w-full"><SelectValue /></SelectTrigger><SelectContent>{options.map(option => <SelectItem key={option} value={option}>{translated(a.annotations.inputOptionLabels?.[option], kc) || option}</SelectItem>)}</SelectContent></Select> : (a.multivalued ? a.values ?? [a.value ?? ""] : [a.value ?? ""]).map((value, index) => <Input key={`${a.name}-${index}`} id={index === 0 ? a.name : `${a.name}-${index}`} name={a.name} defaultValue={value} readOnly={a.readOnly} type={a.name === "email" ? "email" : "text"} autoComplete={a.autocomplete} required={a.required} aria-invalid={kc.messagesPerField.existsError(a.name)} aria-describedby={`${a.name}-error`} />)}<FieldError kc={kc} name={a.name} /></div>;
 }
 
@@ -146,7 +152,7 @@ export default function KcPage({ kcContext: kc }: { kcContext: KcContext }) {
     case "login-update-profile.ftl":
     case "idp-review-user-profile.ftl":
     case "update-email.ftl":
-      return frame(t.profileTitle, t.profileHint, <>{message}<form action={kc.url.loginAction} method="post" onSubmit={onSubmit} className="space-y-5">{Object.values(kc.profile.attributesByName).map(attribute => <ProfileField key={attribute.name} attribute={attribute} kc={kc} t={t} />)}{submit(t.save)}{kc.isAppInitiatedAction && <Button type="submit" name="cancel-aia" value="true" variant="ghost" formNoValidate className="w-full">{t.cancel}</Button>}</form></>);
+      return frame(t.profileTitle, t.profileHint, <>{message}<form action={kc.url.loginAction} method="post" onSubmit={onSubmit} className="space-y-5">{Object.values(kc.profile.attributesByName).filter(attribute => !(attribute.name === "username" && kc.realm.registrationEmailAsUsername)).map(attribute => <ProfileField key={attribute.name} attribute={attribute} kc={kc} t={t} />)}{submit(t.save)}{kc.isAppInitiatedAction && <Button type="submit" name="cancel-aia" value="true" variant="ghost" formNoValidate className="w-full">{t.cancel}</Button>}</form></>);
     case "login-otp.ftl":
       return frame(t.codeTitle, t.codeHint, <>{message}<form action={kc.url.loginAction} method="post" onSubmit={onSubmit} className="space-y-5">{kc.otpLogin.userOtpCredentials.length > 1 && <Select name="selectedCredentialId" defaultValue={kc.otpLogin.selectedCredentialId}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent>{kc.otpLogin.userOtpCredentials.map(credential => <SelectItem key={credential.id} value={credential.id}>{credential.userLabel}</SelectItem>)}</SelectContent></Select>}<div className="space-y-2"><Label htmlFor="otp">{t.code}</Label><Input id="otp" name="otp" inputMode="numeric" autoComplete="one-time-code" autoFocus required className="h-12 text-center text-lg tracking-[0.3em]" /><FieldError kc={kc} name="totp" /></div>{submit(t.continue)}</form></>);
     case "select-authenticator.ftl":

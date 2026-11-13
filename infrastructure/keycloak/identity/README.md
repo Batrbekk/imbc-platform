@@ -19,7 +19,7 @@ docker build -t imbc/keycloak:dev infrastructure/keycloak/identity
 
 Set both the realm `loginTheme` and any client-level `attributes.login_theme` to `imbc`. The `imbc-bff` client's former `keycloak.v2` override must be updated. Keep `emailTheme` unchanged: this package only supplies login screens.
 
-Supported configured screens: username/password login, separate username/password steps, forgot password, password update, email verification, required-action confirmation, information/errors, expired links, logout confirmation, profile/email update, authenticator selection and OTP. Unconfigured authentication methods show an IMBC recovery screen instead of a vendor UI. Native action URLs, credential identifiers and required form names are preserved.
+Supported configured screens: username/password login, separate username/password steps, forgot password, password update, email verification, required-action confirmation, information/errors, expired links, logout confirmation, profile/email update, authenticator selection and OTP. Unconfigured authentication methods show an IMBC recovery screen instead of a vendor UI. On the profile screens an attribute the realm's user profile marks read-only for the user (the login email and username: only an IMBC administrator changes them, MAN-05) is shown as plain text and is not submitted; editable attributes stay inputs. Native action URLs, credential identifiers and required form names are preserved.
 
 In development only, `?page=login-reset-password.ftl&locale=kk` (or `ru`, `en`) selects a preview using Keycloakify fixtures. No preview fixtures enter the production bundle. Repeat with the relevant page identifier for other screens.
 
