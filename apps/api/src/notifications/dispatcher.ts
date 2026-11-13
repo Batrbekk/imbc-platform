@@ -42,6 +42,18 @@ export interface DispatchResult {
   skipped: 'disabled' | 'no_recipients' | null;
 }
 
+/**
+ * Постоянный отказ задания `notify`: код правила (или `unknown`) и причина — поля задания с кодом проверки либо
+ * текст `PermanentNotificationError`, который собирает только код платформы; адресов и значений параметров нет.
+ * Это результат задания: pg-boss сохраняет его в `output` завершённого задания — отказы находятся запросом
+ * `output ? 'refused'`.
+ */
+export interface NotificationRefusal {
+  rule: string;
+  refused: 'invalid_job' | 'permanent_failure';
+  reason: string;
+}
+
 const EMAIL = z.email();
 /** При совпадении адреса остаётся получатель с меньшим номером: аккаунт, затем контакт, затем ящик (NOT-18). */
 const SOURCE_RANK: Record<Recipient['source'], number> = { account: 0, contact: 1, imbc_mailbox: 2 };
@@ -85,26 +97,36 @@ export class NotificationDispatcher {
   /**
    * Задание очереди `notify`. Постоянный отказ (неверное задание, неизвестное правило, часть получателей,
    * которой ещё нет, нет текста или подстановки) — строка журнала с кодом правила и причиной, задание
-   * завершается без повторов; результат — `null`. Временный сбой (SMTP, база) — исключение: повтор pg-boss.
+   * завершается без повторов; результат — `NotificationRefusal` с той же причиной (pg-boss кладёт его в `output`
+   * задания). Отправка — результат `DispatchResult` (только счётчики). Временный сбой (SMTP, база) — исключение:
+   * повтор pg-boss.
    */
-  async runJob(data: unknown): Promise<DispatchResult | null> {
+  async runJob(data: unknown): Promise<DispatchResult | NotificationRefusal> {
     const parsed = notifyJobSchema.safeParse(data);
     if (!parsed.success) {
       // Только имя верхнего поля и код проверки: значения и ключи параметров в журнал не попадают.
       const fields = [
         ...new Set(parsed.error.issues.map((issue) => `${String(issue.path[0] ?? 'job')}:${issue.code}`)),
       ].join(', ');
-      this.logger.error(`notification ${ruleOf(data)}: задание отклонено без повторов — неверные поля: ${fields}`);
-      return null;
+      const refusal: NotificationRefusal = {
+        rule: ruleOf(data),
+        refused: 'invalid_job',
+        reason: `неверные поля: ${fields}`,
+      };
+      this.logger.error(`notification ${refusal.rule}: задание отклонено без повторов — ${refusal.reason}`);
+      return refusal;
     }
     try {
       return await this.dispatch(parsed.data);
     } catch (error) {
       if (!(error instanceof PermanentNotificationError)) throw error;
-      this.logger.error(
-        `notification ${parsed.data.rule}: письмо не будет отправлено, без повторов — ${error.message}`,
-      );
-      return null;
+      const refusal: NotificationRefusal = {
+        rule: parsed.data.rule,
+        refused: 'permanent_failure',
+        reason: error.message,
+      };
+      this.logger.error(`notification ${refusal.rule}: письмо не будет отправлено, без повторов — ${refusal.reason}`);
+      return refusal;
     }
   }
 

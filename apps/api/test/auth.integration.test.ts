@@ -11,7 +11,7 @@ import { ProblemException } from '../src/common/problem.js';
 import type { Env } from '../src/config/env.js';
 import type { Database } from '../src/database/database.module.js';
 import * as schema from '../src/database/schema/index.js';
-import { QUEUES } from '../src/jobs/queues.js';
+import { NOTIFY_QUEUE_OPTIONS, QUEUES } from '../src/jobs/queues.js';
 import { AuthController } from '../src/modules/auth/auth.controller.js';
 import { randomToken, sha256 } from '../src/modules/auth/crypto.js';
 import * as crypto from '../src/modules/auth/crypto.js';
@@ -482,35 +482,65 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
     expect(await sessions.resolve(legacyToken)).toBeNull();
   });
 
-  it('processes password revocation before a failing older lockout notification', async () => {
+  it('processes password revocation before a failing older lockout notification; the rolled-back lockout leaves no event mark, so the next poll enqueues it', async () => {
     const user = await account();
     const old = await session(user, new Date(Date.now() - 3600000));
+    const lockedAt = Date.now() - 10000;
+    const changedAt = Date.now() - 5000;
+    const keycloak = {
+      securityEvents: async () => [
+        { type: 'USER_DISABLED_BY_TEMPORARY_LOCKOUT', userId: user.idpSubject, time: lockedAt },
+        {
+          type: 'UPDATE_CREDENTIAL',
+          userId: user.idpSubject,
+          time: changedAt,
+          details: { credential_type: 'password' },
+        },
+      ],
+    };
+    const onboarding = { onPasswordSet: vi.fn().mockResolvedValue({ profile: 'skipped', adata: 'skipped' }) };
+    const pollWith = (queue: unknown) =>
+      new JobHandlers(
+        db,
+        {} as never,
+        env,
+        new AuditService(db),
+        keycloak as never,
+        sessions,
+        onboarding as never,
+        pool,
+        queue as never,
+      );
     const queue = { send: vi.fn().mockRejectedValue(new Error('queue unavailable')) };
-    const worker = new JobHandlers(
-      db,
-      {} as never,
-      env,
-      new AuditService(db),
-      {
-        securityEvents: async () => [
-          { type: 'USER_DISABLED_BY_TEMPORARY_LOCKOUT', userId: user.idpSubject, time: Date.now() - 10000 },
-          {
-            type: 'UPDATE_CREDENTIAL',
-            userId: user.idpSubject,
-            time: Date.now() - 5000,
-            details: { credential_type: 'password' },
-          },
-        ],
-      } as never,
-      sessions,
-      { onPasswordSet: vi.fn().mockResolvedValue({ profile: 'skipped', adata: 'skipped' }) } as never,
-      pool,
-      queue as never,
-    );
     // Задание письма о блокировке не поставилось (очередь недоступна) — опрос падает, но отзыв уже сделан.
-    await expect(worker.keycloakEvents()).rejects.toThrow('queue unavailable');
+    await expect(pollWith(queue).keycloakEvents()).rejects.toThrow('queue unavailable');
     expect(queue.send).toHaveBeenCalledOnce();
     expect(await sessions.resolve(old.token)).toBeNull();
+    const lockouts = () =>
+      db
+        .select()
+        .from(schema.auditEntries)
+        .where(and(eq(schema.auditEntries.action, 'auth.locked_out'), eq(schema.auditEntries.objectId, user.id)));
+    expect(await lockouts()).toEqual([]);
+
+    // recordLockout откатился целиком, вместе с отметкой события: следующий опрос с рабочей очередью ставит задание
+    // NOT-03 и пишет аудит блокировки — ровно по одному (AUTH-04, NOT-26).
+    await boss.createQueue(QUEUES.notify, NOTIFY_QUEUE_OPTIONS);
+    await pollWith(boss).keycloakEvents();
+    const jobs = await pool.query<{ data: unknown }>(
+      `select data from pgboss_auth_test.job where name = $1 and data->>'eventKey' = $2`,
+      [QUEUES.notify, `${user.idpSubject}:${lockedAt}`],
+    );
+    expect(jobs.rows.map((r) => r.data)).toEqual([
+      {
+        rule: 'NOT-03',
+        eventKey: `${user.idpSubject}:${lockedAt}`,
+        accountId: user.id,
+        params: { minutes: '15', link: 'https://imbc.example/login' },
+      },
+    ]);
+    expect(await lockouts()).toHaveLength(1);
+    await boss.deleteAllJobs(QUEUES.notify);
   });
 
   it('preserves a retryable session on IdP logout failure and returns only a local URL on success', async () => {

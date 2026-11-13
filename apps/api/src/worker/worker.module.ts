@@ -95,7 +95,7 @@ export class WorkerModule implements OnApplicationBootstrap {
 
   async onApplicationBootstrap(): Promise<void> {
     const h = this.handlers;
-    const routes: Record<QueueName, (data: never) => Promise<void>> = {
+    const routes: Record<QueueName, (data: never) => Promise<unknown>> = {
       [QUEUES.fileScan]: async (d) => {
         await this.fileScan.run(d);
       },
@@ -104,10 +104,9 @@ export class WorkerModule implements OnApplicationBootstrap {
         await this.fileScan.sweep();
       },
       // Задание проверяется схемой (только id, код правила и параметры, без адресов). Постоянный отказ —
-      // строка журнала и завершение без повторов; сбой SMTP или базы — повтор (NOTIFY_QUEUE_OPTIONS).
-      [QUEUES.notify]: async (d) => {
-        await this.notifications.runJob(d);
-      },
+      // строка журнала и завершение без повторов, причина — в output задания; сбой SMTP или базы — повтор
+      // (NOTIFY_QUEUE_OPTIONS).
+      [QUEUES.notify]: (d) => this.notifications.runJob(d),
       [QUEUES.sendPasswordEmail]: (d) => h.sendPasswordEmail(d),
       [QUEUES.cleanupIdentity]: (d) => h.cleanupIdentity(d),
       // Очередь письма сброса создаётся раньше задания неактивности, которое её наполняет (AUTH-07).
@@ -130,7 +129,7 @@ export class WorkerModule implements OnApplicationBootstrap {
       [QUEUES.identitySync]: (d) => h.syncIdentity(d),
     };
 
-    for (const [queue, run] of Object.entries(routes) as [QueueName, (data: never) => Promise<void>][]) {
+    for (const [queue, run] of Object.entries(routes) as [QueueName, (data: never) => Promise<unknown>][]) {
       await this.boss.createQueue(
         queue,
         queue === QUEUES.adataPrefill
@@ -152,7 +151,11 @@ export class WorkerModule implements OnApplicationBootstrap {
       );
       await this.boss.work(queue, async (jobs) => {
         try {
-          for (const job of jobs) await run(job.data as never);
+          let output: unknown;
+          for (const job of jobs) output = await run(job.data as never);
+          // Результат обработчика pg-boss сохраняет в output задания: у notify — итог отправки или причина
+          // постоянного отказа (без адресов); остальные очереди результата не отдают, как раньше.
+          return queue === QUEUES.notify ? output : undefined;
         } catch (error) {
           // pg-boss сохраняет ошибку обработчика в output задания: у ошибки базы — только сводка (NFR-11).
           throw redactDatabaseError(error);

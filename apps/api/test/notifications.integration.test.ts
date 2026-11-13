@@ -659,12 +659,12 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
   const cursor = async () =>
     (await db.query.authSyncState.findFirst({ where: eq(schema.authSyncState.name, 'keycloak-events') }))?.checkedAt;
 
-  type QueuedJob = { state: string; retry_count: number; data: NotifyJob };
+  type QueuedJob = { state: string; retry_count: number; data: NotifyJob; output: unknown };
   /** Задания notify события — в любом состоянии (created, retry, completed, failed). */
   const notifyJobs = async (key: string) =>
     (
       await pool.query<QueuedJob>(
-        `select state, retry_count, data from pgboss_auth_test.job where name = $1 and data->>'eventKey' = $2`,
+        `select state, retry_count, data, output from pgboss_auth_test.job where name = $1 and data->>'eventKey' = $2`,
         [QUEUES.notify, key],
       )
     ).rows;
@@ -679,8 +679,9 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
   }
 
   /**
-   * Цикл worker очереди notify, как в WorkerModule: задание — `runJob`; исключение — `fail`, дальше повтор по
-   * правилам очереди (в тесте — два повтора без пауз). Идёт, пока в очереди есть живые задания.
+   * Цикл worker очереди notify, как в WorkerModule: задание — `runJob`, его результат — `output` завершённого
+   * задания (так pg-boss сохраняет результат обработчика); исключение — `fail`, дальше повтор по правилам очереди
+   * (в тесте — два повтора без пауз). Идёт, пока в очереди есть живые задания.
    */
   async function drain(dispatcher: NotificationDispatcher) {
     const live = async () =>
@@ -698,8 +699,8 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
       }
       for (const job of jobs) {
         try {
-          await dispatcher.runJob(job.data);
-          await boss.complete(QUEUES.notify, job.id);
+          const output = await dispatcher.runJob(job.data);
+          await boss.complete(QUEUES.notify, job.id, output);
         } catch (error) {
           await boss.fail(QUEUES.notify, job.id, { message: (error as Error).message });
         }
@@ -764,6 +765,27 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
     expect(await lockouts(user.id)).toHaveLength(1);
     expect(transport.sent).toHaveLength(1);
     expect(await journal('NOT-03', key)).toHaveLength(1);
+
+    // Новое событие, и первый же его опрос — два параллельных: гонка за свежую отметку — одно задание, одна запись
+    // аудита, одно письмо.
+    const raced = await account('operator', { locale: 'ru' });
+    const racedTime = Date.now() - 4500;
+    const racedKey = `${raced.idpSubject}:${racedTime}`;
+    const racer = keycloakWorker(() => [{ id: `lock-${raced.id}`, ...lockout(raced, racedTime) }]);
+    await Promise.all([racer.keycloakEvents(), racer.keycloakEvents()]);
+    expect((await notifyJobs(racedKey)).map((j) => j.data)).toEqual([
+      {
+        rule: 'NOT-03',
+        eventKey: racedKey,
+        accountId: raced.id,
+        params: { minutes: '15', link: 'https://imbc.local/login' },
+      },
+    ]);
+    expect(await lockouts(raced.id)).toHaveLength(1);
+    await drain(dispatcher);
+    expect((await notifyJobs(racedKey)).map((j) => j.state)).toEqual(['completed']);
+    expect(transport.sent.filter((m) => m.to === raced.email)).toHaveLength(1);
+    expect(await journal('NOT-03', racedKey)).toHaveLength(1);
   });
 
   it('SMTP навсегда отклоняет адрес: курсор сдвинулся, остальные события пакета обработаны один раз, аудит блокировки один, задание notify повторяется и в итоге failed, опрос не стоит (AUTH-04)', async () => {
@@ -958,6 +980,33 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
         key,
       ).toEqual([['completed', 0]]);
     expect(transport.sent).toEqual([]);
+    // Причина постоянного отказа — в output завершённого задания: код правила и причина, без адресов и параметров.
+    const outputs = Object.fromEntries(
+      await Promise.all(Object.entries(keys).map(async ([name, key]) => [name, (await notifyJobs(key))[0]!.output])),
+    );
+    expect(outputs).toEqual({
+      invalid: { rule: 'NOT-04', refused: 'invalid_job', reason: 'неверные поля: job:unrecognized_keys' },
+      notReady: {
+        rule: 'NOT-05',
+        refused: 'permanent_failure',
+        reason: 'notification: часть получателей focal_point появится на этапе 3',
+      },
+      noText: { rule: 'NOT-04', refused: 'permanent_failure', reason: 'notification NOT-04: нет текста письма' },
+      noParam: { rule: 'NOT-03', refused: 'permanent_failure', reason: 'mail NOT-03: нет подстановки {link}' },
+      noRule: {
+        rule: 'NOT-17',
+        refused: 'permanent_failure',
+        reason: 'notification NOT-17: правила нет в notification_rule',
+      },
+    });
+    expect(JSON.stringify(outputs)).not.toContain('@');
+    // Поиск отказов запросом к очереди.
+    const refused = await pool.query<{ n: number }>(
+      `select count(*)::int as n from pgboss_auth_test.job
+        where name = $1 and state = 'completed' and output ? 'refused' and data->>'eventKey' = any($2::text[])`,
+      [QUEUES.notify, Object.values(keys)],
+    );
+    expect(refused.rows[0]!.n).toBe(5);
     const lines = error.mock.calls.map((call) => String(call[0]));
     expect(lines).toEqual(
       expect.arrayContaining([
