@@ -190,6 +190,16 @@ describe('загрузка файла: предел, тип по содержи�
     expect(long.body.originalName).toMatch(/^Құрылым.*\.pdf$/);
   });
 
+  it('DOCX и XLSX с ZIP64 (запись с force_zip64, каталог ZIP64) и усечённый DOCX — 415 file_structure_unsupported; обычные DOCX и XLSX принимаются (DATA-07)', async () => {
+    for (const name of ['zip64-local.docx', 'zip64-local.xlsx', 'zip64-directory.docx', 'truncated.docx']) {
+      const res = await upload(form(['file', fixture(name), name]));
+      expect(res, name).toMatchObject({ status: 415, body: { status: 415, code: 'file_structure_unsupported' } });
+      expect(JSON.stringify(res.body), name).not.toContain(name);
+    }
+    for (const name of ['sample.docx', 'sample.xlsx'])
+      expect(await upload(form(['file', fixture(name), name])), name).toMatchObject({ status: 200 });
+  });
+
   it('без сеанса — 401, файл не разбирается', async () => {
     const res = await http.upload('/api/test/upload', undefined, form(['file', fixture('sample.pdf'), 'a.pdf']));
     expect(res.status).toBe(401);

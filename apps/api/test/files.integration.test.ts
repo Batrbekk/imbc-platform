@@ -31,7 +31,13 @@ import { orgChartSampleReadRule } from '../src/modules/files/org-chart-sample.ru
 import type { Antivirus } from '../src/modules/files/antivirus.js';
 import { FILE_ROUTES, FilesService } from '../src/modules/files/files.service.js';
 import { type AcceptedUpload, acceptUpload, uploadInterceptor } from '../src/modules/files/upload.js';
-import { FileScanJob, OBJECT_MISSING_SIGNATURE, type ScanPassedHook } from '../src/worker/file-scan.job.js';
+import {
+  CHECKSUM_MISMATCH_SIGNATURE,
+  FileScanJob,
+  OBJECT_MISSING_SIGNATURE,
+  SCAN_STALE_MS,
+  type ScanPassedHook,
+} from '../src/worker/file-scan.job.js';
 import { StubAntivirus } from './support/antivirus-stub.js';
 import { migrateThrough, openTestPool, resetDatabase } from './support/database.js';
 import { type HttpStand, startHttp } from './support/http.js';
@@ -660,7 +666,7 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
       expect(auditText).not.toContain(part);
   });
 
-  it('загрузка целиком: отказ проверки (предел, пустой, подделанный тип) — в хранилище и БД ничего не осталось (DATA-06)', async () => {
+  it('загрузка целиком: отказ проверки (предел, пустой, подделанный тип, ZIP64 и усечённый архив) — в хранилище и БД ничего не осталось (DATA-06, DATA-07)', async () => {
     const before = await counts();
     const pdf = (size: number) => {
       const bytes = Buffer.alloc(size);
@@ -673,6 +679,11 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
       [fixture('sample.png'), 'схема.pdf', 415, 'file_type_mismatch'],
       [fixture('program.exe'), 'устав.pdf', 415, 'file_type_not_allowed'],
       [fixture('plain.zip'), 'устав.docx', 415, 'file_type_not_allowed'],
+      // DOCX и XLSX, которые антивирус не проверил бы целиком (ZIP64), и усечённый архив (DATA-07).
+      [fixture('zip64-local.docx'), 'устав.docx', 415, 'file_structure_unsupported'],
+      [fixture('zip64-local.xlsx'), 'мощности.xlsx', 415, 'file_structure_unsupported'],
+      [fixture('zip64-directory.docx'), 'устав.docx', 415, 'file_structure_unsupported'],
+      [fixture('truncated.docx'), 'устав.docx', 415, 'file_structure_unsupported'],
     ];
     for (const [bytes, name, status, code] of cases) {
       const form = new FormData();
@@ -744,17 +755,30 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
     expect(read).not.toHaveBeenCalled();
   });
 
-  it('скан: объекта нет в карантине — rejected с аудитом object_missing и предупреждением с id версии; зачистка её больше не берёт; прочий сбой хранилища — ошибка задания', async () => {
+  it('скан: объекта нет в карантине — пока версии не больше 15 минут, ошибка задания (повтор); старше — rejected с аудитом object_missing; зачистка её больше не берёт; прочий сбой хранилища — ошибка задания при любом возрасте', async () => {
     const lost = await createFile({ name: 'Потерянный план.pdf' });
-    const key = (await version(lost.versionId)).storage_key;
+    const { storage_key: key, uploaded_at: uploadedAt } = await version(lost.versionId);
     storage.objects.delete(`${QUARANTINE}/${key}`);
-    await pool.query('update file_version set uploaded_at = $2 where id = $1', [
-      lost.versionId,
-      new Date(Date.now() - 20 * 60_000),
-    ]);
+    const at = (age: number) => new Date(uploadedAt.getTime() + age);
     const warn = vi.spyOn(Logger.prototype, 'warn');
 
-    expect(await scan.run({ fileVersionId: lost.versionId })).toBe('rejected');
+    // Не старше SCAN_STALE_MS (граница включительно) — ошибка задания, версия ждёт.
+    for (const age of [0, SCAN_STALE_MS - 1000, SCAN_STALE_MS]) {
+      const error = await scan.run({ fileVersionId: lost.versionId }, at(age)).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect((error as Error | null)?.message, String(age)).toBe(`file-scan ${lost.versionId}: object_missing`);
+    }
+    expect(await version(lost.versionId)).toMatchObject({ scan_state: 'pending', scanned_at: null });
+    expect(await audits('file.scan_rejected', lost.versionId)).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(
+      { fileVersionId: lost.versionId, reason: 'object_missing', final: false },
+      expect.any(String),
+    );
+
+    // Старше — окончательный отказ.
+    expect(await scan.run({ fileVersionId: lost.versionId }, at(SCAN_STALE_MS + 1000))).toBe('rejected');
     expect(antivirus.calls).toBe(0);
     const row = await version(lost.versionId);
     expect(row.scan_state).toBe('rejected');
@@ -770,50 +794,78 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
       },
     ]);
     expect(OBJECT_MISSING_SIGNATURE).toBe('object_missing');
-    expect(warn).toHaveBeenCalledWith({ fileVersionId: lost.versionId }, expect.stringContaining('missing'));
+    expect(warn).toHaveBeenCalledWith(
+      { fileVersionId: lost.versionId, reason: 'object_missing', final: true },
+      expect.any(String),
+    );
     const text = logged([warn]);
     expect(text).not.toContain(key);
     expect(text).not.toContain('Потерянный');
 
     await boss.deleteAllJobs(QUEUES.fileScan);
-    await scan.sweep();
+    await scan.sweep(at(20 * 60_000));
     expect(await jobs(lost.versionId)).toEqual([]);
-    expect(await scan.run({ fileVersionId: lost.versionId })).toBe('skipped');
+    expect(await scan.run({ fileVersionId: lost.versionId }, at(20 * 60_000))).toBe('skipped');
 
-    // Хранилище недоступно (не «нет ключа») — ошибка задания и повтор, версия остаётся pending.
+    // Хранилище недоступно (не «нет ключа») — ошибка задания и повтор при любом возрасте, версия остаётся pending.
     const unavailable = await createFile();
+    const unavailableAt = (await version(unavailable.versionId)).uploaded_at;
     storage.failNext('get');
-    await expect(scanAs(unavailable.versionId, { clean: true })).rejects.toThrow();
+    await expect(
+      scan.run({ fileVersionId: unavailable.versionId }, new Date(unavailableAt.getTime() + 60 * 60_000)),
+    ).rejects.toThrow();
     expect(await version(unavailable.versionId)).toMatchObject({ scan_state: 'pending', scanned_at: null });
   });
 
-  it('скан: байты карантина не совпадают с sha256 загрузки — ошибка задания, никогда не passed; в журнале только id версии', async () => {
+  it('скан: байты карантина не совпадают с sha256 загрузки — никогда не passed: пока версии не больше 15 минут, ошибка задания; старше — rejected с аудитом checksum_mismatch, объект удалён; в журнале только id версии', async () => {
     const swapped = await createFile({ name: 'Подменённый план.pdf' });
-    const key = (await version(swapped.versionId)).storage_key;
+    const { storage_key: key, uploaded_at: uploadedAt } = await version(swapped.versionId);
+    const at = (age: number) => new Date(uploadedAt.getTime() + age);
     storage.objects.set(`${QUARANTINE}/${key}`, fixture('sample.png'));
     const warn = vi.spyOn(Logger.prototype, 'warn');
 
-    for (const verdict of [{ clean: true }, { clean: false, signature: 'Eicar-Test-Signature' }] as const) {
-      const error = await scanAs(swapped.versionId, verdict).then(
+    for (const [verdict, age] of [
+      [{ clean: true }, 0],
+      [{ clean: false, signature: 'Eicar-Test-Signature' }, SCAN_STALE_MS - 1000],
+      [{ clean: true }, SCAN_STALE_MS],
+    ] as const) {
+      antivirus.verdict = verdict;
+      const error = await scan.run({ fileVersionId: swapped.versionId }, at(age)).then(
         () => null,
         (e: unknown) => e,
       );
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toBe(`file-scan ${swapped.versionId}: checksum mismatch`);
+      expect((error as Error | null)?.message, String(age)).toBe(`file-scan ${swapped.versionId}: checksum_mismatch`);
     }
-    expect(antivirus.calls).toBe(2);
+    expect(antivirus.calls).toBe(3);
     expect(await version(swapped.versionId)).toMatchObject({ scan_state: 'pending', scanned_at: null });
     expect(storage.keys(FILES)).not.toContain(key);
     expect(storage.keys(QUARANTINE)).toContain(key);
     expect(await audits('file.scan_rejected', swapped.versionId)).toEqual([]);
-    expect(warn).toHaveBeenCalledWith({ fileVersionId: swapped.versionId }, expect.stringContaining('checksum'));
+
+    antivirus.verdict = { clean: true };
+    expect(await scan.run({ fileVersionId: swapped.versionId }, at(SCAN_STALE_MS + 1000))).toBe('rejected');
+    expect(await version(swapped.versionId)).toMatchObject({ scan_state: 'rejected' });
+    expect(await audits('file.scan_rejected', swapped.versionId)).toMatchObject([
+      { outcome: 'denied', object_type: 'file_version', diff: { signature: CHECKSUM_MISMATCH_SIGNATURE } },
+    ]);
+    expect(CHECKSUM_MISMATCH_SIGNATURE).toBe('checksum_mismatch');
+    expect(storage.keys(QUARANTINE)).not.toContain(key);
+    expect(storage.keys(FILES)).not.toContain(key);
+    expect(warn).toHaveBeenCalledWith(
+      { fileVersionId: swapped.versionId, reason: 'checksum_mismatch', final: true },
+      expect.any(String),
+    );
     const text = logged([warn]);
     expect(text).not.toContain(key);
     expect(text).not.toContain('Подменённый');
 
     // Те же байты, что приняла загрузка, — проходят.
-    storage.objects.set(`${QUARANTINE}/${key}`, fixture('sample.pdf'));
-    expect(await scanAs(swapped.versionId, { clean: true })).toBe('passed');
+    const restored = await createFile();
+    const restoredKey = (await version(restored.versionId)).storage_key;
+    storage.objects.set(`${QUARANTINE}/${restoredKey}`, fixture('sample.png'));
+    await expect(scanAs(restored.versionId, { clean: true })).rejects.toThrow('checksum_mismatch');
+    storage.objects.set(`${QUARANTINE}/${restoredKey}`, fixture('sample.pdf'));
+    expect(await scanAs(restored.versionId, { clean: true })).toBe('passed');
   });
 
   it('скан: параллельный запуск с другим вердиктом решил раньше — отклонил: наша копия в рабочем бакете удаляется; пропустил: копия остаётся', async () => {

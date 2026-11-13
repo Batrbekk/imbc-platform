@@ -16,6 +16,7 @@ import type { Request } from 'express';
 import type { Observable } from 'rxjs';
 import { ProblemException } from '../../common/problem.js';
 import { detectMediaType } from './file-type.js';
+import { zipStructureIssue } from './zip-structure.js';
 
 /** Длина имени файла в символах (кодовых точках), как её хранит `file_version.original_name`. */
 export const MAX_FILE_NAME_LENGTH = 255;
@@ -27,6 +28,13 @@ const fileEmpty = () => new ProblemException(400, 'file_empty', 'Файл пус
 const fileTooLarge = () => new ProblemException(413, 'file_too_large', 'Файл больше 25 МБ');
 const typeNotAllowed = () =>
   new ProblemException(415, 'file_type_not_allowed', 'Тип файла не допускается', 'Допустимы PDF, JPG, PNG, DOCX, XLSX');
+const structureUnsupported = () =>
+  new ProblemException(
+    415,
+    'file_structure_unsupported',
+    'Структура файла не поддерживается',
+    'Сохраните документ заново в Word или Excel и загрузите снова',
+  );
 const typeMismatch = () =>
   new ProblemException(415, 'file_type_mismatch', 'Расширение имени не соответствует содержимому файла');
 const malformedUpload = () =>
@@ -128,6 +136,12 @@ export function cleanFileName(name: string): string {
   );
 }
 
+/** DOCX и XLSX — архивы ZIP: их структура проверяется до хранилища. */
+const OOXML_TYPES: ReadonlySet<AllowedMediaType> = new Set<AllowedMediaType>([
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+]);
+
 /** Объявленный клиентом тип — только для записи (DATA-05): без управляющих символов, до 255 символов. */
 const cleanDeclaredType = (value: string | undefined) =>
   (value ?? '').replace(UNSAFE_NAME_CHARS, '').trim().slice(0, 255) || 'application/octet-stream';
@@ -135,7 +149,9 @@ const cleanDeclaredType = (value: string | undefined) =>
 /**
  * Проверка загруженного файла до хранилища и БД (DATA-06): нет файла — 400 `file_missing`; 0 байт — 400
  * `file_empty`; тип по содержимому не из пяти допустимых — 415 `file_type_not_allowed`; расширение имени не
- * соответствует содержимому — 415 `file_type_mismatch`. Имени файла нет в тексте ни одной ошибки.
+ * соответствует содержимому — 415 `file_type_mismatch`; DOCX или XLSX с признаками ZIP64 или повреждённой
+ * структурой ZIP (`zipStructureIssue`) — 415 `file_structure_unsupported`: антивирус проверил бы его не целиком
+ * (DATA-07). Имени файла нет в тексте ни одной ошибки.
  */
 export async function acceptUpload(file: Express.Multer.File | undefined): Promise<AcceptedUpload> {
   if (!file || !Buffer.isBuffer(file.buffer)) throw fileMissing();
@@ -147,6 +163,7 @@ export async function acceptUpload(file: Express.Multer.File | undefined): Promi
   const mediaType = await detectMediaType(bytes);
   if (!mediaType) throw typeNotAllowed();
   if (!fileExtensionMatches(originalName, mediaType)) throw typeMismatch();
+  if (OOXML_TYPES.has(mediaType) && zipStructureIssue(bytes) !== null) throw structureUnsupported();
   return {
     originalName,
     declaredMediaType: cleanDeclaredType(file.mimetype),

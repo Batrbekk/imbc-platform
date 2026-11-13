@@ -37,14 +37,17 @@ export const SCAN_PASSED_HOOKS = Symbol('SCAN_PASSED_HOOKS');
 export const SCAN_STALE_MS = 15 * 60_000;
 const SWEEP_BATCH = 500;
 
-/** Сигнатура отказа, когда объекта версии нет в карантине: проверять нечего (DATA-07). */
+/** Сигнатура окончательного отказа, когда объекта версии нет в карантине: проверять нечего (DATA-07). */
 export const OBJECT_MISSING_SIGNATURE = 'object_missing';
+/** Сигнатура окончательного отказа, когда байты карантина не совпадают с sha256 загрузки (DATA-05, DATA-07). */
+export const CHECKSUM_MISMATCH_SIGNATURE = 'checksum_mismatch';
 
 type ScanVersion = {
   id: string;
   fileObjectId: string;
   storageKey: string;
   checksum: string;
+  uploadedAt: Date;
   uploadedBy: string | null;
   purpose: FilePurpose;
   organizationId: string | null;
@@ -52,13 +55,17 @@ type ScanVersion = {
 
 /**
  * Проверка файла ClamAV (DATA-07): версия `pending` читается из карантина и передаётся в антивирус, по тому же
- * потоку считается sha256 — байты должны совпасть с `file_version.checksum` загрузки (иначе ошибка задания, не
- * `passed`). Чистая — копия в рабочий бакет, затем транзакция `passed` (`scanned_at`, хук назначения), затем
- * удаление из карантина. Найдена сигнатура — транзакция `rejected` с аудитом `file.scan_rejected`, затем удаление.
- * Объекта в карантине нет (`NoSuchKey`) — `rejected` с сигнатурой `object_missing`: строка версии пишется только
- * после `put`, потерянный объект проверять нечего. Ответ clamd, кроме OK и FOUND, прочие сбои хранилища и
- * ожидание блокировки сверх `boundLockWaits` — исключение: повтор pg-boss, версия остаётся `pending` и никому не
- * открывается. Переход — только из `pending` (условие UPDATE): повтор и параллельное задание ничего не удваивают.
+ * потоку считается sha256 — байты должны совпасть с `file_version.checksum` загрузки. Чистая — копия в рабочий
+ * бакет, затем транзакция `passed` (`scanned_at`, хук назначения), затем удаление из карантина. Найдена сигнатура —
+ * транзакция `rejected` с аудитом `file.scan_rejected`, затем удаление.
+ *
+ * Объекта в карантине нет (`NoSuchKey`) или sha256 не совпала — одно правило по возрасту версии: пока она
+ * загружена не раньше `now − SCAN_STALE_MS`, это ошибка задания (повтор: временная путаница хранилища не
+ * отклоняет файлы разом); старше — окончательный `rejected` с сигнатурой `object_missing` или
+ * `checksum_mismatch`, иначе версия ждала бы вечно и занимала место в пачке зачистки. Ответ clamd, кроме OK и
+ * FOUND, прочие сбои хранилища и ожидание блокировки сверх `boundLockWaits` — исключение: повтор pg-boss, версия
+ * остаётся `pending` и никому не открывается. Переход — только из `pending` (условие UPDATE): повтор и параллельное
+ * задание ничего не удваивают.
  */
 @Injectable()
 export class FileScanJob {
@@ -74,7 +81,8 @@ export class FileScanJob {
     @Inject(SCAN_PASSED_HOOKS) private readonly hooks: Partial<Record<FilePurpose, ScanPassedHook>>,
   ) {}
 
-  async run({ fileVersionId }: FileScanJobData): Promise<'passed' | 'rejected' | 'skipped'> {
+  /** `now` — момент запуска для правила возраста версии; worker вызывает без аргумента, тесты — с датой (DATA-08). */
+  async run({ fileVersionId }: FileScanJobData, now: Date = new Date()): Promise<'passed' | 'rejected' | 'skipped'> {
     if (typeof fileVersionId !== 'string' || !isUuid(fileVersionId)) return 'skipped';
     const [row] = await this.db
       .select({
@@ -83,6 +91,7 @@ export class FileScanJob {
         scanState: fileVersion.scanState,
         storageKey: fileVersion.storageKey,
         checksum: fileVersion.checksum,
+        uploadedAt: fileVersion.uploadedAt,
         uploadedBy: fileVersion.uploadedBy,
         purpose: fileObject.purpose,
         organizationId: fileObject.organizationId,
@@ -100,21 +109,13 @@ export class FileScanJob {
       body = await this.storage.get(quarantine, version.storageKey);
     } catch (error) {
       if (!(error instanceof ObjectStorageError && error.missing)) throw error;
-      // Строка версии есть только после успешного put: объект потерян, проверять нечего. Иначе версия ждала бы
-      // вечно и занимала место в пачке зачистки.
-      this.logger.warn({ fileVersionId: version.id }, 'File scan: quarantine object missing, version rejected');
-      const result = await this.decide(version, { clean: false, signature: OBJECT_MISSING_SIGNATURE });
-      if (result === 'rejected') await this.discard(files, version);
-      return result;
+      // Строка версии есть только после успешного put: объект потерян, проверять нечего.
+      return this.unverifiable(version, OBJECT_MISSING_SIGNATURE, now);
     }
 
     const { verdict, checksum } = await this.scanCounted(body);
-    if (checksum !== version.checksum) {
-      // Байты карантина не те, что приняла загрузка (подмена или порча): вердикт о них ничего не значит —
-      // не переносим и не решаем.
-      this.logger.warn({ fileVersionId: version.id }, 'File scan: quarantine object does not match upload checksum');
-      throw new Error(`file-scan ${version.id}: checksum mismatch`);
-    }
+    // Байты карантина не те, что приняла загрузка (подмена или порча): вердикт о них ничего не значит.
+    if (checksum !== version.checksum) return this.unverifiable(version, CHECKSUM_MISMATCH_SIGNATURE, now);
 
     // Копия до перехода: `passed` без байтов в рабочем бакете не бывает. Повтор копирует тот же объект.
     if (verdict.clean === true) await this.storage.copy(quarantine, version.storageKey, files);
@@ -127,6 +128,31 @@ export class FileScanJob {
     else if (result === 'skipped' && verdict.clean === true && (await this.stateOf(version.id)) === 'rejected')
       await this.discard(files, version);
     return result;
+  }
+
+  /**
+   * Проверить байты версии нельзя (`object_missing`, `checksum_mismatch`). Версия моложе `SCAN_STALE_MS` —
+   * предупреждение с id версии и ошибка задания (повтор, зачистка); старше — окончательный `rejected` с аудитом
+   * `file.scan_rejected` и этой сигнатурой. Ключа объекта и имени файла нет ни в журнале, ни в ошибке.
+   */
+  private async unverifiable(
+    version: ScanVersion,
+    signature: typeof OBJECT_MISSING_SIGNATURE | typeof CHECKSUM_MISMATCH_SIGNATURE,
+    now: Date,
+  ): Promise<'rejected' | 'skipped'> {
+    const final = version.uploadedAt.getTime() < now.getTime() - SCAN_STALE_MS;
+    this.logger.warn(
+      { fileVersionId: version.id, reason: signature, final },
+      final ? 'File scan: version cannot be verified, rejected' : 'File scan: version cannot be verified yet, retry',
+    );
+    if (!final) throw new Error(`file-scan ${version.id}: ${signature}`);
+    const result = await this.decide(version, { clean: false, signature });
+    if (result === 'rejected') {
+      // Непроверенные байты не остаются ни в карантине, ни в рабочем бакете.
+      await this.discard(this.env.S3_BUCKET_QUARANTINE, version);
+      await this.discard(this.env.S3_BUCKET_FILES, version);
+    }
+    return result as 'rejected' | 'skipped';
   }
 
   /**

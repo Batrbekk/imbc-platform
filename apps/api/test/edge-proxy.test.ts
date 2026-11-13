@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MAX_FILE_BYTES } from '@imbc/contracts';
 import { describe, expect, it } from 'vitest';
+import { CLAMD_CLIENT_TIMEOUT_MS } from '../src/worker/clamd.js';
 
 const read = (path: string) => readFileSync(new URL(`../../../infrastructure/${path}`, import.meta.url), 'utf8');
 const caddyfile = read('azure/Caddyfile');
@@ -215,7 +216,7 @@ describe('ClamAV: пределы проверки и отказ на превы�
     expect(serviceBlock(composeAzure, 'clamav')).toBeNull();
   });
 
-  it('clamd.conf: AlertExceedsMax yes; StreamMaxLength ≥ MAX_FILE_BYTES, MaxFileSize ≥ StreamMaxLength, MaxScanSize ≥ MaxFileSize; строки образа сохранены', () => {
+  it('clamd.conf: AlertExceedsMax yes; StreamMaxLength ≥ MAX_FILE_BYTES, MaxFileSize ≥ StreamMaxLength, MaxScanSize ≥ MaxFileSize; MaxScanTime явно, таймаут клиента clamd больше; строки образа сохранены', () => {
     const settings = clamdSettings(clamdConf);
     expect(settings.get('AlertExceedsMax')).toBe('yes');
     const stream = clamdBytes(settings.get('StreamMaxLength'));
@@ -224,6 +225,12 @@ describe('ClamAV: пределы проверки и отказ на превы�
     expect(stream).toBeGreaterThanOrEqual(MAX_FILE_BYTES);
     expect(file).toBeGreaterThanOrEqual(stream);
     expect(scan).toBeGreaterThanOrEqual(file);
+    // Время скана: решение по долгой проверке принимает clamd (FOUND Heuristics.Limits.Exceeded.MaxScanTime), а не
+    // обрыв клиентом — таймаут клиента в worker заметно больше MaxScanTime (мс).
+    const scanTime = settings.get('MaxScanTime');
+    expect(scanTime).toMatch(/^\d+$/);
+    expect(Number(scanTime)).toBe(120_000);
+    expect(CLAMD_CLIENT_TIMEOUT_MS).toBeGreaterThanOrEqual(Number(scanTime) + 30_000);
     // Действующие строки файла образа clamav/clamav:1.4; порт — CLAMAV_PORT сервисов api и worker.
     expect(
       Object.fromEntries(
