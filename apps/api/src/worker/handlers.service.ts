@@ -28,7 +28,7 @@ import {
 import { S3 } from '../infra/infra.module.js';
 import { MailService } from '../mail/mail.service.js';
 import { renderMail } from '../mail/templates.js';
-import { KeycloakAdminService } from '../modules/auth/keycloak-admin.service.js';
+import { KeycloakAdminService, KeycloakRequestError } from '../modules/auth/keycloak-admin.service.js';
 import { SessionService } from '../modules/auth/session.service.js';
 import { sha256 } from '../modules/auth/crypto.js';
 import { ManufacturerOnboardingService } from '../modules/registration/onboarding.service.js';
@@ -163,7 +163,16 @@ export class JobHandlers {
       .from(userAccounts)
       .where(eq(userAccounts.id, accountId));
     if (!account?.subject) return;
-    await this.keycloak.updateUser(account.subject, { enabled: account.state !== 'blocked', email: account.email });
+    try {
+      await this.keycloak.updateUser(account.subject, { enabled: account.state !== 'blocked', email: account.email });
+    } catch (error) {
+      // Пользователь удалён в Keycloak: догонять нечего, повтор ничего не изменит. Прочие сбои — повтор.
+      if (error instanceof KeycloakRequestError && error.status === 404) {
+        this.logger.warn({ accountId }, 'identity-sync: user not found in Keycloak');
+        return;
+      }
+      throw error;
+    }
     if (logout) await this.keycloak.logoutUser(account.subject);
   }
 

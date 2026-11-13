@@ -171,7 +171,7 @@ describe.skipIf(!databaseUrl)(
       });
 
     /** OIDC callback с заглушкой обмена кода (как adata-prefill.integration.test.ts): адрес 302 и cookie сеанса. */
-    async function callback(target: Account, service = sessions) {
+    async function callback(target: Account, service = sessions, deviceToken?: string) {
       const oidc = {
         exchange: vi.fn(async () => ({
           subject: target.idpSubject,
@@ -195,7 +195,7 @@ describe.skipIf(!databaseUrl)(
       );
       const flow = sign({ v: 'verifier', s: 'state', r: '/profile', exp: Date.now() + 60000 }, env.SESSION_SECRET);
       const req = {
-        cookies: { 'imbc-oidc-flow': flow },
+        cookies: { 'imbc-oidc-flow': flow, ...(deviceToken ? { [env.DEVICE_COOKIE_NAME]: deviceToken } : {}) },
         originalUrl: '/api/auth/callback?code=c&state=state',
         ip: '127.0.0.9',
         get: () => 'test',
@@ -209,6 +209,27 @@ describe.skipIf(!databaseUrl)(
         [string, string] | undefined;
       return { location, token: cookie?.[1] };
     }
+
+    const jobHandlers = () =>
+      new JobHandlers(
+        db,
+        {} as never,
+        {} as never,
+        env,
+        new AuditService(db),
+        keycloak as unknown as KeycloakAdminService,
+        sessions,
+        {} as never,
+      );
+
+    /** Доверенное устройство аккаунта на сутки; возвращает значение cookie. */
+    const trustedDevice = async (userId: string) => {
+      const token = randomUUID();
+      await db
+        .insert(schema.trustedDevices)
+        .values({ userId, deviceHash: sha256(token), expiresAt: new Date(Date.now() + 86_400_000) });
+      return token;
+    };
 
     /** SessionService, у которого между markSignedIn и create входа выполняется `between` — вход «в полёте». */
     function racingSessions(between: () => Promise<unknown>): SessionService {
@@ -312,7 +333,9 @@ describe.skipIf(!databaseUrl)(
       const target = await account();
       const first = await openSession(target.id);
       const second = await openSession(target.id);
+      const device = await trustedDevice(target.id);
       expect(await sessions.resolve(first.token)).not.toBeNull();
+      expect(await sessions.isTrustedDevice(target.id, device)).toBe(true);
 
       const result = await lifecycle().block(admin, target.id, IP);
       expect(result).toEqual({
@@ -330,6 +353,8 @@ describe.skipIf(!databaseUrl)(
       expect(await sessionCount(target.id)).toBe(0);
       expect(await sessions.resolve(first.token)).toBeNull();
       expect(await sessions.resolve(second.token)).toBeNull();
+      // Доверие к устройствам снимается вместе с блокировкой: после разблокировки вход снова просит код.
+      expect((await pool.query('select 1 from trusted_devices where user_id = $1', [target.id])).rowCount).toBe(0);
       expect(await syncJobs(target.id)).toEqual([{ accountId: target.id, logout: true }]);
       expect(await audits('account.blocked', target.id)).toEqual([
         { diff: { from: 'active' }, is_account_event: true, ip: IP, user_id: admin.id, object_type: 'account' },
@@ -343,6 +368,9 @@ describe.skipIf(!databaseUrl)(
       expect((await row(target.id)).authVersion).toBe(after.authVersion);
       expect(await audits('account.blocked', target.id)).toHaveLength(1);
       expect(await syncJobs(target.id)).toHaveLength(1);
+
+      await lifecycle().unblock(admin, target.id, IP);
+      expect((await callback(target, sessions, device)).location).toMatch(/^\/auth\/verify\?/);
 
       // Приглашённый блокируется так же; неверный или чужой id — 404.
       const invited = await account({ state: 'invited' });
@@ -638,6 +666,8 @@ describe.skipIf(!databaseUrl)(
         [target.idpSubject, { email: target.email }],
       ]);
       expect(await row(target.id)).toMatchObject({ email: target.email, authVersion: target.authVersion });
+      // Очередь недоступна — задание после возврата поставить нельзя; в журнале только id аккаунта.
+      expect(await syncJobs(target.id)).toEqual([]);
 
       // Адрес занят в БД между проверкой и транзакцией (23505): 409 и тот же возврат Keycloak.
       keycloak.updateUser.mockClear();
@@ -650,6 +680,8 @@ describe.skipIf(!databaseUrl)(
         code: 'email_exists',
       });
       expect(keycloak.updateUser.mock.calls.at(-1)).toEqual([target.idpSubject, { email: target.email }]);
+      // После любого сбоя транзакции — identity-sync: Keycloak сходится к строке БД, что бы ни случилось.
+      expect(await syncJobs(target.id)).toEqual([{ accountId: target.id, logout: true }]);
 
       // Возврат Keycloak тоже не удался: задание identity-sync приведёт Keycloak к строке БД.
       keycloak.updateUser.mockReset();
@@ -663,7 +695,10 @@ describe.skipIf(!databaseUrl)(
         status: 409,
         code: 'email_exists',
       });
-      expect(await syncJobs(target.id)).toEqual([{ accountId: target.id, logout: true }]);
+      expect(await syncJobs(target.id)).toEqual([
+        { accountId: target.id, logout: true },
+        { accountId: target.id, logout: true },
+      ]);
 
       // Keycloak недоступен: 503, БД без изменений; исход записи в Keycloak неизвестен — задание вернёт его к БД.
       keycloak.updateUser.mockReset().mockRejectedValueOnce(new KeycloakRequestError(503, 'update user'));
@@ -671,12 +706,32 @@ describe.skipIf(!databaseUrl)(
         status: 503,
         code: 'identity_unavailable',
       });
-      expect(await syncJobs(target.id)).toEqual([
-        { accountId: target.id, logout: true },
-        { accountId: target.id, logout: false },
-      ]);
+      expect((await syncJobs(target.id)).at(-1)).toEqual({ accountId: target.id, logout: false });
       expect(await row(target.id)).toMatchObject({ email: target.email, authVersion: target.authVersion });
       expect(await audits('account.email_changed', target.id)).toEqual([]);
+    });
+
+    it('сбой смены почты после того, как строку изменил другой: возврат пишет устаревший адрес, но identity-sync приводит Keycloak к адресу БД (ADM-05, MAN-05)', async () => {
+      const target = await account();
+      const other = `${randomUUID()}@new-login.local`;
+      const mine = `${randomUUID()}@new-login.local`;
+      // Пока первый администратор ждёт Keycloak, второй записал в строку адрес `other`; затем транзакция
+      // первого падает на 23505 (адрес `mine` занял третий аккаунт), и возврат пишет прежний адрес.
+      keycloak.updateUser.mockImplementationOnce(async () => {
+        await pool.query('update user_accounts set email = $2 where id = $1', [target.id, other]);
+        await account().then((a) => pool.query('update user_accounts set email = $2 where id = $1', [a.id, mine]));
+      });
+      expect(await problem(lifecycle().changeEmail(admin, target.id, mine, IP))).toEqual({
+        status: 409,
+        code: 'email_exists',
+      });
+      expect(keycloak.updateUser.mock.calls.at(-1)).toEqual([target.idpSubject, { email: target.email }]);
+      const jobs = await syncJobs(target.id);
+      expect(jobs).toEqual([{ accountId: target.id, logout: true }]);
+
+      await jobHandlers().syncIdentity(jobs[0]!);
+      expect(keycloak.updateUser.mock.calls.at(-1)).toEqual([target.idpSubject, { enabled: true, email: other }]);
+      expect(keycloak.logoutUser).toHaveBeenCalledExactlyOnceWith(target.idpSubject);
     });
 
     it('не производитель — 409 not_manufacturer_account; без субъекта — 409 identity_not_bound', async () => {
@@ -702,16 +757,7 @@ describe.skipIf(!databaseUrl)(
     });
 
     it('identity-sync: enabled = state ≠ blocked, email из БД, logout по флагу; без субъекта — ни одного вызова; повтор задания даёт тот же вызов', async () => {
-      const handlers = new JobHandlers(
-        db,
-        {} as never,
-        {} as never,
-        env,
-        new AuditService(db),
-        keycloak as unknown as KeycloakAdminService,
-        sessions,
-        {} as never,
-      );
+      const handlers = jobHandlers();
       const blocked = await account({ state: 'blocked' });
       await handlers.syncIdentity({ accountId: blocked.id, logout: true });
       await handlers.syncIdentity({ accountId: blocked.id, logout: true });
@@ -744,6 +790,18 @@ describe.skipIf(!databaseUrl)(
         KeycloakRequestError,
       );
       expect((await row(blocked.id)).state).toBe('blocked');
+
+      // Пользователя в Keycloak нет (404): догонять нечего — задание завершается с предупреждением, без повтора.
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      keycloak.logoutUser.mockClear();
+      keycloak.updateUser.mockRejectedValueOnce(new KeycloakRequestError(404, 'update user'));
+      await expect(handlers.syncIdentity({ accountId: blocked.id, logout: true })).resolves.toBeUndefined();
+      expect(keycloak.logoutUser).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledExactlyOnceWith(
+        { accountId: blocked.id },
+        'identity-sync: user not found in Keycloak',
+      );
+      expect(JSON.stringify(warn.mock.calls)).not.toContain(blocked.email);
     });
 
     it('исполнитель уже не active administrator — 403 и запись denied; сбой записи отказа — всё равно 403, в журнале только сводка (GEN-08, AUD-01)', async () => {

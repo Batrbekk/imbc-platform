@@ -94,7 +94,10 @@ export class AccountLifecycleService {
     this.db = drizzle(pool, { schema, casing: 'snake_case' });
   }
 
-  /** Блокировка (ADM-02): открытые сеансы завершаются сразу (AUTH-06), Keycloak отключает пользователя. */
+  /**
+   * Блокировка (ADM-02): открытые сеансы завершаются сразу (AUTH-06), доверие к устройствам снимается —
+   * после разблокировки первый вход снова подтверждается кодом; Keycloak отключает пользователя.
+   */
   async block(actor: AuthUser, id: string, ip: string | null = null): Promise<AdminAccountResult> {
     return this.act(actor, id, ADMIN_ROUTES.block, ip, async (tx, target) => {
       if (target.id === actor.id) throw selfAction();
@@ -104,6 +107,7 @@ export class AccountLifecycleService {
         .set({ state: 'blocked', authVersion: nextAuthVersion() })
         .where(eq(userAccounts.id, id));
       await this.endSessions(tx, id);
+      await tx.delete(trustedDevices).where(eq(trustedDevices.userId, id));
       return { action: 'account.blocked', diff: { from: target.state }, sync: true };
     });
   }
@@ -188,7 +192,10 @@ export class AccountLifecycleService {
           return this.read(tx, id);
         });
       } catch (error) {
-        await this.restoreIdentityEmail(id, subject, before.email);
+        // `before.email` прочитан без блокировки, а исход COMMIT при обрыве неизвестен: возврат — быстрая
+        // мера, а задание приводит Keycloak к строке БД, что бы в ней ни оказалось.
+        await this.restoreIdentityEmail(subject, before.email);
+        await this.queueSync(id, true);
         if (uniqueViolation(error) === 'user_accounts_email_uq') throw emailExists();
         throw error;
       }
@@ -286,19 +293,18 @@ export class AccountLifecycleService {
     }
   }
 
-  /** Компенсация: прежний адрес в Keycloak; не удалось — identity-sync приведёт Keycloak к строке БД. */
-  private async restoreIdentityEmail(id: string, subject: string, previous: string): Promise<void> {
+  /** Компенсация: прежний адрес в Keycloak сразу; сходимость к БД обеспечивает identity-sync после неё. */
+  private async restoreIdentityEmail(subject: string, previous: string): Promise<void> {
     try {
       await this.keycloak.updateUser(subject, { email: previous });
     } catch {
       this.logger.warn('Keycloak: email change compensation failed, identity-sync queued');
-      await this.queueSync(id, true);
     }
   }
 
   private async queueSync(accountId: string, logout: boolean): Promise<void> {
     await this.queue
       .send(QUEUES.identitySync, { accountId, logout } satisfies IdentitySyncJob)
-      .catch(() => this.logger.error('Failed to enqueue identity-sync'));
+      .catch(() => this.logger.error({ accountId }, 'Failed to enqueue identity-sync'));
   }
 }

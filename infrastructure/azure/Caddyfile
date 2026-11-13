@@ -43,7 +43,7 @@
 
 		# The stock Keycloak account console is not an IMBC screen, and only an IMBC
 		# administrator changes a login email (MAN-05, ADM-05).
-		@accountConsole path_regexp accountConsole (?i)^/kc/realms/[^/]+/account(?:/|$)
+		@accountConsole path_regexp accountConsole (?i)^/kc/realms/[^/]+/account(?:/|;|$)
 		respond @accountConsole 404
 
 		# Product realm, OIDC endpoints and login theme resources remain public.

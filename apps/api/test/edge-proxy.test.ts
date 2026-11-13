@@ -8,9 +8,9 @@ const read = (path: string) => readFileSync(new URL(`../../../infrastructure/${p
 const caddyfile = read('azure/Caddyfile');
 const nginxConf = read('nginx/nginx.conf');
 
-const CADDY_MATCHER = '@accountConsole path_regexp accountConsole (?i)^/kc/realms/[^/]+/account(?:/|$)';
+const CADDY_MATCHER = '@accountConsole path_regexp accountConsole (?i)^/kc/realms/[^/]+/account(?:/|;|$)';
 const CADDY_RESPOND = 'respond @accountConsole 404';
-const NGINX_LOCATION = 'location ~* ^/kc/realms/[^/]+/account(/|$) { return 404; }';
+const NGINX_LOCATION = 'location ~* ^/kc/realms/[^/]+/account(/|;|$) { return 404; }';
 
 /** Шаблон пути из конфигурации как регулярное выражение JS: `(?i)` Caddy и `~*` nginx — флаг i. */
 const pattern = (source: string) => new RegExp(source.replace(/^\(\?i\)/, ''), 'i');
@@ -21,6 +21,7 @@ const CLOSED = [
   '/kc/realms/imbc/Account/',
   '/kc/realms/imbc/account/personal-info',
   '/kc/realms/imbc/account/credentials/password',
+  '/kc/realms/imbc/account;x=1',
   '/kc/realms/other/account/',
 ];
 const OPEN = [

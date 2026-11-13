@@ -495,7 +495,7 @@ sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql 
   select state, count(*) from pgboss.job where name = 'identity-sync' group by state;" </dev/null
 ```
 
-`failed` — пять повторов не прошли (обычно Keycloak недоступен или клиент `imbc-admin-api` без `manage-users`). Решение администратора от этого не меняется: вход проверяет состояние в БД. После восстановления Keycloak поставьте задание для аккаунта заново (команда печатает только id задания):
+`failed` — пять повторов не прошли (обычно Keycloak недоступен или клиент `imbc-admin-api` без `manage-users`). Пользователь, удалённый в Keycloak (404), задание не валит: оно завершается, в журнале worker — `identity-sync: user not found in Keycloak` с `accountId`. Решение администратора от этого не меняется: вход проверяет состояние в БД. Если в журнале API есть `Failed to enqueue identity-sync` (очередь была недоступна сразу после смены почты), задания нет вовсе — возьмите `accountId` из этой строки. В обоих случаях после восстановления поставьте задание для аккаунта заново (команда печатает только id задания):
 
 ```bash
 sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T worker node --input-type=module -e "
