@@ -136,11 +136,8 @@ export class AuthController {
     // Неактивный (AUTH-07) входит, если пароль задан после перехода: событие Keycloak worker мог ещё не прочесть.
     if (account.state === 'inactive' && !(await this.reactivatedByPassword(account.id, identity.subject))) {
       // Возврат — только ссылкой сброса (AUTH-07): SSO-сеанс отклонённого входа не должен мешать «Забыли пароль».
-      try {
-        await this.keycloak.logoutUser(identity.subject);
-      } catch {
-        this.logger.warn('inactive account: IdP logout after refused sign-in failed');
-      }
+      // Выход из IdP не ждём: при зависшем Keycloak отказ не задерживается.
+      void this.logoutAfterRefusedSignIn(identity.subject);
       return res.redirect(302, '/login?error=account_inactive');
     }
     if (
@@ -314,6 +311,20 @@ export class AuthController {
       ip: req.ip ?? null,
     });
     return { redirectTo: '/login?logged_out=1' };
+  }
+
+  /**
+   * Выход из IdP после отклонённого входа неактивного (AUTH-07): вызывается без ожидания ответа Keycloak.
+   * Вызов уходит сразу, а любой сбой — отказ запроса или исключение при вызове — становится только строкой
+   * журнала без адреса Keycloak, субъекта и текста ошибки: отказ пользователю не меняется, необработанного
+   * отклонения промиса нет.
+   */
+  private async logoutAfterRefusedSignIn(subject: string): Promise<void> {
+    try {
+      await this.keycloak.logoutUser(subject);
+    } catch {
+      this.logger.warn('inactive account: IdP logout after refused sign-in failed');
+    }
   }
 
   /**

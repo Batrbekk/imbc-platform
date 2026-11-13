@@ -80,11 +80,14 @@ export function AccountActions({
   });
   const unblock = useAdminAction({
     request: () => api<AdminAccountResult>(`${path}/unblock`, { method: "POST" }),
-    // Неактивный до блокировки аккаунт остаётся inactive: путь назад — сброс пароля (AUTH-07).
+    // Неактивный до блокировки аккаунт остаётся inactive: путь назад — сброс пароля (AUTH-07). Не входивший
+    // возвращается в invited: ссылка из прежнего приглашения могла устареть — приглашение шлют снова.
     done: (result) =>
       result.account.state === "inactive"
         ? t("unblockedInactive", { email: account.email })
-        : t("unblocked", { email: account.email }),
+        : result.account.state === "invited"
+          ? t("unblockedInvited", { email: account.email })
+          : t("unblocked", { email: account.email }),
   });
   const block = useAdminAction({
     request: () => api<AdminAccountResult>(`${path}/block`, { method: "POST" }),
@@ -99,6 +102,11 @@ export function AccountActions({
   const pending = resend.isPending || unblock.isPending || block.isPending;
   const close = (open: boolean) => {
     if (!open) setDialog(null);
+  };
+  // Пока запрос блокировки в пути, подтверждение не закрывается (Escape, подложка, «Отмена»).
+  const closeBlock = (open: boolean) => {
+    if (!open && block.isPending) return;
+    close(open);
   };
 
   return (
@@ -162,7 +170,7 @@ export function AccountActions({
       </DropdownMenu>
 
       {offered.block && (
-        <AlertDialog open={dialog === "block"} onOpenChange={close}>
+        <AlertDialog open={dialog === "block"} onOpenChange={closeBlock}>
           <AlertDialogContent finalFocus={trigger}>
             <AlertDialogHeader>
               <AlertDialogTitle className="wrap-anywhere">
@@ -176,7 +184,7 @@ export function AccountActions({
               </Alert>
             )}
             <AlertDialogFooter>
-              <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+              <AlertDialogCancel disabled={block.isPending}>{t("cancel")}</AlertDialogCancel>
               <AlertDialogAction
                 variant="destructive"
                 disabled={block.isPending}

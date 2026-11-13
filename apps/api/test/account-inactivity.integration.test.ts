@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
+import { Logger } from '@nestjs/common';
 import type { AccountState, OrganizationType, Role } from '@imbc/contracts';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -640,6 +641,65 @@ describe.skipIf(!databaseUrl)(
       const bound = await signIn(unbound, async () => after, subject);
       expect(bound.location).toBe(verify);
       expect(await row(unbound.id)).toMatchObject({ state: 'active', idpSubject: subject, inactiveSince: null });
+    });
+
+    it('отказ неактивному не ждёт выхода из IdP: ответ — пока logoutUser не завершён; сбой logoutUser — строка в журнале без данных, без необработанного отклонения (AUTH-07)', async () => {
+      const now = almatyMidnight('2026-11-02');
+      const hanging = await account({ lastSignInAt: new Date('2026-08-01T07:00:00Z') });
+      const failing = await account({ lastSignInAt: new Date('2026-08-01T07:00:00Z') });
+      const throwing = await account({ lastSignInAt: new Date('2026-08-01T07:00:00Z') });
+      expect(await job().run(now)).toEqual({ deactivated: 3 });
+      const stalePassword = async () => new Date('2026-10-01T07:00:00Z');
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => unhandled.push(reason);
+      process.on('unhandledRejection', onUnhandled);
+      try {
+        // Keycloak завис: logoutUser не отвечает. Ответ приходит всё равно (прежний код ждал бы ~30 с).
+        const stuck = keycloakMock(stalePassword);
+        let finishLogout!: () => void;
+        stuck.logoutUser.mockReturnValue(new Promise<void>((resolve) => (finishLogout = resolve)));
+        const answer = await Promise.race([
+          callback({ email: hanging.email, subject: hanging.idpSubject! }, stuck),
+          new Promise<'ждёт logoutUser'>((resolve) => setTimeout(() => resolve('ждёт logoutUser'), 2000)),
+        ]);
+        expect(answer).toEqual({ location: '/login?error=account_inactive', token: undefined });
+        expect(stuck.logoutUser).toHaveBeenCalledExactlyOnceWith(hanging.idpSubject);
+        expect(await row(hanging.id)).toMatchObject({ state: 'inactive', inactiveSince: now });
+        expect(await sessionCount(hanging.id)).toBe(0);
+        finishLogout();
+
+        // Keycloak отвечает ошибкой, в тексте которой адрес с субъектом: отказ прежний, в журнале — фиксированная строка.
+        const broken = keycloakMock(stalePassword);
+        const secret = `https://keycloak.invalid/admin/realms/imbc/users/${failing.idpSubject}/logout`;
+        broken.logoutUser.mockRejectedValue(new Error(`Keycloak logout user: ${secret} 503`));
+        const refused = await callback({ email: failing.email, subject: failing.idpSubject! }, broken);
+        expect(refused).toEqual({ location: '/login?error=account_inactive', token: undefined });
+
+        // Исключение уже при вызове (а не отклонённый промис) отказ тоже не меняет.
+        const thrown = keycloakMock(stalePassword);
+        thrown.logoutUser.mockImplementation(() => {
+          throw new Error(`Keycloak logout user: ${secret}`);
+        });
+        const refusedAgain = await callback({ email: throwing.email, subject: throwing.idpSubject! }, thrown);
+        expect(refusedAgain).toEqual({ location: '/login?error=account_inactive', token: undefined });
+
+        // Даём отклонённому промису шанс стать необработанным, прежде чем смотреть журнал.
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(unhandled).toEqual([]);
+        const line = 'inactive account: IdP logout after refused sign-in failed';
+        expect(warn.mock.calls).toEqual([[line], [line]]);
+        for (const personal of [
+          failing.idpSubject!,
+          failing.email,
+          throwing.idpSubject!,
+          throwing.email,
+          'keycloak.invalid',
+        ])
+          expect(JSON.stringify(warn.mock.calls)).not.toContain(personal);
+      } finally {
+        process.off('unhandledRejection', onUnhandled);
+      }
     });
   },
 );

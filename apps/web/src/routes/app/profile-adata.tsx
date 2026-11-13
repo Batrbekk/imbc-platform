@@ -4,7 +4,7 @@ import { cn } from "cn";
 import { useId } from "react";
 import { useTranslations } from "use-intl";
 
-import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -75,11 +75,11 @@ export function AdataReadCard() {
         ) : result.isError ? (
           <Alert variant="destructive">
             <AlertDescription>{t("loadError")}</AlertDescription>
-            <AlertAction>
+            <div className="mt-2">
               <Button size="sm" variant="outline" onClick={() => void result.refetch()}>
                 {common("retry")}
               </Button>
-            </AlertAction>
+            </div>
           </Alert>
         ) : (
           <Skeleton className="h-40" />

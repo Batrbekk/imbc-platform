@@ -5,7 +5,7 @@ import { Link } from "react-router";
 import { useLocale, useTranslations } from "use-intl";
 import { z } from "zod";
 
-import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -172,7 +172,7 @@ export function RegisterForm() {
         {ndaUnavailable ? t("ndaUnavailable") : t("termsLoadError")}
       </AlertDescription>
       {!ndaUnavailable && (
-        <AlertAction>
+        <div className="mt-2">
           <Button
             type="button"
             size="sm"
@@ -183,7 +183,7 @@ export function RegisterForm() {
             {terms.isFetching && <Spinner />}
             {common("retry")}
           </Button>
-        </AlertAction>
+        </div>
       )}
     </Alert>
   );

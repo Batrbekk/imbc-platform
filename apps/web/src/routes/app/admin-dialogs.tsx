@@ -14,6 +14,7 @@ import {
   type Role,
 } from "@imbc/contracts";
 import {
+  type ComponentProps,
   type FormEvent,
   type ReactElement,
   type ReactNode,
@@ -46,25 +47,38 @@ import { api } from "@/lib/api";
 
 import { type Action, problemCode, useAdminAction, useProblemMessage } from "./admin-actions";
 
+/** Куда уходит фокус при закрытии диалога: ссылка на элемент или функция (Base UI `finalFocus`). */
+type FinalFocus = ComponentProps<typeof DialogContent>["finalFocus"];
+
 /**
  * Диалог действия: своя переведённая кнопка «Отмена» (у встроенной подпись «Close» не переводится),
- * закрытие возвращает фокус на кнопку-триггер или на `finalFocus` (кнопку меню строки).
+ * закрытие возвращает фокус на кнопку-триггер или на `finalFocus` (кнопку меню строки). Пока `locked`
+ * (запрос в пути), диалог не закрывается ни Escape, ни щелчком по подложке: итог действия не придёт
+ * на уже закрытый диалог.
  */
 function AdminDialog({
   open,
   onOpenChange,
   trigger,
   finalFocus,
+  locked = false,
   children,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   trigger?: ReactElement;
-  finalFocus?: RefObject<HTMLElement | null>;
+  finalFocus?: FinalFocus;
+  locked?: boolean;
   children: ReactNode;
 }) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && locked) return;
+        onOpenChange(next);
+      }}
+    >
       {trigger && <DialogTrigger render={trigger} />}
       <DialogContent
         showCloseButton={false}
@@ -79,13 +93,15 @@ function AdminDialog({
 
 /**
  * Форма в диалоге: поля, ошибка запроса и кнопки. Enter в поле отправляет форму. После неудачной
- * проверки (`focusRequest` растёт) фокус уходит на первое поле с ошибкой.
+ * проверки (`focusRequest` растёт) фокус уходит на первое поле с ошибкой. Пока запрос в пути, «Отмена»
+ * недоступна (диалог не закрывается); `submitDisabled` — «Сохранить» недоступна, пока значение не изменено.
  */
 function DialogForm({
   title,
   description,
   submitLabel,
   pending,
+  submitDisabled = false,
   error,
   focusRequest,
   onSubmit,
@@ -95,6 +111,7 @@ function DialogForm({
   description?: string;
   submitLabel: string;
   pending: boolean;
+  submitDisabled?: boolean;
   error?: string;
   focusRequest: number;
   onSubmit: () => void;
@@ -107,6 +124,7 @@ function DialogForm({
   }, [focusRequest]);
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    if (submitDisabled) return;
     onSubmit();
   };
   return (
@@ -122,8 +140,10 @@ function DialogForm({
         </Alert>
       )}
       <DialogFooter>
-        <DialogClose render={<Button type="button" variant="outline" />}>{t("cancel")}</DialogClose>
-        <Button type="submit" disabled={pending}>
+        <DialogClose disabled={pending} render={<Button type="button" variant="outline" />}>
+          {t("cancel")}
+        </DialogClose>
+        <Button type="submit" disabled={pending || submitDisabled}>
           {pending && <Spinner aria-hidden="true" />}
           {submitLabel}
         </Button>
@@ -263,6 +283,7 @@ export function ImbcMailboxDialog({ mailbox }: { mailbox: string | null }) {
         if (next) action.reset();
         setOpen(next);
       }}
+      locked={action.isPending}
       trigger={
         <Button variant="outline" size="sm">
           {t("change")}
@@ -289,6 +310,8 @@ function MailboxForm({
   const [value, setValue] = useState(mailbox ?? "");
   const [invalid, setInvalid] = useState(false);
   const [focusRequest, setFocusRequest] = useState(0);
+  // Адрес хранится в нижнем регистре (imbcMailboxSchema): отличие только регистром или пробелами — не изменение.
+  const unchanged = value.trim().toLowerCase() === (mailbox ?? "").toLowerCase();
   const submit = () => {
     const email = value.trim();
     const parsed = imbcMailboxSchema.safeParse({ email: email === "" ? null : email });
@@ -305,6 +328,7 @@ function MailboxForm({
       description={t("imbcMailboxHint")}
       submitLabel={t("save")}
       pending={action.isPending}
+      submitDisabled={unchanged}
       error={action.isError ? problem(action.error) : undefined}
       focusRequest={focusRequest}
       onSubmit={submit}
@@ -343,6 +367,7 @@ export function CreateOrganizationDialog() {
         if (next) action.reset();
         setOpen(next);
       }}
+      locked={action.isPending}
       trigger={<Button variant="outline">{t("createOrganization")}</Button>}
     >
       <OrganizationForm action={action} close={() => setOpen(false)} />
@@ -437,14 +462,21 @@ export function InviteDialog({
   organizations,
   organizationId = null,
   trigger,
+  invitedFocus,
 }: {
   organizations: readonly AdminOrganization[];
   /** Организация, выбранная заранее (приглашение из карточки организации без аккаунтов). */
   organizationId?: string | null;
   trigger?: ReactElement;
+  /**
+   * Куда перевести фокус после удачного приглашения, если триггер исчезнет со страницы (кнопка из пустой
+   * карточки: в ней появляется аккаунт). Отмена и закрытие без приглашения возвращают фокус на триггер.
+   */
+  invitedFocus?: RefObject<HTMLElement | null>;
 }) {
   const t = useTranslations("adminAccounts");
   const [open, setOpen] = useState(false);
+  const invited = useRef(false);
   const action = useAdminAction({
     request: (input: InviteInput) => api<AdminAccountResult>("/v1/admin/accounts", { method: "POST", json: input }),
     done: (result) => t("invited", { email: result.account.email }),
@@ -453,16 +485,24 @@ export function InviteDialog({
     <AdminDialog
       open={open}
       onOpenChange={(next) => {
-        if (next) action.reset();
+        if (next) {
+          action.reset();
+          invited.current = false;
+        }
         setOpen(next);
       }}
+      locked={action.isPending}
+      finalFocus={invitedFocus && (() => (invited.current ? invitedFocus.current : true))}
       trigger={trigger ?? <Button>{t("inviteUser")}</Button>}
     >
       <InviteForm
         organizations={organizations}
         organizationId={organizationId}
         action={action}
-        close={() => setOpen(false)}
+        close={() => {
+          invited.current = true;
+          setOpen(false);
+        }}
       />
     </AdminDialog>
   );
@@ -614,6 +654,7 @@ export function ChangeRoleDialog({
         if (next) action.reset();
         onOpenChange(next);
       }}
+      locked={action.isPending}
       finalFocus={finalFocus}
     >
       <RoleForm account={account} action={action} close={() => onOpenChange(false)} />
@@ -646,6 +687,7 @@ function RoleForm({ account, action, close }: { account: AdminAccount; action: A
       description={t("changeRoleHint")}
       submitLabel={t("save")}
       pending={action.isPending}
+      submitDisabled={role === account.role}
       error={action.isError ? problem(action.error) : undefined}
       focusRequest={focusRequest}
       onSubmit={submit}
@@ -695,6 +737,7 @@ export function ChangeEmailDialog({
         if (next) action.reset();
         onOpenChange(next);
       }}
+      locked={action.isPending}
       finalFocus={finalFocus}
     >
       <EmailForm account={account} action={action} close={() => onOpenChange(false)} />
@@ -712,6 +755,14 @@ function EmailForm({ account, action, close }: { account: AdminAccount; action: 
   const [invalid, setInvalid] = useState(false);
   const [focusRequest, setFocusRequest] = useState(0);
   const code = problemCode(action.error);
+  // Письмо на новый адрес уходит только приглашённому (установка пароля); у неактивного и заблокированного
+  // его нет — подсказка не обещает ни сеансов, ни письма.
+  const emailHint =
+    account.state === "invited"
+      ? `${t("changeEmailHint")} ${t("changeEmailInvitedHint")}`
+      : account.state === "inactive" || account.state === "blocked"
+        ? t("changeEmailHintIdle")
+        : t("changeEmailHint");
   const submit = () => {
     const parsed = changeEmailSchema.safeParse({ email: value });
     if (!parsed.success) {
@@ -724,9 +775,7 @@ function EmailForm({ account, action, close }: { account: AdminAccount; action: 
   return (
     <DialogForm
       title={t("changeEmailTitle", { email })}
-      description={
-        account.state === "invited" ? `${t("changeEmailHint")} ${t("changeEmailInvitedHint")}` : t("changeEmailHint")
-      }
+      description={emailHint}
       submitLabel={t("save")}
       pending={action.isPending}
       error={action.isError && code !== "email_exists" ? problem(action.error) : undefined}

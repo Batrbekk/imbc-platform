@@ -34,12 +34,14 @@ export function LegalDialog({ title, body, trigger }: { title: string; body: str
             {title}
           </DialogTitle>
         </DialogHeader>
-        {/* Длинный текст прокручивается и с клавиатуры: область в порядке Tab, названа заголовком. */}
+        {/* Длинный текст прокручивается и с клавиатуры: область в порядке Tab, названа заголовком.
+            Внутренний отступ p-2 при отрицательном внешнем -m-2: текст стоит на месте, а кольцо фокуса
+            обходит его с зазором 8px и не обрезается полем диалога. */}
         <div
           role="document"
           aria-labelledby={titleId}
           tabIndex={0}
-          className="min-h-0 overflow-y-auto rounded-md break-words whitespace-pre-line leading-relaxed outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="-m-2 min-h-0 overflow-y-auto rounded-md p-2 break-words whitespace-pre-line leading-relaxed outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           {body}
         </div>

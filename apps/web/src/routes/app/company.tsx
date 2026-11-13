@@ -6,7 +6,7 @@ import { Link, useLocation, useParams } from "react-router";
 import { useLocale, useTranslations } from "use-intl";
 
 import { PageTitle } from "@/components/app/page-title";
-import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -66,11 +66,11 @@ export function CompanyPage() {
       ) : result.isError ? (
         <Alert variant="destructive">
           <AlertDescription>{t("loadError")}</AlertDescription>
-          <AlertAction>
+          <div className="mt-2">
             <Button size="sm" variant="outline" onClick={() => void result.refetch()}>
               {common("retry")}
             </Button>
-          </AlertAction>
+          </div>
         </Alert>
       ) : (
         <div className="flex flex-col gap-4">

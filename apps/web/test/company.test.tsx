@@ -174,6 +174,8 @@ describe("страница компании (OPR-09, OPR-10)", () => {
     ({ user } = renderRoute(`/companies/${ID}`, { locale: "en" }));
 
     expect(await screen.findByText(en.company.loadError)).toBeTruthy();
+    // Кнопка «Повторить» — под текстом, а не в AlertAction: у того справа 4,5rem, на 390 px кнопка легла бы на текст.
+    expect(document.querySelector('[data-slot="alert-action"]')).toBeNull();
     expect(screen.queryByText(en.company.notFound)).toBeNull();
     fail = false;
     await user.click(screen.getByRole("button", { name: en.common.retry }));
