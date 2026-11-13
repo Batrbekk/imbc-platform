@@ -284,8 +284,9 @@ function stubBackend(
     [
       "POST",
       /^\/api\/v1\/org-chart-sample$/,
-      () => {
-        sample.latest = sampleFile("pending", "Новый образец.pdf") as OrgChartSampleState["latest"];
+      (_url, init) => {
+        const name = ((init?.body as FormData).get("file") as File).name;
+        sample.latest = sampleFile("pending", name) as OrgChartSampleState["latest"];
         return Response.json({ upload: sample.latest }, { status: 202 });
       },
     ],
@@ -1162,8 +1163,8 @@ describe("образец оргструктуры (ADM-11)", () => {
     await waitFor(() => expect(screen.queryByText(t.pending)).toBeNull());
     expect(await screen.findByText("Новый образец.pdf")).toBeTruthy();
     expect(screen.queryByText("Прежний образец.pdf")).toBeNull();
-    // Строка итога объявила результат проверки (U1): образец стал текущим.
-    expect(screen.getByText(t.checkPassed).closest("[aria-live]")!.getAttribute("aria-live")).toBe("polite");
+    // Проверка чужая (страница открыта, когда она уже шла): итога в строке состояния нет.
+    expect(screen.queryByText(t.checkPassed)).toBeNull();
     const after = polls();
     await vi.advanceTimersByTimeAsync(15_000);
     expect(polls()).toBe(after);
@@ -1841,91 +1842,208 @@ describe("образец оргструктуры: итог проверки в 
     );
   /** Строка итога страницы: aria-live над карточками. */
   const statusLine = () => document.querySelector<HTMLElement>("[aria-live='polite'][aria-atomic='true']")!;
+  const pdf = (name: string) => new File(["%PDF-1.4"], name, { type: "application/pdf" });
+  const fileInput = () => document.querySelector<HTMLInputElement>('input[type="file"]')!;
+  const POST_SAMPLE: [string, RegExp] = ["POST", /\/org-chart-sample$/];
 
-  it("проверка закончилась успешно: «Образец прошёл проверку и стал текущим», тон успеха; прежнее «проверяется» заменено", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const sample: Backend["sample"] = {
-      current: sampleFile("passed", "Прежний образец.pdf") as never,
-      latest: null,
+  /** Ответ на загрузку: сервер принял файл (202, `pending`), а `outcome` решает, чем проверка кончится к первому перечитыванию. */
+  const uploadHandler =
+    (sample: Backend["sample"], outcome: "slow" | "passed" | "rejected"): Handler =>
+    (_url, init) => {
+      const name = ((init?.body as FormData).get("file") as File).name;
+      const pending = sampleFile("pending", name) as never;
+      if (outcome === "slow") sample.latest = pending;
+      else if (outcome === "passed") {
+        sample.current = sampleFile("passed", name) as never;
+        sample.latest = null;
+      } else sample.latest = sampleFile("rejected", name) as never;
+      return Response.json({ upload: pending }, { status: 202 });
     };
-    stubBackend({ sample });
+
+  it("обычный путь через «проверяется»: загрузка → опрос видит pending → файл стал текущим → «стал текущим», тон успеха", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const sample: Backend["sample"] = { current: sampleFile("passed", "Прежний образец.pdf") as never, latest: null };
+    stubBackend({ sample, overrides: [[...POST_SAMPLE, uploadHandler(sample, "slow")]] });
     const { user } = renderRoute("/references", { locale: "ru" });
     const t = ru.references.sample;
 
     await screen.findByRole("link", { name: t.download });
-    // Загрузка: итог «загружен и проверяется», сервер отвечает 202; затем проверка идёт.
-    await user.upload(
-      document.querySelector<HTMLInputElement>('input[type="file"]')!,
-      new File(["%PDF-1.4"], "Новый образец.pdf", { type: "application/pdf" }),
-    );
+    await user.upload(fileInput(), pdf("Новый образец.pdf"));
     expect(await within(statusLine()).findByText(t.uploaded)).toBeTruthy();
     expect(await sampleCard().findByText(t.pending)).toBeTruthy();
+    await vi.advanceTimersByTimeAsync(5_500);
+    // Пока проверка идёт, итога нет: «загружен и проверяется» остаётся.
+    expect(within(statusLine()).getByText(t.uploaded)).toBeTruthy();
 
-    // Проверка прошла: новая загрузка стала текущей, последней загрузки нет.
     sample.current = sampleFile("passed", "Новый образец.pdf") as never;
     sample.latest = null;
     await vi.advanceTimersByTimeAsync(5_500);
     const done = await within(statusLine()).findByText(t.checkPassed);
     expect(within(statusLine()).queryByText(t.uploaded)).toBeNull();
-    // Тон успеха: не красный.
     expect(done.closest('[data-slot="alert"]')!.className).not.toContain("text-destructive");
     expect(await sampleCard().findByText("Новый образец.pdf")).toBeTruthy();
     expect(sampleCard().queryByText(t.pending)).toBeNull();
   });
 
-  it("первый образец прошёл проверку (текущего не было): тоже «стал текущим»", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const sample: Backend["sample"] = { current: null, latest: sampleFile("pending", "Первый.pdf") as never };
-    stubBackend({ sample });
-    renderRoute("/references", { locale: "ru" });
+  it("быстрая проверка: первое перечитывание после загрузки уже отдаёт новый файл текущим (pending не встречался) — «стал текущим»", async () => {
+    const sample: Backend["sample"] = { current: sampleFile("passed", "Прежний образец.pdf") as never, latest: null };
+    const api = stubBackend({ sample, overrides: [[...POST_SAMPLE, uploadHandler(sample, "passed")]] });
+    const { user } = renderRoute("/references", { locale: "ru" });
     const t = ru.references.sample;
 
-    expect(await screen.findByText(t.pendingFirstHint)).toBeTruthy();
-    expect(within(statusLine()).queryByText(t.checkPassed)).toBeNull();
-    sample.current = sampleFile("passed", "Первый.pdf") as never;
-    sample.latest = null;
-    await vi.advanceTimersByTimeAsync(5_500);
-    expect(await within(statusLine()).findByText(t.checkPassed)).toBeTruthy();
+    await screen.findByRole("link", { name: t.download });
+    await user.upload(fileInput(), pdf("Быстрый.pdf"));
+
+    const done = await within(statusLine()).findByText(t.checkPassed);
+    expect(done.closest('[data-slot="alert"]')!.className).not.toContain("text-destructive");
+    expect(within(statusLine()).queryByText(t.uploaded)).toBeNull();
+    // Карточка показывает то же: новый файл текущий, «проверяется» не было ни разу.
+    expect(await sampleCard().findByText("Быстрый.pdf")).toBeTruthy();
+    expect(sampleCard().queryByText(t.pending)).toBeNull();
+    // Ровно одно перечитывание после загрузки, опроса нет.
+    expect(requests(api, "GET", /\/org-chart-sample$/)).toHaveLength(2);
   });
 
-  it("проверка не пройдена: «Файл не прошёл проверку. Текущий образец не изменился», тон ошибки", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const sample: Backend["sample"] = {
-      current: sampleFile("passed", "Прежний образец.pdf") as never,
-      latest: sampleFile("pending", "Вирус.pdf") as never,
-    };
-    stubBackend({ sample });
-    renderRoute("/references", { locale: "ru" });
+  it("быстрая проверка первого образца (текущего не было): «стал текущим»", async () => {
+    const sample: Backend["sample"] = { current: null, latest: null };
+    stubBackend({ sample, overrides: [[...POST_SAMPLE, uploadHandler(sample, "passed")]] });
+    const { user } = renderRoute("/references", { locale: "ru" });
     const t = ru.references.sample;
 
-    expect(await screen.findByText(t.pending)).toBeTruthy();
-    // Пока проверка идёт, в строке итога ничего нет.
-    expect(statusLine().textContent).toBe("");
+    await screen.findByText(t.none);
+    await user.upload(fileInput(), pdf("Первый.pdf"));
+    expect(await within(statusLine()).findByText(t.checkPassed)).toBeTruthy();
+    expect(await sampleCard().findByText("Первый.pdf")).toBeTruthy();
+  });
+
+  it("быстрый отказ: первое перечитывание отдаёт rejected — «Файл не прошёл проверку. Текущий образец не изменился.», тон ошибки", async () => {
+    const sample: Backend["sample"] = { current: sampleFile("passed", "Прежний образец.pdf") as never, latest: null };
+    stubBackend({ sample, overrides: [[...POST_SAMPLE, uploadHandler(sample, "rejected")]] });
+    const { user } = renderRoute("/references", { locale: "ru" });
+    const t = ru.references.sample;
+
+    await screen.findByRole("link", { name: t.download });
+    await user.upload(fileInput(), pdf("Вирус.pdf"));
+
+    const failed = await within(statusLine()).findByText(`${t.checkRejected} ${t.keptCurrent}`);
+    expect(failed.closest('[data-slot="alert"]')!.className).toContain("text-destructive");
+    expect(within(statusLine()).queryByText(t.uploaded)).toBeNull();
+    expect(await sampleCard().findByText(t.rejected)).toBeTruthy();
+    expect(sampleCard().getByText("Прежний образец.pdf")).toBeTruthy();
+  });
+
+  it("быстрый отказ первого образца: без слов о неизменившемся текущем", async () => {
+    const sample: Backend["sample"] = { current: null, latest: null };
+    stubBackend({ sample, overrides: [[...POST_SAMPLE, uploadHandler(sample, "rejected")]] });
+    const { user } = renderRoute("/references", { locale: "ru" });
+    const t = ru.references.sample;
+
+    await screen.findByText(t.none);
+    await user.upload(fileInput(), pdf("Вирус.pdf"));
+    expect(await within(statusLine()).findByText(t.checkRejected)).toBeTruthy();
+    expect(within(statusLine()).queryByText(t.keptCurrent, { exact: false })).toBeNull();
+  });
+
+  it("отказ после «проверяется»: опрос видит rejected своего файла — итог об отказе", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const sample: Backend["sample"] = { current: sampleFile("passed", "Прежний образец.pdf") as never, latest: null };
+    stubBackend({ sample, overrides: [[...POST_SAMPLE, uploadHandler(sample, "slow")]] });
+    const { user } = renderRoute("/references", { locale: "ru" });
+    const t = ru.references.sample;
+
+    await screen.findByRole("link", { name: t.download });
+    await user.upload(fileInput(), pdf("Вирус.pdf"));
+    expect(await sampleCard().findByText(t.pending)).toBeTruthy();
     sample.latest = sampleFile("rejected", "Вирус.pdf") as never;
     await vi.advanceTimersByTimeAsync(5_500);
 
     const failed = await within(statusLine()).findByText(`${t.checkRejected} ${t.keptCurrent}`);
     expect(failed.closest('[data-slot="alert"]')!.className).toContain("text-destructive");
     expect(await sampleCard().findByText(t.rejected)).toBeTruthy();
-    // Текущий образец прежний.
-    expect(sampleCard().getByText("Прежний образец.pdf")).toBeTruthy();
   });
 
-  it("не пройдена проверка первого образца: без слов о неизменившемся текущем", async () => {
+  it("ответ на загрузку уже говорит об итоге: объявляется сразу, не дожидаясь перечитывания", async () => {
+    const sample: Backend["sample"] = { current: sampleFile("passed", "Прежний образец.pdf") as never, latest: null };
+    stubBackend({
+      sample,
+      overrides: [
+        [
+          ...POST_SAMPLE,
+          (_url, init) => {
+            const name = ((init?.body as FormData).get("file") as File).name;
+            return Response.json({ upload: sampleFile("rejected", name) }, { status: 202 });
+          },
+        ],
+      ],
+    });
+    const { user } = renderRoute("/references", { locale: "ru" });
+    const t = ru.references.sample;
+
+    await screen.findByRole("link", { name: t.download });
+    await user.upload(fileInput(), pdf("Вирус.pdf"));
+    // Состояние на сервере прежнее (ни latest, ни нового current) — итог всё равно в строке.
+    expect(await within(statusLine()).findByText(`${t.checkRejected} ${t.keptCurrent}`)).toBeTruthy();
+  });
+
+  it("страница открыта, когда чужая проверка уже шла: когда она кончается, объявлять нечего", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const sample: Backend["sample"] = { current: null, latest: sampleFile("pending", "Вирус.pdf") as never };
-    stubBackend({ sample });
+    const sample: Backend["sample"] = {
+      current: sampleFile("passed", "Прежний образец.pdf") as never,
+      latest: sampleFile("pending", "Чужой.pdf") as never,
+    };
+    const api = stubBackend({ sample });
     renderRoute("/references", { locale: "ru" });
     const t = ru.references.sample;
 
-    await screen.findByText(t.pending);
-    sample.latest = sampleFile("rejected", "Вирус.pdf") as never;
+    expect(await screen.findByText(t.pending)).toBeTruthy();
+    expect(statusLine().textContent).toBe("");
+    sample.current = sampleFile("passed", "Чужой.pdf") as never;
+    sample.latest = null;
     await vi.advanceTimersByTimeAsync(5_500);
-    expect(await within(statusLine()).findByText(t.checkRejected)).toBeTruthy();
-    expect(within(statusLine()).queryByText(t.keptCurrent, { exact: false })).toBeNull();
+    expect(await sampleCard().findByText("Чужой.pdf")).toBeTruthy();
+    expect(requests(api, "GET", /\/org-chart-sample$/)).toHaveLength(2);
+    expect(statusLine().textContent).toBe("");
+
+    // Так же с отказом чужой проверки.
+    cleanup();
+    const other: Backend["sample"] = { current: null, latest: sampleFile("pending", "Чужой вирус.pdf") as never };
+    stubBackend({ sample: other });
+    renderRoute("/references", { locale: "ru" });
+    await screen.findByText(t.pending);
+    other.latest = sampleFile("rejected", "Чужой вирус.pdf") as never;
+    await vi.advanceTimersByTimeAsync(5_500);
+    expect(await screen.findByText(t.rejected)).toBeTruthy();
+    expect(statusLine().textContent).toBe("");
   });
 
-  it("страница открыта на уже закончившейся проверке: итога нет, объявляется только смена, увиденная опросом", async () => {
+  it("итог прежней загрузки не объявляется: после второй загрузки ждём только её", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const sample: Backend["sample"] = { current: null, latest: null };
+    stubBackend({ sample, overrides: [[...POST_SAMPLE, uploadHandler(sample, "slow")]] });
+    const { user } = renderRoute("/references", { locale: "ru" });
+    const t = ru.references.sample;
+
+    await screen.findByText(t.none);
+    await user.upload(fileInput(), pdf("Первая.pdf"));
+    expect(await sampleCard().findByText("Первая.pdf")).toBeTruthy();
+    await user.upload(fileInput(), pdf("Вторая.pdf"));
+    await waitFor(() => expect(sampleCard().getByText("Вторая.pdf")).toBeTruthy());
+
+    // Первая прошла проверку, вторая ещё идёт: итога первой нет (страница уже ждёт вторую).
+    sample.current = sampleFile("passed", "Первая.pdf") as never;
+    sample.latest = sampleFile("pending", "Вторая.pdf") as never;
+    await vi.advanceTimersByTimeAsync(5_500);
+    await waitFor(() => expect(sampleCard().getByText("Первая.pdf")).toBeTruthy());
+    expect(within(statusLine()).queryByText(t.checkPassed)).toBeNull();
+
+    sample.current = sampleFile("passed", "Вторая.pdf") as never;
+    sample.latest = null;
+    await vi.advanceTimersByTimeAsync(5_500);
+    expect(await within(statusLine()).findByText(t.checkPassed)).toBeTruthy();
+    expect(await sampleCard().findByText("Вторая.pdf")).toBeTruthy();
+  });
+
+  it("страница открыта на уже закончившейся проверке: итога нет", async () => {
     stubBackend({
       sample: {
         current: sampleFile("passed", "Прежний образец.pdf") as never,

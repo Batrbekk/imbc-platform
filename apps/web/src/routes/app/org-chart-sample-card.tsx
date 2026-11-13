@@ -88,28 +88,35 @@ export function OrgChartSampleCard({ canManage }: { canManage: boolean }) {
   const current = state.data?.current ?? null;
   const latest = state.data?.latest ?? null;
 
-  // Проверка закончилась, пока страница открыта: строка итога объявляет результат, а не остаётся на «проверяется».
-  // Переход виден по ответу опроса: `pending` → последней загрузки нет, а текущий образец сменился (прошла проверку
-  // и стала текущим) или `pending` → `rejected` (не прошла; текущий прежний). Первый ответ при открытии страницы
-  // ничего не объявляет: человек не ждал этого результата. Прежнее значение — в `watched`, а не в состоянии:
-  // повторный запуск эффекта с тем же ответом ничего не объявит второй раз.
-  const watched = useRef<{ pendingId: string | null; currentId: string | null } | null>(null);
+  // Страница ждёт итог своей загрузки: в ответе на `POST` — её `fileId`. На каждом ответе о состоянии (первом после
+  // загрузки и на опросе) смотрим, чем кончилась проверка этого файла: он стал текущим или `latest` — он же и
+  // `rejected`; пока `pending` — ждём дальше. Итог объявляется, даже если состояние `pending` страница не видела:
+  // небольшой файл проверяется за секунду, и уже первое перечитывание отдаёт его текущим. Ожидание — только у файла,
+  // загруженного на этой странице в этом сеансе (данные мутации): при открытии страницы с идущей чужой проверкой, после
+  // перезагрузки и для прежней загрузки объявлять нечего. Если сам ответ на загрузку уже говорит об итоге — тоже.
+  const uploaded: OrgChartSampleFile | undefined = upload.data?.upload;
+  const announcedFor = useRef<string | null>(null);
   useEffect(() => {
-    const data = state.data;
-    if (!data) return;
-    const before = watched.current;
-    watched.current = {
-      pendingId: data.latest?.scanState === "pending" ? data.latest.fileId : null,
-      currentId: data.current?.fileId ?? null,
-    };
-    if (!before?.pendingId) return;
-    if (data.latest?.scanState === "rejected") {
-      const kept = data.current ? ` ${t("sample.keptCurrent")}` : "";
-      announce({ tone: "error", text: `${t("sample.checkRejected")}${kept}` });
-    } else if (data.latest === null && data.current && data.current.fileId !== before.currentId) {
+    if (!uploaded || announcedFor.current === uploaded.fileId) return;
+    const mine = (file: OrgChartSampleFile | null | undefined) => file?.fileId === uploaded.fileId;
+    const verdict =
+      uploaded.scanState !== "pending"
+        ? uploaded.scanState
+        : mine(state.data?.current)
+          ? "passed"
+          : mine(state.data?.latest) && state.data?.latest?.scanState === "rejected"
+            ? "rejected"
+            : null;
+    if (!verdict) return;
+    announcedFor.current = uploaded.fileId;
+    if (verdict === "passed") {
       announce({ tone: "success", text: t("sample.checkPassed") });
+    } else {
+      // «Текущий образец не изменился» — только если текущий был.
+      const kept = state.data?.current ? ` ${t("sample.keptCurrent")}` : "";
+      announce({ tone: "error", text: `${t("sample.checkRejected")}${kept}` });
     }
-  }, [state.data, announce, t]);
+  }, [uploaded, state.data, announce, t]);
 
   return (
     <Card className="@container">
