@@ -1,3 +1,5 @@
+import 'reflect-metadata';
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +14,7 @@ import {
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AuditService } from '../src/common/audit.service.js';
 import { applyAppRoleGrants } from '../src/database/app-role.js';
 import type { Database } from '../src/database/database.module.js';
 import {
@@ -19,8 +22,11 @@ import {
   loadReferenceFile,
   REFERENCE_DATA_DIR,
   ReferenceFileError,
+  referenceLoadSummary,
 } from '../src/database/reference-data.js';
 import * as schema from '../src/database/schema/index.js';
+import type { AuthUser } from '../src/modules/auth/auth.types.js';
+import { DictionariesService } from '../src/modules/dictionaries/dictionaries.service.js';
 import { migrateThrough, openTestPool, resetDatabase } from './support/database.js';
 
 const RELEASE = join(REFERENCE_DATA_DIR, 'release');
@@ -120,6 +126,37 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
          from audit_entries where action = 'reference.loaded' order by at, object_id`,
       )
     ).rows;
+
+  /** Администратор IMBC в базе: действия справочников проверяют исполнителя под блокировкой (actorTransaction). */
+  const administrator = async (): Promise<AuthUser> => {
+    const imbc = await pool.query<{ id: string }>("select id from organizations where type = 'imbc'");
+    const id = randomUUID();
+    await pool.query(
+      "insert into user_accounts (id, organization_id, email, role, state) values ($1, $2, $3, 'administrator', 'active')",
+      [id, imbc.rows[0]!.id, `${id}@imbc.local`],
+    );
+    return {
+      id,
+      email: `${id}@imbc.local`,
+      fullName: null,
+      role: 'administrator',
+      organizationId: imbc.rows[0]!.id,
+      organizationType: 'imbc',
+      locale: 'kk',
+    };
+  };
+
+  /** API справочников администратора: удаление пишет аудит `dictionary.entry_deleted`, по нему судит загрузчик. */
+  const dictionaries = (database: Database = db, connections: pg.Pool = pool) =>
+    new DictionariesService(database, connections, new AuditService(database));
+
+  const entryId = async (dictionary: string, code: string) =>
+    (
+      await pool.query<{ id: string }>(
+        'select e.id from dictionary_entry e join dictionary d on d.id = e.dictionary_id where d.code = $1 and e.code = $2',
+        [dictionary, code],
+      )
+    ).rows[0]!.id;
 
   it('release: правовые формы LLP, LLC, JSC; группы A–E; роли management, technical, commercial; типы сертификатов — ISO 9001, ISO 14001, ISO 45001 обязательные, Other с customNameAllowed; типы документов — registration_certificate, charter, licence обязательные, financial_statements нет (MAN-09, MAN-13, MAN-34, MAN-37, MAN-38)', async () => {
     const results = await loadReferenceDirectory(db, RELEASE, 'release');
@@ -253,6 +290,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
       dictionary: 'legal_form',
       inserted: 0,
       translationsAdded: 1,
+      skippedDeleted: 0,
     });
     expect(third.filter((r) => r.dictionary !== 'legal_form').every((r) => r.translationsAdded === 0)).toBe(true);
     const llc = (await entries('legal_form')).find((e) => e.code === 'LLC')!;
@@ -264,6 +302,102 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
     expect((await entries('legal_form')).find((e) => e.code === 'LLP')).toEqual(adjusted.llp);
     expect(await entries('certificate_type')).toEqual(adjusted.certificates);
     expect(await counts()).toEqual({ ...first, audit: 6 });
+  });
+
+  it('значение release, удалённое администратором, выкат не возвращает: ISO 45001 снят с обязательных и удалён — загрузка его пропускает, счётчик пропущенных 1, аудита reference.loaded нет (ADM-08, DATA-04)', async () => {
+    await loadReferenceDirectory(db, RELEASE, 'release');
+    const admin = await administrator();
+    const service = dictionaries();
+    const iso = await entryId('certificate_type', 'ISO 45001');
+    await service.setMandatory(admin, 'certificate_type', iso, false);
+    await service.remove(admin, 'certificate_type', iso);
+    const before = await counts();
+
+    const results = await loadReferenceDirectory(db, RELEASE, 'release');
+    expect(results.find((r) => r.dictionary === 'certificate_type')).toEqual({
+      dictionary: 'certificate_type',
+      inserted: 0,
+      translationsAdded: 0,
+      skippedDeleted: 1,
+    });
+    expect(results.filter((r) => r.dictionary !== 'certificate_type').every((r) => r.skippedDeleted === 0)).toBe(true);
+    expect((await entries('certificate_type')).map((e) => e.code)).not.toContain('ISO 45001');
+    // Ни строки, ни перевода, ни записи reference.loaded: пропущенное в аудит загрузки не попадает.
+    expect(await counts()).toEqual(before);
+    expect(referenceLoadSummary(results.find((r) => r.dictionary === 'certificate_type')!)).toBe(
+      'certificate_type +0 (+0 переводов), пропущено удалённых: 1',
+    );
+
+    // Код в файле в другом регистре — тот же код (уникальность без учёта регистра): тоже пропускается.
+    const lower = await loadReferenceFile(
+      db,
+      fixture(
+        'certificate_type',
+        [{ code: 'iso 45001', names: { en: 'ISO 45001' }, mandatory: true }],
+        'specification',
+      ),
+      'release',
+    );
+    expect(lower).toEqual({ dictionary: 'certificate_type', inserted: 0, translationsAdded: 0, skippedDeleted: 1 });
+    expect(await counts()).toEqual(before);
+  });
+
+  it('удалить и создать заново с тем же кодом: загрузка строку администратора не меняет — ни полей, ни переводов (ADM-08, DATA-04)', async () => {
+    await loadReferenceDirectory(db, RELEASE, 'release');
+    const admin = await administrator();
+    const service = dictionaries();
+    await service.remove(admin, 'legal_form', await entryId('legal_form', 'LLC'));
+    await service.create(admin, 'legal_form', {
+      code: 'LLC',
+      parentCode: null,
+      names: { kk: 'ЖШҚ (жаңа)', ru: 'ООО (заново)', en: 'LLC (again)' },
+    });
+    // Перевода на английский у новой строки нет (правка в обход формы): загрузка его из файла не добавляет.
+    await pool.query(
+      `delete from dictionary_entry_translation
+       where language = 'en' and dictionary_entry_id = (select id from dictionary_entry where code = 'LLC')`,
+    );
+    const recreated = (await entries('legal_form')).find((e) => e.code === 'LLC')!;
+    const before = await counts();
+
+    const results = await loadReferenceDirectory(db, RELEASE, 'release');
+    expect(results.find((r) => r.dictionary === 'legal_form')).toEqual({
+      dictionary: 'legal_form',
+      inserted: 0,
+      translationsAdded: 0,
+      skippedDeleted: 1,
+    });
+    expect((await entries('legal_form')).find((e) => e.code === 'LLC')).toEqual(recreated);
+    expect(recreated.names).toEqual({ kk: 'ЖШҚ (жаңа)', ru: 'ООО (заново)' });
+    expect(await counts()).toEqual(before);
+  });
+
+  it('удаление в одном справочнике не мешает загрузке того же кода в другом: удалённый process/X-1 пропускается, equipment_type/X-1 загружается (ADM-08)', async () => {
+    const admin = await administrator();
+    const service = dictionaries();
+    const names = { kk: 'X-1 (kk)', ru: 'X-1 (ru)', en: 'X-1 (en)' };
+    const created = await service.create(admin, 'process', { code: 'X-1', parentCode: null, names });
+    await service.remove(admin, 'process', created.entry.id);
+
+    expect(
+      await loadReferenceFile(
+        db,
+        fixture('equipment_type', [{ code: 'X-1', names: { ru: 'Оборудование X-1' } }]),
+        'provisional',
+      ),
+    ).toEqual({ dictionary: 'equipment_type', inserted: 1, translationsAdded: 1, skippedDeleted: 0 });
+    expect(
+      await loadReferenceFile(
+        db,
+        fixture('process', [
+          { code: 'x-1', names: { ru: 'Процесс x-1' } },
+          { code: 'welding', names: { ru: 'Сварка' } },
+        ]),
+        'provisional',
+      ),
+    ).toEqual({ dictionary: 'process', inserted: 1, translationsAdded: 1, skippedDeleted: 1 });
+    expect((await entries('process')).map((e) => e.code)).toEqual(['welding']);
+    expect((await entries('equipment_type')).map((e) => e.code)).toEqual(['X-1']);
   });
 
   it('ведущие нули: 0101210000 и 01110 сохраняются текстом и возвращаются как есть (DATA-03)', async () => {
@@ -490,7 +624,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
       ),
     ).rejects.toBeInstanceOf(ReferenceFileError);
 
-    // Ошибка каталога не оставляет частичной загрузки: допустимый файл перед недопустимым не загружен.
+    // Ошибка проверки файла (без базы) не оставляет частичной загрузки: допустимый файл перед недопустимым не загружен.
     await resetDatabase(pool);
     await migrateThrough(pool);
     const dir = directoryWith({
@@ -547,7 +681,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
       },
     });
     expect(await loadReferenceDirectory(db, other, 'provisional')).toEqual([
-      { dictionary: 'process', inserted: 1, translationsAdded: 1 },
+      { dictionary: 'process', inserted: 1, translationsAdded: 1, skippedDeleted: 0 },
     ]);
   });
 
@@ -560,6 +694,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
       dictionary: 'process',
       inserted: 2,
       translationsAdded: 3,
+      skippedDeleted: 0,
     });
     // Загрузчик — система: без исполнителя, организации и IP; не событие аккаунта.
     expect(await audit()).toEqual([
@@ -581,6 +716,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
       dictionary: 'process',
       inserted: 0,
       translationsAdded: 0,
+      skippedDeleted: 0,
     });
     expect(await audit()).toHaveLength(1);
 
@@ -590,6 +726,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
       dictionary: 'process',
       inserted: 0,
       translationsAdded: 1,
+      skippedDeleted: 0,
     });
     expect((await audit()).map((a) => a.diff)).toEqual([
       { inserted: 2, translationsAdded: 3 },
@@ -609,11 +746,13 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
       dictionary: 'tn_ved',
       inserted: 2500,
       translationsAdded: 5000,
+      skippedDeleted: 0,
     });
     expect(await loadReferenceFile(db, many, 'provisional')).toEqual({
       dictionary: 'tn_ved',
       inserted: 0,
       translationsAdded: 0,
+      skippedDeleted: 0,
     });
     const first = await pool.query(`select 1 from dictionary_entry where code = '0000000000'`);
     expect(first.rowCount).toBe(1);
@@ -648,6 +787,19 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
       expect(await counts()).toEqual({ entries: 25, translations: 75, audit: 5 });
       // Повтор под той же ролью.
       expect((await loadReferenceDirectory(asApp, RELEASE, 'release')).every((r) => r.inserted === 0)).toBe(true);
+
+      // Удаление администратором и следующая загрузка — тоже от роли приложения: удалённые коды загрузчик читает
+      // из audit_entries (у роли приложения на журнал SELECT и INSERT).
+      const service = dictionaries(asApp, roleDb);
+      await service.remove(await administrator(), 'legal_form', await entryId('legal_form', 'JSC'));
+      const after = await loadReferenceDirectory(asApp, RELEASE, 'release');
+      expect(after.find((r) => r.dictionary === 'legal_form')).toEqual({
+        dictionary: 'legal_form',
+        inserted: 0,
+        translationsAdded: 0,
+        skippedDeleted: 1,
+      });
+      expect((await entries('legal_form')).map((e) => e.code).sort()).toEqual(['LLC', 'LLP']);
     } finally {
       await roleDb?.end();
       await dropRole();
@@ -691,5 +843,11 @@ describe('файлы справочников в репозитории', () => 
     const dictionaries = [...found.keys()].map((k) => k.split('/')[1]);
     expect(new Set(dictionaries).size).toBe(dictionaries.length);
     for (const code of dictionaries) expect(DICTIONARY_CODES as readonly string[]).toContain(code);
+  });
+
+  it('строка журнала migrate и seed: добавлено, переводы и пропущенные удалённые', () => {
+    expect(
+      referenceLoadSummary({ dictionary: 'legal_form', inserted: 3, translationsAdded: 9, skippedDeleted: 0 }),
+    ).toBe('legal_form +3 (+9 переводов), пропущено удалённых: 0');
   });
 });

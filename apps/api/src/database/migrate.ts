@@ -10,7 +10,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
 import { applyAppRoleGrants } from './app-role.js';
-import { loadReferenceDirectory, REFERENCE_DATA_DIR } from './reference-data.js';
+import { loadReferenceDirectory, REFERENCE_DATA_DIR, referenceLoadSummary } from './reference-data.js';
 import * as schema from './schema/index.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -31,11 +31,13 @@ async function main(): Promise<void> {
     if (appRole) await applyAppRoleGrants(pool, appRole);
     console.log('Миграции применены');
 
-    // Списки, которые фиксирует спецификация (ADM-08, DATA-03): добавляется только недостающее, правки
-    // администратора не затираются. Временные значения прототипа сюда не входят — их грузит seed.
+    // Списки, которые фиксирует спецификация (ADM-08, DATA-03): добавляется только недостающее — нового значения
+    // нет в базе или ему не хватает перевода. У существующих значений названия, порядок, обязательность и вывод
+    // из оборота не меняются; значение, которое администратор удалил (аудит dictionary.entry_deleted), не
+    // возвращается (DATA-04). Временные значения прототипа сюда не входят — их грузит seed.
     const db = drizzle(pool, { schema, casing: 'snake_case' });
     for (const r of await loadReferenceDirectory(db, join(REFERENCE_DATA_DIR, 'release'), 'release'))
-      console.log(`Справочники: ${r.dictionary} +${r.inserted} (+${r.translationsAdded} переводов)`);
+      console.log(`Справочники: ${referenceLoadSummary(r)}`);
   } finally {
     await pool.end();
   }

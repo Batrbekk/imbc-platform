@@ -5,7 +5,9 @@
  *
  * Загрузка идемпотентна и ничего не затирает: нет значения (без учёта регистра кода) — оно вставляется; у
  * существующего добавляются только недостающие переводы. Названия, `mandatory`, `sort_order` и `retired_at`
- * ведёт администратор (ADM-08, ADM-09, DATA-04) — загрузка их не меняет.
+ * ведёт администратор (ADM-08, ADM-09, DATA-04) — загрузка их не меняет. Значение, которое администратор
+ * удалил (аудит `dictionary.entry_deleted` этого справочника с этим кодом), загрузка не возвращает: код
+ * пропускается целиком — и вставка, и переводы, даже если администратор потом создал значение с тем же кодом.
  *
  * Строки `dictionary` кладёт миграция 0010, а у роли приложения нет INSERT на `dictionary`: загрузчик пишет
  * только `dictionary_entry`, `dictionary_entry_translation` и аудит.
@@ -24,7 +26,7 @@ import {
   type ReferenceFile,
   referenceFileSchema,
 } from '@imbc/contracts';
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { Database } from './database.module.js';
 import { auditEntries, dictionary, dictionaryEntry, dictionaryEntryTranslation } from './schema/index.js';
 
@@ -62,6 +64,13 @@ export interface ReferenceLoadResult {
   inserted: number;
   /** Строк перевода вставлено — у новых значений и у существующих, которым не хватало языка. */
   translationsAdded: number;
+  /** Значений файла пропущено: администратор удалил значение с этим кодом (DATA-04). В аудит загрузки не идёт. */
+  skippedDeleted: number;
+}
+
+/** Строка журнала `migrate` и `seed` об одном файле. */
+export function referenceLoadSummary(r: ReferenceLoadResult): string {
+  return `${r.dictionary} +${r.inserted} (+${r.translationsAdded} переводов), пропущено удалённых: ${r.skippedDeleted}`;
 }
 
 type Executor = Pick<Database, 'select' | 'insert'>;
@@ -126,10 +135,13 @@ export async function loadReferenceFile(
 
   return db.transaction(async (tx) => {
     const dictionaryId = await findDictionaryId(tx, parsed.dictionary, fileName);
-    const parentIds = await findParentIds(tx, parsed, fileName);
+    const deleted = await deletedCodes(tx, parsed.dictionary);
+    const loaded = parsed.entries.filter((e) => !deleted.has(e.code.toLowerCase()));
+    const skippedDeleted = parsed.entries.length - loaded.length;
+    const parentIds = await findParentIds(tx, parsed, deleted, fileName);
 
     let inserted = 0;
-    for (const batch of chunks(parsed.entries, BATCH_SIZE)) {
+    for (const batch of chunks(loaded, BATCH_SIZE)) {
       const rows = batch.map((e) => ({
         dictionaryId,
         code: e.code,
@@ -154,7 +166,7 @@ export async function loadReferenceFile(
       .where(eq(dictionaryEntry.dictionaryId, dictionaryId));
     const idByCode = new Map(stored.map((r) => [r.code.toLowerCase(), r.id]));
 
-    const translations = parsed.entries.flatMap((e) => {
+    const translations = loaded.flatMap((e) => {
       const id = idByCode.get(e.code.toLowerCase());
       if (id === undefined) throw new Error(`Значение справочника ${parsed.dictionary} не найдено после вставки`);
       return LOCALES.flatMap((language) => {
@@ -172,7 +184,7 @@ export async function loadReferenceFile(
       translationsAdded += added.length;
     }
 
-    // Повтор без изменений записи в журнале не оставляет (AUD-01).
+    // Повтор без изменений записи в журнале не оставляет (AUD-01); пропущенные удалённые — только в итоге.
     if (inserted + translationsAdded > 0)
       await tx.insert(auditEntries).values({
         action: 'reference.loaded',
@@ -181,8 +193,28 @@ export async function loadReferenceFile(
         diff: { inserted, translationsAdded },
         isAccountEvent: false,
       });
-    return { dictionary: parsed.dictionary, inserted, translationsAdded };
+    return { dictionary: parsed.dictionary, inserted, translationsAdded, skippedDeleted };
   });
+}
+
+/**
+ * Коды значений справочника, которые удалял администратор (DATA-04), в нижнем регистре: запись аудита
+ * `dictionary.entry_deleted` хранит справочник и прежний код (`diff: { dictionary, code, names }`). Одно чтение
+ * на файл; у роли приложения на журнал аудита есть SELECT. Фильтр `object_type` идёт по индексу
+ * `audit_entries_object_idx`.
+ */
+async function deletedCodes(tx: Executor, code: DictionaryCode): Promise<Set<string>> {
+  const rows = await tx
+    .select({ code: sql<string | null>`${auditEntries.diff} ->> 'code'` })
+    .from(auditEntries)
+    .where(
+      and(
+        eq(auditEntries.objectType, 'dictionary_entry'),
+        eq(auditEntries.action, 'dictionary.entry_deleted'),
+        sql`${auditEntries.diff} ->> 'dictionary' = ${code}`,
+      ),
+    );
+  return new Set(rows.flatMap((r) => (r.code === null ? [] : [r.code.toLowerCase()])));
 }
 
 /** Строка справочника — данные миграции 0010; загрузчик её не создаёт. */
@@ -192,11 +224,20 @@ async function findDictionaryId(tx: Executor, code: DictionaryCode, fileName: st
   return row.id;
 }
 
-/** Идентификаторы родительских значений по коду без учёта регистра; ненайденный родитель — ошибка файла. */
-async function findParentIds(tx: Executor, file: ReferenceFile, fileName: string): Promise<Map<string, string>> {
+/**
+ * Идентификаторы родительских значений по коду без учёта регистра; ненайденный родитель загружаемого значения —
+ * ошибка файла. Значения с удалёнными кодами (`deleted`) не загружаются, их родитель не проверяется.
+ */
+async function findParentIds(
+  tx: Executor,
+  file: ReferenceFile,
+  deleted: ReadonlySet<string>,
+  fileName: string,
+): Promise<Map<string, string>> {
   const parentCode = DICTIONARY_PARENT[file.dictionary];
   const ids = new Map<string, string>();
-  if (parentCode === undefined || file.entries.every((e) => e.parent === null)) return ids;
+  const needsParent = (e: ReferenceFile['entries'][number]) => e.parent !== null && !deleted.has(e.code.toLowerCase());
+  if (parentCode === undefined || !file.entries.some(needsParent)) return ids;
   const rows = await tx
     .select({ id: dictionaryEntry.id, code: dictionaryEntry.code })
     .from(dictionaryEntry)
@@ -204,15 +245,17 @@ async function findParentIds(tx: Executor, file: ReferenceFile, fileName: string
     .where(eq(dictionary.code, parentCode));
   for (const r of rows) ids.set(r.code.toLowerCase(), r.id);
   for (const [i, entry] of file.entries.entries())
-    if (entry.parent !== null && !ids.has(entry.parent.toLowerCase()))
+    if (needsParent(entry) && !ids.has(entry.parent!.toLowerCase()))
       throw new ReferenceFileError(fileName, `запись ${i + 1}: родитель не найден в справочнике ${parentCode}`);
   return ids;
 }
 
 /**
  * Загружает все `*.json` каталога в порядке `DICTIONARY_CODES` (родительский справочник раньше дочернего,
- * затем по имени файла). Сначала разбираются и проверяются все файлы: ошибка в одном не оставляет
- * частичной загрузки остальных. Каждый файл грузится в своей транзакции.
+ * затем по имени файла). Сначала все файлы читаются, разбираются и проверяются без базы: ошибка этих проверок
+ * в любом файле останавливает загрузку до первой записи в базу. Каждый файл грузится в своей транзакции,
+ * поэтому ошибка базы на втором файле (родитель не найден, справочника нет, сбой соединения) оставляет первый
+ * загруженным; загрузка идемпотентна, и следующий запуск `migrate` или `seed` догрузит остальное.
  */
 export async function loadReferenceDirectory(
   db: Database,

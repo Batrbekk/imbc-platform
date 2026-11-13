@@ -17,7 +17,12 @@ import {
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
-import { loadReferenceDirectory, REFERENCE_DATA_DIR, type ReferenceLoadResult } from './reference-data.js';
+import {
+  loadReferenceDirectory,
+  REFERENCE_DATA_DIR,
+  type ReferenceLoadResult,
+  referenceLoadSummary,
+} from './reference-data.js';
 import * as schema from './schema/index.js';
 
 const { organizations, userAccounts, manufacturerProfiles, catalogVisible, ndaVersion } = schema;
@@ -344,8 +349,7 @@ async function main(): Promise<void> {
     console.log(
       `Демо-данные: ${PEOPLE.length} учётных записей, ${COMPANIES.length} компаний в каталоге, профилей вне каталога: ${QUEUE_COMPANIES.length}`,
     );
-    for (const r of references)
-      console.log(`Справочники (временные): ${r.dictionary} +${r.inserted} (+${r.translationsAdded} переводов)`);
+    for (const r of references) console.log(`Справочники (временные): ${referenceLoadSummary(r)}`);
   } finally {
     await pool.end();
   }

@@ -76,6 +76,12 @@ export type ReferenceDataStatus = (typeof REFERENCE_DATA_STATUSES)[number];
 const entryName = z.string().trim().min(1).max(500);
 
 /**
+ * Наибольший порядок значения: его принимают и форма администратора, и файл загрузки — значение из файла
+ * сохраняется из формы без смены порядка.
+ */
+export const DICTIONARY_SORT_ORDER_MAX = 100000;
+
+/**
  * Файл значений одного справочника (`apps/api/reference-data`). Хотя бы одно название: классификаторы
  * приходят без английского, переводов не выдумываем (ADM-08). Код — только строка (DATA-03).
  */
@@ -100,7 +106,7 @@ export const referenceFileSchema = z
               }),
             mandatory: z.boolean().optional(),
             customNameAllowed: z.boolean().default(false),
-            sortOrder: z.number().int().min(0).default(0),
+            sortOrder: z.number().int().min(0).max(DICTIONARY_SORT_ORDER_MAX).default(0),
           })
           .strict(),
       )
@@ -125,9 +131,6 @@ export function entryDisplayName(names: Partial<Record<Locale, string | null>>, 
  * `reference.read`, изменения — `reference.manage`; выбор действующих значений — любой вошедший пользователь
  * (расхождение 3 плана этапа 2). Поиск и страницы — на сервере.
  */
-
-/** Наибольший порядок значения, который принимает форма администратора. */
-export const DICTIONARY_SORT_ORDER_MAX = 100000;
 
 /** Названия значения: форма администратора требует все три языка (расхождение 6 плана этапа 2). */
 const names = z.object({ kk: entryName, ru: entryName, en: entryName }).strict();

@@ -23,6 +23,7 @@ import {
   DICTIONARY_CODES,
   DICTIONARY_ENTRY_STATUSES,
   DICTIONARY_PARENT,
+  DICTIONARY_SORT_ORDER_MAX,
   dictionaryChoicesQuerySchema,
   dictionaryEntriesQuerySchema,
   entryDisplayName,
@@ -167,6 +168,18 @@ describe('файлы справочников: схема, шаблоны код
     );
     expect(referenceFileSchema.safeParse({ ...file({}), entries: [] }).success).toBe(false);
     expect(REFERENCE_DATA_STATUSES).toEqual(['specification', 'imbc', 'provisional']);
+  });
+
+  it('referenceFileSchema: порядок значения — не больше DICTIONARY_SORT_ORDER_MAX, как в форме правки: значение из файла сохраняется из формы без смены порядка (ADM-08)', () => {
+    const withOrder = (sortOrder: number) => file({ code: '0101210000', names: { ru: 'Лошади' }, sortOrder });
+    expect(referenceFileSchema.safeParse(withOrder(DICTIONARY_SORT_ORDER_MAX)).success).toBe(true);
+    expect(referenceFileSchema.safeParse(withOrder(DICTIONARY_SORT_ORDER_MAX + 1)).success).toBe(false);
+    expect(referenceFileSchema.safeParse(withOrder(-1)).success).toBe(false);
+    const names = { kk: 'Жылқы', ru: 'Лошади', en: 'Horses' };
+    expect(updateDictionaryEntrySchema.safeParse({ names, sortOrder: DICTIONARY_SORT_ORDER_MAX }).success).toBe(true);
+    expect(updateDictionaryEntrySchema.safeParse({ names, sortOrder: DICTIONARY_SORT_ORDER_MAX + 1 }).success).toBe(
+      false,
+    );
   });
 
   it('entryDisplayName: язык → kk → ru → en → код', () => {
