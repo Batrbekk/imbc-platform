@@ -64,11 +64,16 @@ const PROFILE_VALUES = [
 ];
 
 describe("кабинет администратора", () => {
-  it("девять пунктов меню; прогноз и STR/KTRE с бейджем Release 2", async () => {
+  it("восемь пунктов меню; индекс ведёт на первый из них; прогноз и STR/KTRE с бейджем Release 2", async () => {
     renderCabinet("/proto/administrator", { role: "administrator" });
-    expect(await screen.findByRole("heading", { level: 1, name: "Organisations and accounts" })).toBeTruthy();
+    // Индексный маршрут кабинета открывает первый пункт меню — «Assign reviews».
+    expect(await screen.findByRole("heading", { level: 1, name: "Assign reviews" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Assign reviews/ }).getAttribute("href")).toBe(
+      "/proto/administrator/assignments",
+    );
+    // Макет «Организации и аккаунты» из меню убран: настоящая страница — /admin/accounts (ADM-02).
+    expect(screen.queryByRole("link", { name: /Organisations and accounts/ })).toBeNull();
     for (const name of [
-      "Organisations and accounts",
       "Assign reviews",
       "Reference lists",
       "NDA versions",

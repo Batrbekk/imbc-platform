@@ -5,7 +5,6 @@ import { type Dictionary, defineDictionary, translate } from "@/prototype/i18n";
 /** Пункты меню и общие тексты кабинета администратора IMBC. Казахский — на проверку носителю. */
 export const texts = defineDictionary({
   en: {
-    "menu.organizations": "Organisations and accounts",
     "menu.assignments": "Assign reviews",
     "menu.references": "Reference lists",
     "menu.nda": "NDA versions",
@@ -33,7 +32,6 @@ export const texts = defineDictionary({
     notAssigned: "Not assigned",
   },
   ru: {
-    "menu.organizations": "Организации и аккаунты",
     "menu.assignments": "Назначение проверок",
     "menu.references": "Справочники",
     "menu.nda": "Версии NDA",
@@ -61,7 +59,6 @@ export const texts = defineDictionary({
     notAssigned: "Не назначен",
   },
   kk: {
-    "menu.organizations": "Ұйымдар мен аккаунттар",
     "menu.assignments": "Тексеруді тағайындау",
     "menu.references": "Анықтамалықтар",
     "menu.nda": "NDA нұсқалары",

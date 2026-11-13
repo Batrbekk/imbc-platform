@@ -1,6 +1,5 @@
 import {
   BookOpenIcon,
-  Building2Icon,
   ClipboardListIcon,
   FileStackIcon,
   FileTextIcon,
@@ -39,8 +38,8 @@ const item = (
 /** Кабинет администратора IMBC: раздел 6.9, GEN-03, 7.6, 8.4 (задача 4 плана). */
 export const cabinet: CabinetModule = {
   role: "administrator",
+  // Пункта «Организации и аккаунты» нет: настоящая страница — /admin/accounts (ADM-02); макет остаётся по прямому адресу.
   menu: [
-    item("organizations", "menu.organizations", Building2Icon),
     item("assignments", "menu.assignments", ClipboardListIcon),
     item("references", "menu.references", BookOpenIcon),
     item("nda", "menu.nda", FileTextIcon),
@@ -51,7 +50,7 @@ export const cabinet: CabinetModule = {
     item("audit", "menu.audit", ScrollTextIcon),
   ],
   routes: [
-    { index: true, element: <Navigate to="organizations" replace /> },
+    { index: true, element: <Navigate to="assignments" replace /> },
     { path: "organizations", element: <OrganizationsScreen /> },
     { path: "assignments", element: <AssignmentsScreen /> },
     { path: "references", element: <ReferencesScreen /> },
