@@ -1,0 +1,11 @@
+{
+  "dictionary": "oked",
+  "status": "provisional",
+  "source": "прототип data/references.ts; ждёт перечня IMBC",
+  "entries": [
+    { "code": "25110", "names": { "ru": "Производство строительных металлических конструкций" }, "sortOrder": 0 },
+    { "code": "28131", "names": { "ru": "Производство насосов" }, "sortOrder": 1 },
+    { "code": "27320", "names": { "ru": "Производство электрических проводов и кабелей" }, "sortOrder": 2 },
+    { "code": "33120", "names": { "ru": "Ремонт машин и оборудования" }, "sortOrder": 3 }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "dictionary": "legal_form",
+  "status": "specification",
+  "source": "MAN-09: список включает LLP, LLC, JSC; полный перечень — IMBC",
+  "entries": [
+    {
+      "code": "LLP",
+      "names": {
+        "kk": "Жауапкершілігі шектеулі серіктестік (ЖШС)",
+        "ru": "Товарищество с ограниченной ответственностью (ТОО)",
+        "en": "Limited liability partnership (LLP)"
+      },
+      "sortOrder": 0
+    },
+    {
+      "code": "LLC",
+      "names": {
+        "kk": "Жауапкершілігі шектеулі қоғам (ЖШҚ)",
+        "ru": "Общество с ограниченной ответственностью (ООО)",
+        "en": "Limited liability company (LLC)"
+      },
+      "sortOrder": 1
+    },
+    {
+      "code": "JSC",
+      "names": { "kk": "Акционерлік қоғам (АҚ)", "ru": "Акционерное общество (АО)", "en": "Joint-stock company (JSC)" },
+      "sortOrder": 2
+    }
+  ]
+}

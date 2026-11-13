@@ -54,6 +54,7 @@
   },
   "files": [
     "dist",
-    "drizzle"
+    "drizzle",
+    "reference-data"
   ]
 }

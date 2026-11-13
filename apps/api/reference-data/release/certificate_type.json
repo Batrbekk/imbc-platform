@@ -1,0 +1,43 @@
+{
+  "dictionary": "certificate_type",
+  "status": "specification",
+  "source": "MAN-34",
+  "entries": [
+    {
+      "code": "ISO 9001",
+      "names": { "kk": "ISO 9001", "ru": "ISO 9001", "en": "ISO 9001" },
+      "mandatory": true,
+      "sortOrder": 0
+    },
+    {
+      "code": "ISO 14001",
+      "names": { "kk": "ISO 14001", "ru": "ISO 14001", "en": "ISO 14001" },
+      "mandatory": true,
+      "sortOrder": 1
+    },
+    {
+      "code": "ISO 45001",
+      "names": { "kk": "ISO 45001", "ru": "ISO 45001", "en": "ISO 45001" },
+      "mandatory": true,
+      "sortOrder": 2
+    },
+    { "code": "ASME", "names": { "kk": "ASME", "ru": "ASME", "en": "ASME" }, "mandatory": false, "sortOrder": 3 },
+    { "code": "API", "names": { "kk": "API", "ru": "API", "en": "API" }, "mandatory": false, "sortOrder": 4 },
+    { "code": "IEC", "names": { "kk": "IEC", "ru": "IEC", "en": "IEC" }, "mandatory": false, "sortOrder": 5 },
+    { "code": "IECEx", "names": { "kk": "IECEx", "ru": "IECEx", "en": "IECEx" }, "mandatory": false, "sortOrder": 6 },
+    { "code": "ATEX", "names": { "kk": "ATEX", "ru": "ATEX", "en": "ATEX" }, "mandatory": false, "sortOrder": 7 },
+    {
+      "code": "Extract from e-Ondiris",
+      "names": { "kk": "e-Ondiris үзінді көшірмесі", "ru": "Выписка из e-Ondiris", "en": "Extract from e-Ondiris" },
+      "mandatory": false,
+      "sortOrder": 8
+    },
+    {
+      "code": "Other",
+      "names": { "kk": "Басқа (атауын көрсетіңіз)", "ru": "Другой (укажите название)", "en": "Other (enter the name)" },
+      "mandatory": false,
+      "customNameAllowed": true,
+      "sortOrder": 9
+    }
+  ]
+}

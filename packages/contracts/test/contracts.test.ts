@@ -9,15 +9,22 @@ import {
   changeEmailSchema,
   changeRoleSchema,
   checkBin,
+  CLOSED_DICTIONARIES,
+  COMMODITY_GROUPS,
   companyCardDataSchema,
   companyPageSchema,
   computeBinCheckDigit,
+  CONTACT_ROLES,
   createOrganizationSchema,
   DATA_CLASSES,
   dashboardSchema,
+  DICTIONARY_CODE_PATTERNS,
   DICTIONARY_CODES,
+  DICTIONARY_PARENT,
+  entryDisplayName,
   FILE_PURPOSES,
   FILE_SCAN_STATES,
+  MANDATORY_DICTIONARIES,
   MANUFACTURER_FILE_PURPOSES,
   imbcMailboxSchema,
   INVITABLE_ROLES,
@@ -35,6 +42,8 @@ import {
   ownProfileSchema,
   PREFILL_FIELDS,
   PROFILE_TIERS,
+  REFERENCE_DATA_STATUSES,
+  referenceFileSchema,
   ROLES,
   UPDATE_STATUSES,
 } from '../src/index.js';
@@ -111,6 +120,94 @@ describe('файлы и справочники (DBML, ADM-08, DATA-05, DATA-07)'
       'certificate_type',
       'document_type',
     ]);
+  });
+});
+
+describe('файлы справочников: схема, шаблоны кодов, показ названия (ADM-08, DATA-03)', () => {
+  const file = (entry: unknown) => ({
+    dictionary: 'tn_ved',
+    status: 'provisional',
+    source: 'тест',
+    entries: [entry],
+  });
+
+  it('referenceFileSchema: код-число отклоняется, без названий — отклоняется, неизвестный справочник — отклоняется (DATA-03)', () => {
+    const ok = referenceFileSchema.safeParse(file({ code: '0101210000', names: { ru: 'Лошади' } }));
+    expect(ok.success).toBe(true);
+    // Значения по умолчанию: без родителя, без разрешения вводить название, порядок 0.
+    expect(ok.success && ok.data.entries[0]).toEqual({
+      code: '0101210000',
+      parent: null,
+      names: { ru: 'Лошади' },
+      customNameAllowed: false,
+      sortOrder: 0,
+    });
+
+    // Код — только строка: число теряет ведущие нули.
+    expect(referenceFileSchema.safeParse(file({ code: 101210000, names: { ru: 'x' } })).success).toBe(false);
+    // Хотя бы одно название, и не пустое.
+    expect(referenceFileSchema.safeParse(file({ code: '0101210000', names: {} })).success).toBe(false);
+    expect(referenceFileSchema.safeParse(file({ code: '0101210000', names: { ru: '  ' } })).success).toBe(false);
+    // Язык вне kk, ru, en и лишние поля отклоняются.
+    expect(referenceFileSchema.safeParse(file({ code: 'X', names: { ru: 'x', de: 'x' } })).success).toBe(false);
+    expect(referenceFileSchema.safeParse(file({ code: 'X', names: { ru: 'x' }, extra: 1 })).success).toBe(false);
+    // Неизвестный справочник, неизвестный статус и пустой список.
+    expect(
+      referenceFileSchema.safeParse({ ...file({ code: 'X', names: { ru: 'x' } }), dictionary: 'country' }).success,
+    ).toBe(false);
+    expect(referenceFileSchema.safeParse({ ...file({ code: 'X', names: { ru: 'x' } }), status: 'draft' }).success).toBe(
+      false,
+    );
+    expect(referenceFileSchema.safeParse({ ...file({}), entries: [] }).success).toBe(false);
+    expect(REFERENCE_DATA_STATUSES).toEqual(['specification', 'imbc', 'provisional']);
+  });
+
+  it('entryDisplayName: язык → kk → ru → en → код', () => {
+    const all = { kk: 'Қазақша', ru: 'Русский', en: 'English' };
+    expect(entryDisplayName(all, 'en', 'X')).toBe('English');
+    expect(entryDisplayName(all, 'ru', 'X')).toBe('Русский');
+    expect(entryDisplayName({ ru: 'Русский', en: 'English' }, 'en', 'X')).toBe('English');
+    // Нет названия на языке пользователя — kk, затем ru, затем en.
+    expect(entryDisplayName({ kk: 'Қазақша', ru: 'Русский' }, 'en', 'X')).toBe('Қазақша');
+    expect(entryDisplayName({ ru: 'Русский', en: 'English' }, 'kk', 'X')).toBe('Русский');
+    expect(entryDisplayName({ en: 'English' }, 'kk', 'X')).toBe('English');
+    // Пустое и null — не название.
+    expect(entryDisplayName({ kk: null, ru: '', en: 'English' }, 'ru', 'X')).toBe('English');
+    // Названий нет — код как есть, ведущие нули на месте.
+    expect(entryDisplayName({}, 'ru', '0101210000')).toBe('0101210000');
+    expect(entryDisplayName({ kk: null, ru: null, en: null }, 'kk', 'ISO 9001')).toBe('ISO 9001');
+  });
+
+  it('закрытые справочники = COMMODITY_GROUPS и CONTACT_ROLES; шаблон tn_ved принимает 0101210000 и отклоняет 101210000', () => {
+    expect(CLOSED_DICTIONARIES).toEqual(['commodity_group', 'contact_role']);
+    expect(MANDATORY_DICTIONARIES).toEqual(['certificate_type', 'document_type']);
+    expect(DICTIONARY_PARENT).toEqual({ commodity_type: 'commodity_group' });
+
+    // Коды закрытых справочников задаёт спецификация (MAN-23, MAN-13): шаблон принимает ровно их.
+    for (const group of COMMODITY_GROUPS) expect(DICTIONARY_CODE_PATTERNS.commodity_group.test(group)).toBe(true);
+    for (const bad of ['F', 'a', 'AB', '', ' A'])
+      expect(DICTIONARY_CODE_PATTERNS.commodity_group.test(bad), bad).toBe(false);
+    for (const role of CONTACT_ROLES) expect(DICTIONARY_CODE_PATTERNS.contact_role.test(role)).toBe(true);
+
+    // Шаблон есть у каждого справочника.
+    for (const code of DICTIONARY_CODES) expect(DICTIONARY_CODE_PATTERNS[code]).toBeInstanceOf(RegExp);
+    // MAN-25: ТН ВЭД — десять цифр, ведущий ноль не теряется.
+    expect(DICTIONARY_CODE_PATTERNS.tn_ved.test('0101210000')).toBe(true);
+    expect(DICTIONARY_CODE_PATTERNS.tn_ved.test('101210000')).toBe(false);
+    expect(DICTIONARY_CODE_PATTERNS.tn_ved.test('01012100001')).toBe(false);
+    expect(DICTIONARY_CODE_PATTERNS.oked.test('01110')).toBe(true);
+    expect(DICTIONARY_CODE_PATTERNS.oked.test('1110')).toBe(false);
+    for (const good of ['25.11.23', '01', '01.1', '28.13.14'])
+      expect(DICTIONARY_CODE_PATTERNS.kpved.test(good)).toBe(true);
+    for (const bad of ['1.1', '25.', '25.11.', '25-11'])
+      expect(DICTIONARY_CODE_PATTERNS.kpved.test(bad), bad).toBe(false);
+
+    // Остальные: буквы, цифры, пробел и ._-/, 1–64 символа, без пробела по краям.
+    for (const good of ['KZ-AKT', 'ISO 9001', 'Extract from e-Ondiris', 'registration_certificate', 'A/B.c-d_e', 'Ж'])
+      expect(DICTIONARY_CODE_PATTERNS.certificate_type.test(good), good).toBe(true);
+    for (const bad of ['', ' ISO', 'ISO ', 'a;b', 'a,b', 'a\nb', 'x'.repeat(65)])
+      expect(DICTIONARY_CODE_PATTERNS.certificate_type.test(bad), JSON.stringify(bad)).toBe(false);
+    expect(DICTIONARY_CODE_PATTERNS.region.test('x'.repeat(64))).toBe(true);
   });
 });
 

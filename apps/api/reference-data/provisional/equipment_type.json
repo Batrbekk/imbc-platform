@@ -1,0 +1,9 @@
+{
+  "dictionary": "equipment_type",
+  "status": "provisional",
+  "source": "прототип data/references.ts; ждёт перечня IMBC",
+  "entries": [
+    { "code": "metalworking", "names": { "ru": "Металлообработка" }, "sortOrder": 0 },
+    { "code": "lifting", "names": { "ru": "Грузоподъёмное" }, "sortOrder": 1 }
+  ]
+}

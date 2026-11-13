@@ -1,6 +1,10 @@
+import { join } from 'node:path';
 import { companyCardDataSchema } from '@imbc/contracts';
+import { drizzle } from 'drizzle-orm/node-postgres';
 import type pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { loadReferenceDirectory, REFERENCE_DATA_DIR } from '../src/database/reference-data.js';
+import * as schema from '../src/database/schema/index.js';
 import { NDA_PLACEHOLDER_BODY, seedDemo } from '../src/database/seed.js';
 import { migrateThrough, openTestPool, resetDatabase } from './support/database.js';
 
@@ -50,6 +54,89 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
     // 15 организаций seed и NCOC, TCO, KPO из 0008; IMBC из 0008 seed находит по типу.
     expect(first).toEqual({ organizations: 18, accounts: 6, visible: 8 });
     expect((await accounts()).map((a) => a.email)).toEqual(['observer@observer.local']);
+  });
+
+  it('seed загружает временные справочники: после seed — 9 регионов, KZ-ATY есть; после одних миграций с загрузкой release — регионов 0 (ADM-08, DATA-03)', async () => {
+    const perDictionary = async () =>
+      Object.fromEntries(
+        (
+          await pool.query<{ code: string; n: number }>(
+            `select d.code, count(e.id)::int as n from dictionary d
+             left join dictionary_entry e on e.dictionary_id = d.id group by d.code order by d.code`,
+          )
+        ).rows.map((r) => [r.code, r.n]),
+      );
+    const regions = async () =>
+      (
+        await pool.query<{ code: string }>(
+          `select e.code from dictionary_entry e join dictionary d on d.id = e.dictionary_id
+           where d.code = 'region' order by e.code`,
+        )
+      ).rows.map((r) => r.code);
+
+    // Продакшен: миграции и загрузка release — семь списков без перечня IMBC пусты (расхождение 5 плана).
+    await loadReferenceDirectory(
+      drizzle(pool, { schema, casing: 'snake_case' }),
+      join(REFERENCE_DATA_DIR, 'release'),
+      'release',
+    );
+    expect(await regions()).toEqual([]);
+    const production = await perDictionary();
+    expect(production).toEqual({
+      commodity_group: 5,
+      commodity_type: 0,
+      contact_role: 3,
+      certificate_type: 10,
+      document_type: 4,
+      equipment_type: 0,
+      kpved: 0,
+      legal_form: 3,
+      oked: 0,
+      process: 0,
+      region: 0,
+      tn_ved: 0,
+    });
+
+    // Стенд: seed добавляет временные значения прототипа.
+    await seedDemo(pool);
+    const found = await regions();
+    expect(found).toHaveLength(9);
+    expect(found).toContain('KZ-ATY');
+    // Регионы компаний каталога seed покрыты списком.
+    const catalog = await pool.query<{ region: string }>('select distinct region from catalog_visible order by region');
+    expect(catalog.rows.length).toBeGreaterThan(0);
+    for (const { region } of catalog.rows) expect(found).toContain(region);
+    const demo = await perDictionary();
+    expect(demo).toEqual({
+      ...production,
+      commodity_type: 5,
+      equipment_type: 2,
+      kpved: 2,
+      oked: 4,
+      process: 3,
+      region: 9,
+      tn_ved: 4,
+    });
+    // ТН ВЭД, ОКЭД: ведущие нули и тип text (DATA-03).
+    const codes = await pool.query<{ code: string }>(
+      `select e.code from dictionary_entry e join dictionary d on d.id = e.dictionary_id
+       where d.code = 'tn_ved' order by e.code`,
+    );
+    expect(codes.rows.map((r) => r.code)).toEqual(['7308909809', '8413702100', '8481805190', '8544499108']);
+
+    // Повторный seed: значений не прибавилось, аудит загрузки — только за первый запуск.
+    const audit = async () =>
+      (
+        await pool.query<{ n: number }>(
+          "select count(*)::int as n from audit_entries where action = 'reference.loaded'",
+        )
+      ).rows[0]!.n;
+    const auditAfterFirst = await audit();
+    // Пять списков release и семь временных.
+    expect(auditAfterFirst).toBe(12);
+    await seedDemo(pool);
+    expect(await perDictionary()).toEqual(demo);
+    expect(await audit()).toBe(auditAfterFirst);
   });
 
   it('seed: текущая NDA — версия 1, три абзаца заглушки (kk, ru, en), опубликовал admin@imbc.local; повторный запуск не создаёт вторую версию (FC-02, Р-5)', async () => {

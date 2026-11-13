@@ -3,6 +3,7 @@
  * Учётные записи совпадают с пользователями realm-файла Keycloak (infrastructure/keycloak/imbc-realm.json).
  * Все компании вымышленные; БИН сгенерированы с правильной контрольной цифрой.
  */
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   type CompanyCardData,
@@ -16,6 +17,7 @@ import {
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
+import { loadReferenceDirectory, REFERENCE_DATA_DIR, type ReferenceLoadResult } from './reference-data.js';
 import * as schema from './schema/index.js';
 
 const { organizations, userAccounts, manufacturerProfiles, catalogVisible, ndaVersion } = schema;
@@ -174,8 +176,11 @@ const QUEUE_COMPANIES: { name: string; status: ProfileStatus; assigned: boolean;
 ];
 const SME_EMAIL = 'expert@imbc.local';
 
-/** Записывает демо-данные в одной транзакции. Пул не закрывает. */
-export async function seedDemo(pool: pg.Pool): Promise<void> {
+/**
+ * Записывает демо-данные в одной транзакции и загружает временные справочники (`reference-data/provisional`:
+ * значения прототипа, пока IMBC не прислал перечни — ADM-08). Пул не закрывает.
+ */
+export async function seedDemo(pool: pg.Pool): Promise<ReferenceLoadResult[]> {
   const db = drizzle(pool, { schema, casing: 'snake_case' });
   await db.transaction(async (tx) => {
     const orgIds: Record<string, string> = {};
@@ -325,6 +330,9 @@ export async function seedDemo(pool: pg.Pool): Promise<void> {
         .onConflictDoUpdate({ target: manufacturerProfiles.organizationId, set: state });
     }
   });
+
+  // Временные значения справочников — только на стенде: в продакшен их не кладёт ни миграция, ни seed.
+  return loadReferenceDirectory(db, join(REFERENCE_DATA_DIR, 'provisional'), 'provisional');
 }
 
 async function main(): Promise<void> {
@@ -332,10 +340,12 @@ async function main(): Promise<void> {
   if (!url) throw new Error('DATABASE_URL не задан');
   const pool = new pg.Pool({ connectionString: url, max: 1, application_name: 'imbc-seed' });
   try {
-    await seedDemo(pool);
+    const references = await seedDemo(pool);
     console.log(
       `Демо-данные: ${PEOPLE.length} учётных записей, ${COMPANIES.length} компаний в каталоге, профилей вне каталога: ${QUEUE_COMPANIES.length}`,
     );
+    for (const r of references)
+      console.log(`Справочники (временные): ${r.dictionary} +${r.inserted} (+${r.translationsAdded} переводов)`);
   } finally {
     await pool.end();
   }

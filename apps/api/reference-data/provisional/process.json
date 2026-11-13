@@ -1,0 +1,10 @@
+{
+  "dictionary": "process",
+  "status": "provisional",
+  "source": "прототип data/references.ts; ждёт перечня IMBC",
+  "entries": [
+    { "code": "welding", "names": { "ru": "Сварка" }, "sortOrder": 0 },
+    { "code": "machining", "names": { "ru": "Механическая обработка" }, "sortOrder": 1 },
+    { "code": "painting", "names": { "ru": "Покраска" }, "sortOrder": 2 }
+  ]
+}
