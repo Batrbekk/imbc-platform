@@ -5,13 +5,17 @@ import { AuditModule } from '../common/audit.service.js';
 import { ConfigModule } from '../config/config.module.js';
 import { ENV, type Env } from '../config/env.js';
 import { DatabaseModule } from '../database/database.module.js';
+import { redactDatabaseError } from '../database/pg-errors.js';
 import { InfraModule, QUEUE } from '../infra/infra.module.js';
 import { MailService } from '../mail/mail.service.js';
 import { ADATA_DEFAULT_TIMING } from '../modules/adata/adata.client.js';
 import { AdataScheduler } from '../modules/adata/adata.scheduler.js';
 import { KeycloakAdminService } from '../modules/auth/keycloak-admin.service.js';
 import { SessionService } from '../modules/auth/session.service.js';
+import { ProfilesService } from '../modules/profiles/profiles.service.js';
+import { ManufacturerOnboardingService } from '../modules/registration/onboarding.service.js';
 import { ADATA_QUEUE_OPTIONS, PLATFORM_TZ, QUEUES, type QueueName, SCHEDULES } from '../jobs/queues.js';
+import { AccountInactivityJob } from './account-inactivity.job.js';
 import { ADATA_CLIENT_FACTORY, ADATA_TIMING, AdataPrefillJob, defaultAdataClientFactory } from './adata-prefill.job.js';
 import { JobHandlers } from './handlers.service.js';
 
@@ -37,7 +41,10 @@ import { JobHandlers } from './handlers.service.js';
     KeycloakAdminService,
     SessionService,
     AdataScheduler,
+    ProfilesService,
+    ManufacturerOnboardingService,
     AdataPrefillJob,
+    AccountInactivityJob,
     { provide: ADATA_CLIENT_FACTORY, useValue: defaultAdataClientFactory },
     { provide: ADATA_TIMING, useValue: ADATA_DEFAULT_TIMING },
   ],
@@ -49,6 +56,7 @@ export class WorkerModule implements OnApplicationBootstrap {
     @Inject(QUEUE) private readonly boss: PgBoss,
     private readonly handlers: JobHandlers,
     private readonly adataPrefill: AdataPrefillJob,
+    private readonly inactivity: AccountInactivityJob,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -58,18 +66,24 @@ export class WorkerModule implements OnApplicationBootstrap {
       [QUEUES.sendNotification]: (d) => h.sendNotification(d),
       [QUEUES.sendPasswordEmail]: (d) => h.sendPasswordEmail(d),
       [QUEUES.cleanupIdentity]: (d) => h.cleanupIdentity(d),
+      // Очередь письма сброса создаётся раньше задания неактивности, которое её наполняет (AUTH-07).
+      [QUEUES.inactivityReset]: (d) => h.sendInactivityReset(d),
+      // Без аргумента: «сейчас» — часы worker; данные задания расписания в run не передаются.
+      [QUEUES.accountInactivity]: async () => {
+        await this.inactivity.run();
+      },
       [QUEUES.certificateExpiry]: () => h.certificateExpiry(),
       [QUEUES.purgeSessions]: () => h.purgeSessions(),
       [QUEUES.purgeExportFiles]: () => h.purgeExportFiles(),
       [QUEUES.refreshCatalog]: () => h.todo(QUEUES.refreshCatalog),
       [QUEUES.buildExport]: () => h.todo(QUEUES.buildExport),
       [QUEUES.updateStatus]: () => h.todo(QUEUES.updateStatus),
-      [QUEUES.accountInactivity]: () => h.todo(QUEUES.accountInactivity),
       [QUEUES.keycloakEvents]: () => h.keycloakEvents(),
       [QUEUES.activitySnapshotWeekly]: () => h.todo(QUEUES.activitySnapshotWeekly),
       [QUEUES.activitySnapshotMonthly]: () => h.todo(QUEUES.activitySnapshotMonthly),
       [QUEUES.runSubscriptions]: () => h.todo(QUEUES.runSubscriptions),
       [QUEUES.adataPrefill]: (d) => this.adataPrefill.run(d),
+      [QUEUES.identitySync]: (d) => h.syncIdentity(d),
     };
 
     for (const [queue, run] of Object.entries(routes) as [QueueName, (data: never) => Promise<void>][]) {
@@ -78,13 +92,23 @@ export class WorkerModule implements OnApplicationBootstrap {
         queue === QUEUES.adataPrefill
           ? ADATA_QUEUE_OPTIONS
           : {
-              retryLimit: queue === QUEUES.sendPasswordEmail || queue === QUEUES.cleanupIdentity ? 10 : 5,
+              retryLimit:
+                queue === QUEUES.sendPasswordEmail ||
+                queue === QUEUES.cleanupIdentity ||
+                queue === QUEUES.inactivityReset
+                  ? 10
+                  : 5,
               retryBackoff: true,
               retryDelay: 30,
             },
       );
       await this.boss.work(queue, async (jobs) => {
-        for (const job of jobs) await run(job.data as never);
+        try {
+          for (const job of jobs) await run(job.data as never);
+        } catch (error) {
+          // pg-boss сохраняет ошибку обработчика в output задания: у ошибки базы — только сводка (NFR-11).
+          throw redactDatabaseError(error);
+        }
       });
     }
     for (const s of SCHEDULES) {

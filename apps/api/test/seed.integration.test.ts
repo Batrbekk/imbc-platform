@@ -1,12 +1,11 @@
-import { randomUUID } from 'node:crypto';
 import { companyCardDataSchema } from '@imbc/contracts';
 import type pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { seedDemo } from '../src/database/seed.js';
+import { NDA_PLACEHOLDER_BODY, seedDemo } from '../src/database/seed.js';
 import { migrateThrough, openTestPool, resetDatabase } from './support/database.js';
 
-// Демо-аккаунт наблюдателя (GEN-06, раздел 3.1 v1.3): spectator@spectator.local → observer@observer.local.
-// На стенде строка аккаунта переименовывается на месте: id и idp_subject сохраняются.
+// Демо-аккаунт наблюдателя (GEN-06, раздел 3.1 v1.3) — observer@observer.local; прежний адрес
+// spectator@spectator.local seed не создаёт.
 describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
   vi.setConfig({ testTimeout: 30000 });
   let pool: pg.Pool;
@@ -14,24 +13,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
   /** Аккаунты наблюдателя — прежний и новый адрес. */
   const accounts = async () =>
     (
-      await pool.query<{ id: string; email: string; organization_id: string; idp_subject: string | null }>(
-        `select id, email, organization_id, idp_subject from user_accounts
+      await pool.query<{ email: string }>(
+        `select email from user_accounts
          where lower(email) in ('spectator@spectator.local', 'observer@observer.local') order by email`,
       )
     ).rows;
-
-  /** Демо-организация и аккаунт наблюдателя, как их оставила предыдущая версия после переноса данных. */
-  const legacyObserver = async (email = 'spectator@spectator.local') => {
-    const org = await pool.query<{ id: string }>(
-      "insert into organizations (type, name) values ('observer', 'Наблюдатель (демо)') returning id",
-    );
-    const subject = randomUUID();
-    const account = await pool.query<{ id: string }>(
-      "insert into user_accounts (organization_id, email, role, state, idp_subject) values ($1, $2, 'observer', 'active', $3) returning id",
-      [org.rows[0]!.id, email, subject],
-    );
-    return { organization: org.rows[0]!.id, account: account.rows[0]!.id, subject };
-  };
 
   beforeAll(() => {
     pool = openTestPool();
@@ -44,63 +30,6 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
 
   afterAll(async () => {
     await pool?.end();
-  });
-
-  it('переименовывает прежний демо-аккаунт на месте', async () => {
-    const legacy = await legacyObserver();
-
-    await seedDemo(pool);
-
-    expect(await accounts()).toEqual([
-      {
-        id: legacy.account,
-        email: 'observer@observer.local',
-        organization_id: legacy.organization,
-        idp_subject: legacy.subject,
-      },
-    ]);
-    const orgs = await pool.query("select id from organizations where name = 'Наблюдатель (демо)'");
-    expect(orgs.rows).toEqual([{ id: legacy.organization }]);
-  });
-
-  it('находит прежний адрес без учёта регистра', async () => {
-    const legacy = await legacyObserver('Spectator@Spectator.local');
-
-    await seedDemo(pool);
-
-    expect(await accounts()).toEqual([
-      {
-        id: legacy.account,
-        email: 'observer@observer.local',
-        organization_id: legacy.organization,
-        idp_subject: legacy.subject,
-      },
-    ]);
-  });
-
-  it('не трогает аккаунты, если observer@observer.local уже существует', async () => {
-    const legacy = await legacyObserver();
-    const current = await pool.query<{ id: string }>(
-      "insert into user_accounts (organization_id, email, role, state) values ($1, 'observer@observer.local', 'observer', 'invited') returning id",
-      [legacy.organization],
-    );
-
-    await seedDemo(pool);
-
-    expect(await accounts()).toEqual([
-      {
-        id: current.rows[0]!.id,
-        email: 'observer@observer.local',
-        organization_id: legacy.organization,
-        idp_subject: null,
-      },
-      {
-        id: legacy.account,
-        email: 'spectator@spectator.local',
-        organization_id: legacy.organization,
-        idp_subject: legacy.subject,
-      },
-    ]);
   });
 
   it('повторный запуск не создаёт дублей', async () => {
@@ -118,8 +47,56 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
     await seedDemo(pool);
 
     expect(await counts()).toEqual(first);
-    expect(first).toEqual({ organizations: 15, accounts: 6, visible: 8 });
+    // 15 организаций seed и NCOC, TCO, KPO из 0008; IMBC из 0008 seed находит по типу.
+    expect(first).toEqual({ organizations: 18, accounts: 6, visible: 8 });
     expect((await accounts()).map((a) => a.email)).toEqual(['observer@observer.local']);
+  });
+
+  it('seed: текущая NDA — версия 1, три абзаца заглушки (kk, ru, en), опубликовал admin@imbc.local; повторный запуск не создаёт вторую версию (FC-02, Р-5)', async () => {
+    const versions = async () =>
+      (
+        await pool.query<{ version: number; body: string; current: boolean; publisher: string | null }>(
+          `select v.version_number as version, v.body, v.is_current as current, a.email as publisher
+           from nda_version v left join user_accounts a on a.id = v.published_by order by v.version_number`,
+        )
+      ).rows;
+
+    await seedDemo(pool);
+    const first = await versions();
+    expect(first.map(({ body: _, ...v }) => v)).toEqual([{ version: 1, current: true, publisher: 'admin@imbc.local' }]);
+    expect(first[0]!.body).toBe(NDA_PLACEHOLDER_BODY);
+    expect(first[0]!.body.split('\n\n')).toEqual([
+      'УАҚЫТША МӘТІН — ЗАҢДЫҚ ҚҰЖАТ ЕМЕС. Платформаның құпияны жария етпеу туралы келісімінің (NDA) мәтінін IMBC ұсынады. Бұл мәтін тек сынақ стендіне арналған, оған сүйенуге болмайды.',
+      'ВРЕМЕННЫЙ ТЕКСТ — НЕ ЮРИДИЧЕСКИЙ ДОКУМЕНТ. Текст соглашения о неразглашении (NDA) платформы предоставит IMBC. Этот текст существует только для тестового стенда, полагаться на него нельзя.',
+      'PLACEHOLDER — NOT A LEGAL TEXT. IMBC will provide the text of the platform non-disclosure agreement (NDA). This text exists only for the test environment and must not be relied on.',
+    ]);
+
+    await seedDemo(pool);
+    expect(await versions()).toEqual(first);
+    // Версия уже есть (например, текст IMBC из миграции) — seed свою не добавляет.
+    await pool.query('delete from nda_version');
+    await pool.query("insert into nda_version (version_number, body, is_current) values (2, 'IMBC', true)");
+    await seedDemo(pool);
+    expect((await versions()).map((v) => v.version)).toEqual([2]);
+  });
+
+  it('seed не создаёт вторую IMBC, если существующая названа иначе', async () => {
+    // Организация IMBC одна (organizations_imbc_uq); seed ищет её по типу, а не по имени.
+    await pool.query("update organizations set name = 'IMBC Kazakhstan' where type = 'imbc'");
+    await seedDemo(pool);
+    const imbc = await pool.query<{ id: string; name: string }>(
+      "select id, name from organizations where type = 'imbc'",
+    );
+    expect(imbc.rows.map((r) => r.name)).toEqual(['IMBC Kazakhstan']);
+    const staff = await pool.query<{ email: string; organization_id: string }>(
+      `select email, organization_id from user_accounts where role in ('expert', 'administrator', 'director') order by email`,
+    );
+    expect(staff.rows).toEqual(
+      ['admin@imbc.local', 'director@imbc.local', 'expert@imbc.local'].map((email) => ({
+        email,
+        organization_id: imbc.rows[0]!.id,
+      })),
+    );
   });
 
   it('card каждой видимой строки проходит companyCardDataSchema, focal point есть у семи из восьми', async () => {

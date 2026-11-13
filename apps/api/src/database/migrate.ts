@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
-import { backfillSpecV13 } from './backfill.js';
+import { applyAppRoleGrants } from './app-role.js';
 import { createPrototypeTable } from './prototype-store.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -23,14 +23,6 @@ async function main(): Promise<void> {
     await pool.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
     await migrate(drizzle(pool), { migrationsFolder });
 
-    // Шаг migrate для v1.3 (раздел 3.1, UPD-06): значения, добавленные миграцией 0003,
-    // можно использовать только после её фиксации. Идемпотентно.
-    const moved = await backfillSpecV13(pool);
-    console.log(
-      `Перенос v1.3: organizations ${moved.organizations}, user_accounts ${moved.userAccounts}, ` +
-        `manufacturer_profiles ${moved.manufacturerProfiles}, catalog_visible ${moved.catalogVisible}`,
-    );
-
     // Общее состояние прототипа кабинетов — вне журнала Drizzle, только при флаге; до выдачи прав роли
     // приложения, чтобы GRANT ниже захватил и эту таблицу.
     if (process.env.PROTOTYPE_CABINETS === 'true') {
@@ -38,13 +30,9 @@ async function main(): Promise<void> {
       console.log('Таблица prototype_state готова');
     }
 
-    // Журнал аудита — только добавление (AUD-02): у роли приложения нет UPDATE/DELETE.
+    // Права роли приложения; журнал аудита и принятия NDA — только добавление (app-role.ts).
     const appRole = process.env.DB_APP_ROLE;
-    if (appRole) {
-      const role = pg.escapeIdentifier(appRole);
-      await pool.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${role}`);
-      await pool.query(`REVOKE UPDATE, DELETE, TRUNCATE ON audit_entries FROM ${role}`);
-    }
+    if (appRole) await applyAppRoleGrants(pool, appRole);
     console.log('Миграции применены');
   } finally {
     await pool.end();

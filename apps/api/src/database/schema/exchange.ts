@@ -1,16 +1,4 @@
-import {
-  boolean,
-  index,
-  inet,
-  integer,
-  jsonb,
-  numeric,
-  pgTable,
-  text,
-  timestamp,
-  uniqueIndex,
-  uuid,
-} from 'drizzle-orm/pg-core';
+import { boolean, index, integer, jsonb, numeric, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { createdAt, id } from './_shared.js';
 import { userAccounts } from './access.js';
 import { commodityGroup, exportFormat, runResult, subscriptionPeriod } from './enums.js';
@@ -53,38 +41,6 @@ export const exportFiles = pgTable(
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   },
   (t) => [index('export_files_owner_idx').on(t.ownerId, t.createdAt)],
-);
-
-/** Версии NDA и их принятия: ФИО, должность, время, версия, IP (FC-02, FC-03). */
-export const ndaVersions = pgTable('nda_versions', {
-  id: id(),
-  version: integer('version').notNull().unique(),
-  textKk: text('text_kk').notNull(),
-  textRu: text('text_ru').notNull(),
-  textEn: text('text_en').notNull(),
-  publishedAt: timestamp('published_at', { withTimezone: true }),
-  publishedBy: uuid('published_by').references(() => userAccounts.id),
-});
-
-export const ndaAcceptances = pgTable(
-  'nda_acceptances',
-  {
-    id: id(),
-    profileId: uuid('profile_id')
-      .notNull()
-      .references(() => manufacturerProfiles.id),
-    ndaVersionId: uuid('nda_version_id')
-      .notNull()
-      .references(() => ndaVersions.id),
-    acceptorName: text('acceptor_name').notNull(),
-    acceptorPosition: text('acceptor_position').notNull(),
-    userId: uuid('user_id')
-      .notNull()
-      .references(() => userAccounts.id),
-    ip: inet('ip').notNull(),
-    acceptedAt: timestamp('accepted_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [uniqueIndex('nda_acceptances_uq').on(t.profileId, t.ndaVersionId)],
 );
 
 /** Версии прогноза; опубликованная заменяет предыдущую одним указателем (ADM-20…22). */

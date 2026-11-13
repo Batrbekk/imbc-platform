@@ -1,15 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ADMIN_PROBLEM_CODES,
   type Action,
   can,
   catalogFilterSchema,
   catalogFilterToSearchParams,
   catalogItemSchema,
+  changeEmailSchema,
+  changeRoleSchema,
   checkBin,
   companyCardDataSchema,
   companyPageSchema,
   computeBinCheckDigit,
+  createOrganizationSchema,
   dashboardSchema,
+  imbcMailboxSchema,
+  INVITABLE_ROLES,
+  inviteAccountSchema,
+  loginEmailSchema,
+  registrationRequestSchema,
+  LEGAL_PLACEHOLDER_MARKER,
+  registrationTermsReadSchema,
+  registrationTermsSchema,
   normalizeCompanyName,
   POLICY_MATRIX,
   type PolicyMatrix,
@@ -51,6 +63,139 @@ describe('БИН (MAN-02, MIG-05)', () => {
   it('отклоняет не 12 цифр', () => {
     expect(checkBin('12345')).toEqual({ valid: false, reason: 'format' });
     expect(checkBin('12345678901a')).toEqual({ valid: false, reason: 'format' });
+  });
+});
+
+describe('регистрация производителя (MAN-01, FC-02, GEN-01)', () => {
+  const valid = {
+    companyName: 'ТОО «Тест»',
+    bin: '980540000381',
+    email: 'Info@Company.local',
+    heardAboutUs: 'Выставка',
+    acceptPlatformTerms: true,
+    acceptPersonalData: true,
+    ndaVersion: 1,
+  };
+
+  it('регистрация: без любого согласия, без ответа «Как вы узнали», с acceptTerms или password — отклоняется (MAN-01)', () => {
+    expect(registrationRequestSchema.parse(valid)).toEqual({ ...valid, email: 'info@company.local', locale: 'kk' });
+    for (const key of ['acceptPlatformTerms', 'acceptPersonalData', 'ndaVersion', 'heardAboutUs'] as const) {
+      const { [key]: _omitted, ...rest } = valid;
+      expect(registrationRequestSchema.safeParse(rest).success, key).toBe(false);
+    }
+    for (const over of [
+      { acceptPlatformTerms: false },
+      { acceptPersonalData: false },
+      { ndaVersion: 0 },
+      { ndaVersion: 1.5 },
+      { heardAboutUs: '   ' },
+      { heardAboutUs: null },
+      { heardAboutUs: 'x'.repeat(501) },
+      { acceptTerms: true },
+      { password: 'Secret-123' },
+    ])
+      expect(registrationRequestSchema.safeParse({ ...valid, ...over }).success, JSON.stringify(over)).toBe(false);
+    expect(registrationRequestSchema.parse({ ...valid, heardAboutUs: '  Выставка  ' }).heardAboutUs).toBe('Выставка');
+  });
+
+  it('почта логина в нижнем регистре, больше 254 — отклоняется', () => {
+    expect(loginEmailSchema.parse('  Admin@IMBC.Local ')).toBe('admin@imbc.local');
+    const long = `${'a'.repeat(64)}@${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(57)}.local`;
+    expect(long.length).toBeGreaterThan(254);
+    expect(loginEmailSchema.safeParse(long).success).toBe(false);
+    expect(loginEmailSchema.safeParse('not-an-email').success).toBe(false);
+  });
+
+  it('текст условий регистрации — только номер и текст текущей версии NDA (FC-02)', () => {
+    expect(registrationTermsSchema.parse({ nda: { version: 1, body: 'Текст' } })).toEqual({
+      nda: { version: 1, body: 'Текст' },
+    });
+    expect(registrationTermsSchema.safeParse({ nda: { version: 1, body: '' } }).success).toBe(false);
+    expect(registrationTermsSchema.safeParse({ nda: { version: 1, body: 'Текст', id: 'x' } }).success).toBe(false);
+  });
+
+  it('маркер временного текста: три начальные фразы с длинным тире; дефис или другие слова — не заглушка (FC-02)', () => {
+    for (const text of ['PLACEHOLDER — NOT A LEGAL TEXT.', 'ВРЕМЕННЫЙ ТЕКСТ — НЕ ЮРИДИЧЕСКИЙ ДОКУМЕНТ.', 'УАҚЫТША МӘТІН — ЗАҢДЫҚ ҚҰЖАТ ЕМЕС.'])
+      expect(text, text).toMatch(LEGAL_PLACEHOLDER_MARKER);
+    for (const text of ['PLACEHOLDER - NOT A LEGAL TEXT.', 'ВРЕМЕННЫЙ ТЕКСТ – НЕ ДОКУМЕНТ.', 'Настоящий текст соглашения.', ' PLACEHOLDER — с пробелом впереди.'])
+      expect(text, text).not.toMatch(LEGAL_PLACEHOLDER_MARKER);
+  });
+
+  it('форма читает текст условий нестрого: новое поле API не мешает, неверная форма ответа — отказ (FC-02, NFR-06)', () => {
+    expect(registrationTermsReadSchema.parse({ nda: { version: 2, body: 'Текст', publishedAt: 'x' }, extra: 1 })).toEqual({
+      nda: { version: 2, body: 'Текст' },
+    });
+    for (const body of [{}, { nda: { body: 'Текст' } }, { nda: { version: 0, body: 'Текст' } }, { nda: { version: 1, body: '' } }])
+      expect(registrationTermsReadSchema.safeParse(body).success, JSON.stringify(body)).toBe(false);
+  });
+});
+
+describe('организации и приглашения администратора (ADM-01, ADM-03, GEN-05)', () => {
+  it('INVITABLE_ROLES: производителя нет, у IMBC три роли (раздел 3.1)', () => {
+    expect(Object.keys(INVITABLE_ROLES).sort()).toEqual(['imbc', 'observer', 'operator']);
+    expect(INVITABLE_ROLES.imbc).toEqual(['expert', 'administrator', 'director']);
+    expect(INVITABLE_ROLES.operator).toEqual(['operator']);
+    expect(INVITABLE_ROLES.observer).toEqual(['observer']);
+    expect(Object.values(INVITABLE_ROLES).flat()).not.toContain('manufacturer');
+  });
+
+  it('наблюдатель с отметкой major — отклоняется (GEN-05)', () => {
+    expect(createOrganizationSchema.parse({ name: '  Оператор  ', type: 'operator', isMajorOperator: true })).toEqual({
+      name: 'Оператор',
+      type: 'operator',
+      isMajorOperator: true,
+    });
+    expect(createOrganizationSchema.parse({ name: 'Наблюдатель', type: 'observer' }).isMajorOperator).toBe(false);
+    const major = createOrganizationSchema.safeParse({ name: 'Наблюдатель', type: 'observer', isMajorOperator: true });
+    expect(major.success).toBe(false);
+    expect(major.error?.issues.map((i) => i.path.join('.'))).toEqual(['isMajorOperator']);
+    for (const type of ['manufacturer', 'imbc'])
+      expect(createOrganizationSchema.safeParse({ name: 'Организация', type }).success, type).toBe(false);
+    expect(
+      createOrganizationSchema.safeParse({ name: 'Организация', type: 'operator', bin: '980540000381' }).success,
+    ).toBe(false);
+  });
+
+  it('коды ошибок маршрутов администратора — без повторов, snake_case (ADMIN_PROBLEM_CODES)', () => {
+    expect(new Set(ADMIN_PROBLEM_CODES).size).toBe(ADMIN_PROBLEM_CODES.length);
+    for (const code of ADMIN_PROBLEM_CODES) expect(code).toMatch(/^[a-z]+(_[a-z]+)*$/);
+    expect(ADMIN_PROBLEM_CODES).toContain('organization_not_invitable');
+  });
+
+  it('приглашение и ящик IMBC: почта в нижнем регистре, лишний ключ — отказ (ADM-01, раздел 8.2)', () => {
+    const invite = {
+      email: ' New@Operator.Local ',
+      fullName: ' Имя Фамилия ',
+      organizationId: '00000000-0000-4000-8000-000000000001',
+      role: 'operator',
+    };
+    expect(inviteAccountSchema.parse(invite)).toEqual({
+      ...invite,
+      email: 'new@operator.local',
+      fullName: 'Имя Фамилия',
+    });
+    expect(inviteAccountSchema.safeParse({ ...invite, locale: 'ru' }).success).toBe(false);
+    expect(inviteAccountSchema.safeParse({ ...invite, organizationId: 'x' }).success).toBe(false);
+    expect(imbcMailboxSchema.parse({ email: ' Mail@IMBC.Local ' })).toEqual({ email: 'mail@imbc.local' });
+    expect(imbcMailboxSchema.parse({ email: null })).toEqual({ email: null });
+    expect(imbcMailboxSchema.safeParse({ email: 'not-an-email' }).success).toBe(false);
+    expect(imbcMailboxSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('changeEmailSchema приводит к нижнему регистру', () => {
+    expect(changeEmailSchema.parse({ email: ' New.Login@Maker.Local ' })).toEqual({ email: 'new.login@maker.local' });
+    expect(changeEmailSchema.safeParse({ email: 'not-an-email' }).success).toBe(false);
+    expect(changeEmailSchema.safeParse({ email: 'a@maker.local', emailVerified: true }).success).toBe(false);
+  });
+
+  it('changeRoleSchema — роль из ROLES, лишний ключ — отказ; коды действий над аккаунтом в контракте (AUTH-06, ADM-05)', () => {
+    expect(changeRoleSchema.parse({ role: 'director' })).toEqual({ role: 'director' });
+    expect(changeRoleSchema.safeParse({ role: 'boss' }).success).toBe(false);
+    expect(
+      changeRoleSchema.safeParse({ role: 'expert', organizationId: '00000000-0000-4000-8000-000000000001' }).success,
+    ).toBe(false);
+    for (const code of ['self_action', 'role_fixed', 'not_manufacturer_account'])
+      expect(ADMIN_PROBLEM_CODES, code).toContain(code);
   });
 });
 

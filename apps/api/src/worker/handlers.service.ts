@@ -28,11 +28,11 @@ import {
 import { S3 } from '../infra/infra.module.js';
 import { MailService } from '../mail/mail.service.js';
 import { renderMail } from '../mail/templates.js';
-import { AdataScheduler } from '../modules/adata/adata.scheduler.js';
-import { KeycloakAdminService } from '../modules/auth/keycloak-admin.service.js';
+import { KeycloakAdminService, KeycloakRequestError } from '../modules/auth/keycloak-admin.service.js';
 import { SessionService } from '../modules/auth/session.service.js';
 import { sha256 } from '../modules/auth/crypto.js';
-import type { IdentityJob, ScanFileJob, SendNotificationJob } from '../jobs/queues.js';
+import { ManufacturerOnboardingService } from '../modules/registration/onboarding.service.js';
+import type { AccountJob, IdentityJob, IdentitySyncJob, ScanFileJob, SendNotificationJob } from '../jobs/queues.js';
 import { scanStream } from './clamd.js';
 
 type SecurityEvent = Awaited<ReturnType<KeycloakAdminService['securityEvents']>>[number];
@@ -62,7 +62,7 @@ export class JobHandlers {
     private readonly audit: AuditService,
     private readonly keycloak: KeycloakAdminService,
     private readonly sessions: SessionService,
-    private readonly adata: AdataScheduler,
+    private readonly onboarding: ManufacturerOnboardingService,
   ) {}
 
   /** Файл из карантина проверяется ClamAV и только чистым переносится в рабочий бакет (FILE-03). */
@@ -152,6 +152,48 @@ export class JobHandlers {
     if (!account) await this.keycloak.deleteUser(subject);
   }
 
+  /**
+   * Keycloak догоняет решение администратора (ADM-02, ADM-05, AUTH-06): всегда к текущей строке БД, а не
+   * к данным задания — повтор, порядок заданий и задание после следующего действия сходятся к одному.
+   * Аккаунт без субъекта (seed до первого входа) догонять нечего. Сбой Keycloak — повтор pg-boss.
+   */
+  async syncIdentity({ accountId, logout }: IdentitySyncJob): Promise<void> {
+    const [account] = await this.db
+      .select({ subject: userAccounts.idpSubject, state: userAccounts.state, email: userAccounts.email })
+      .from(userAccounts)
+      .where(eq(userAccounts.id, accountId));
+    if (!account?.subject) return;
+    try {
+      await this.keycloak.updateUser(account.subject, { enabled: account.state !== 'blocked', email: account.email });
+    } catch (error) {
+      // Пользователь удалён в Keycloak: догонять нечего, повтор ничего не изменит. Прочие сбои — повтор.
+      if (error instanceof KeycloakRequestError && error.status === 404) {
+        this.logger.warn({ accountId }, 'identity-sync: user not found in Keycloak');
+        return;
+      }
+      throw error;
+    }
+    if (logout) await this.keycloak.logoutUser(account.subject);
+  }
+
+  /**
+   * Аккаунт стал inactive (AUTH-07, NOT-26): сеансы IdP завершаются, письмо NOT-01 ссылкой сброса (72 часа,
+   * AUTH-01) — на языке атрибута `locale` пользователя Keycloak. Обязательное действие `UPDATE_PASSWORD`
+   * пользователю не ставится — оно только в токене ссылки: иначе вход со старым паролем сразу просил бы новый
+   * и возвращал аккаунт мимо ящика. Вход со старым паролем отклоняет BFF (`account_inactive`). Пользователь
+   * остаётся включённым — иначе ссылка не сработает. Аккаунт уже не inactive или без субъекта — выход.
+   * Повтор безвреден.
+   */
+  async sendInactivityReset({ accountId }: AccountJob): Promise<void> {
+    const [account] = await this.db
+      .select({ subject: userAccounts.idpSubject, state: userAccounts.state })
+      .from(userAccounts)
+      .where(eq(userAccounts.id, accountId));
+    if (account?.state !== 'inactive' || !account.subject) return;
+    await this.keycloak.logoutUser(account.subject);
+    await this.keycloak.sendPasswordEmail(account.subject, ['UPDATE_PASSWORD']);
+  }
+
   /** Файлы выгрузок хранятся 90 дней (OPR-23); запись о запуске остаётся. */
   async purgeExportFiles(): Promise<void> {
     const stale = await this.db
@@ -182,7 +224,8 @@ export class JobHandlers {
     const events = await this.keycloak.securityEvents(since);
     const ordered = events.sort((a, b) => a.time - b.time);
     // Revocations must finish even when an unrelated lockout notification cannot be mailed.
-    const passwordSet = new Set<string>();
+    // Самое раннее время установки пароля в пакете — момент появления профиля (registered_at, MAN-03).
+    const passwordSet = new Map<string, Date>();
     for (const event of ordered) {
       if (!event.userId || event.error || !Number.isFinite(event.time)) continue;
       if (isPasswordEvent(event)) {
@@ -191,11 +234,11 @@ export class JobHandlers {
           new Date(event.time),
           `password:${sha256(event.id ?? `${event.type}:${event.userId}:${event.time}`)}`,
         );
-        passwordSet.add(event.userId);
+        if (!passwordSet.has(event.userId)) passwordSet.set(event.userId, new Date(event.time));
       }
     }
-    // Чтение Adata — после всех отзывов пакета и до уведомлений: отзыв не ждёт планировщик.
-    for (const subject of passwordSet) await this.requestAdataRead(subject);
+    // Профиль и чтение Adata — после всех отзывов пакета и до уведомлений: отзыв не ждёт онбординг.
+    for (const [subject, at] of passwordSet) await this.onboardAfterPassword(subject, at);
     for (const event of ordered) {
       if (!event.userId || event.error || !Number.isFinite(event.time)) continue;
       if (event.type !== 'USER_DISABLED_BY_TEMPORARY_LOCKOUT') continue;
@@ -234,19 +277,20 @@ export class JobHandlers {
   }
 
   /**
-   * Установка пароля создаёт профиль (MAN-03, NOT-23) — с ней ставится одно чтение Adata (IMBC-07).
-   * Сбой не мешает отзыву сеансов и письмам NOT-03. Повтор события в пятиминутном окне опроса даёт skipped,
-   * а для попытки в quota_exhausted или not_configured — requeued (новое задание и запись аудита).
+   * Установка пароля создаёт Draft-профиль и принятие NDA (MAN-03, FC-02) и ставит одно чтение Adata
+   * (IMBC-07) — одной транзакцией, без писем (NOT-23). Сбой не мешает отзыву сеансов, письмам NOT-03
+   * и сдвигу курсора: следующий вход или повтор события в пятиминутном окне опроса создаст всё. Повтор
+   * события — existing; попытку в quota_exhausted или not_configured он ставит снова (requeued).
    */
-  private async requestAdataRead(subject: string): Promise<void> {
+  private async onboardAfterPassword(subject: string, at: Date): Promise<void> {
     try {
       const [account] = await this.db
         .select({ id: userAccounts.id })
         .from(userAccounts)
         .where(eq(userAccounts.idpSubject, subject));
-      if (account) await this.adata.requestOnProfileCreated(account.id, 'password_set');
+      if (account) await this.onboarding.onPasswordSet(account.id, 'password_set', at);
     } catch {
-      this.logger.warn('adata: чтение после установки пароля не поставлено');
+      this.logger.warn('onboarding: профиль после установки пароля не создан');
     }
   }
 

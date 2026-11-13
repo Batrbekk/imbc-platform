@@ -38,6 +38,7 @@ case " $* " in
   *" ps -q keycloak "*) echo 0123456789ab ;;
   *"clientId=imbc-bff"*) echo '[{"id":"client-1","clientId":"imbc-bff"}]' ;;
   *" get clients/client-1 "*) echo '{"attributes":{"existing":"kept"}}' ;;
+  *" get users/profile "*) echo '{"attributes":[{"name":"username","permissions":{"view":["admin","user"],"edit":["admin","user"]}},{"name":"email","permissions":{"view":["admin","user"],"edit":["admin","user"]}}]}' ;;
   *" --format "*) printf 'api running healthy\ncaddy running \n' ;;
 esac
 [[ " $* " != *" exec "* ]] || cat >/dev/null

@@ -1,5 +1,17 @@
 import { sql } from 'drizzle-orm';
-import { boolean, index, inet, integer, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import {
+  type AnyPgColumn,
+  boolean,
+  check,
+  index,
+  inet,
+  integer,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 import { createdAt, id, updatedAt } from './_shared.js';
 import { accountState, locale, organizationType, role } from './enums.js';
 
@@ -13,6 +25,8 @@ export const organizations = pgTable(
     /** БИН хранится текстом (DATA-03); обязателен только у производителя. */
     bin: text('bin'),
     isMajorOperator: boolean('is_major_operator').notNull().default(false),
+    /** Ящик IMBC для писем платформы (DBML, раздел 8.2); задаётся только у организации IMBC. */
+    notificationMailbox: text('notification_mailbox'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -20,6 +34,17 @@ export const organizations = pgTable(
     uniqueIndex('organizations_bin_uq')
       .on(t.bin)
       .where(sql`${t.bin} is not null`),
+    // Организация IMBC одна: её создаёт миграция 0008, ящик хранится у неё.
+    uniqueIndex('organizations_imbc_uq')
+      .on(t.type)
+      .where(sql`${t.type} = 'imbc'`),
+    // Не в DBML: администратор не создаёт второго оператора или наблюдателя с тем же именем (ADM-03).
+    // Условие — тип, а не пустой БИН: связь БИН с типом схема не проверяет. Производителей различает
+    // БИН (у мигрированного его может не быть), их названия могут совпадать.
+    uniqueIndex('organizations_name_uq')
+      .on(t.type, sql`lower(${t.name})`)
+      .where(sql`${t.type} <> 'manufacturer'`),
+    check('organizations_mailbox_imbc_ck', sql`${t.notificationMailbox} is null or ${t.type} = 'imbc'`),
   ],
 );
 
@@ -44,6 +69,21 @@ export const userAccounts = pgTable(
     credentialsChangedAt: timestamp('credentials_changed_at', { withTimezone: true }),
     lastOtpIssuedAt: timestamp('last_otp_issued_at', { withTimezone: true }),
     idpLoggedOutAt: timestamp('idp_logged_out_at', { withTimezone: true }),
+    /** Согласия при регистрации производителя (MAN-01): условия платформы и политика персональных данных. */
+    platformTermsAcceptedAt: timestamp('platform_terms_accepted_at', { withTimezone: true }),
+    personalDataAcceptedAt: timestamp('personal_data_accepted_at', { withTimezone: true }),
+    /**
+     * Не в DBML: принятие NDA при регистрации, пока профиля нет (FC-02, MAN-01). DBML требует у
+     * `nda_acceptance` профиль, а профиль появляется, когда задан пароль (MAN-03): при его создании
+     * принятие переносится в `nda_acceptance`, колонки очищаются. Три колонки — все или ни одной.
+     */
+    registrationNdaVersionId: uuid('registration_nda_version_id').references((): AnyPgColumn => ndaVersion.id),
+    registrationNdaAcceptedAt: timestamp('registration_nda_accepted_at', { withTimezone: true }),
+    registrationIp: inet('registration_ip'),
+    /** Не в DBML (там — колонка профиля `heard_about_us`): ответ регистрации ждёт профиля так же (MAN-01). */
+    registrationHeardAboutUs: text('registration_heard_about_us'),
+    /** Не в DBML: момент перехода в inactive после трёх месяцев без входа (AUTH-07). */
+    inactiveSince: timestamp('inactive_since', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -51,6 +91,41 @@ export const userAccounts = pgTable(
     uniqueIndex('user_accounts_email_uq').on(sql`lower(${t.email})`),
     uniqueIndex('user_accounts_idp_subject_uq').on(t.idpSubject),
     index('user_accounts_org_idx').on(t.organizationId),
+    // DBML: «one row where the organisation type is manufacturer». Частичный индекс не видит тип
+    // организации, поэтому условие — роль: manufacturer бывает только в организации-производителе (GEN-01).
+    uniqueIndex('user_accounts_manufacturer_org_uq')
+      .on(t.organizationId)
+      .where(sql`${t.role} = 'manufacturer'`),
+    // Ожидающее принятие NDA: все три колонки или ни одной.
+    check(
+      'user_accounts_registration_nda_ck',
+      sql`num_nulls(${t.registrationNdaVersionId}, ${t.registrationNdaAcceptedAt}, ${t.registrationIp}) in (0, 3)`,
+    ),
+  ],
+);
+
+/**
+ * Версия NDA платформы (DBML `nda_version`, FC-02, FC-03). Прежние версии остаются вместе с принятиями;
+ * текущая — одна. Отступления от DBML: `published_by` допускает null — версию, загруженную релизом,
+ * никто из администраторов не публиковал; `published_at` по умолчанию — момент вставки.
+ */
+export const ndaVersion = pgTable(
+  'nda_version',
+  {
+    id: id(),
+    versionNumber: integer('version_number').notNull(),
+    body: text('body').notNull(),
+    publishedAt: timestamp('published_at', { withTimezone: true }).notNull().defaultNow(),
+    publishedBy: uuid('published_by').references((): AnyPgColumn => userAccounts.id),
+    isCurrent: boolean('is_current').notNull().default(false),
+  },
+  (t) => [
+    uniqueIndex('nda_version_number_uq').on(t.versionNumber),
+    // Частичный уникальный индекс не откладывается: смена текущей версии — два UPDATE (снять, затем поставить).
+    uniqueIndex('nda_version_current_uq')
+      .on(t.isCurrent)
+      .where(sql`${t.isCurrent}`),
+    check('nda_version_number_ck', sql`${t.versionNumber} > 0`),
   ],
 );
 

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Apply managed settings to an existing IMBC realm and rename listed legacy demo users, without importing users or secrets.
+"""Apply managed settings to an existing IMBC realm without importing users or secrets.
 
 Run from the repository on the VM after Keycloak is healthy:
     python3 infrastructure/azure/sync-realm.py --theme imbc
-Only the explicitly allowlisted fields below are sent to the admin API. A legacy demo user
-from LEGACY_DEMO_USERS is renamed in place, so its id (token subject) and password are kept.
+Only the explicitly allowlisted fields below are sent to the admin API.
 """
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import re
 import subprocess
@@ -32,8 +32,13 @@ REALM_FIELDS = frozenset({
 })
 CLIENT_FIELDS = frozenset({"rootUrl", "baseUrl", "redirectUris", "webOrigins", "attributes", "frontchannelLogout"})
 PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
-# The realm file is imported only once, so renamed demo users are renamed here (GEN-06, v1.3 section 3.1).
-LEGACY_DEMO_USERS = {"spectator@spectator.local": "observer@observer.local"}
+# The login email is changed only by an IMBC administrator (MAN-05, ADM-05); with
+# registrationEmailAsUsername the username follows it. Everyone keeps seeing both.
+ADMIN_EDIT_ONLY = ("email", "username")
+VIEWERS = ("admin", "user")
+# The platform keeps the person's name itself (user_accounts.full_name); registration and the
+# invitation ask nothing else (MAN-01, MAN-03, ADM-01), so Keycloak must not demand a name step.
+OPTIONAL_NAMES = ("firstName", "lastName")
 
 
 class SyncError(Exception):
@@ -98,10 +103,42 @@ def desired_settings(source: dict[str, Any], env: dict[str, str], theme: str) ->
     return realm, realm_patch, client_patch
 
 
-def legacy_user_renames(source: dict[str, Any]) -> dict[str, str]:
-    """Pairs whose new username is a desired realm user and whose old username no longer is."""
-    usernames = {str(user.get("username", "")).lower() for user in source.get("users", []) if isinstance(user, dict)}
-    return {old: new for old, new in LEGACY_DEMO_USERS.items() if new in usernames and old not in usernames}
+def managed_user_profile(profile: Any) -> tuple[dict[str, Any], list[str], list[str]]:
+    """Return the user profile as the platform needs it and what changed.
+
+    Email and username become editable only by admin (both still viewable by admin and user);
+    `required` is removed from firstName and lastName when present. Nothing else changes —
+    validations, other attributes, groups and every other key are kept — so a second run changes
+    nothing. Returns (profile, attributes made admin-only, names made optional).
+    """
+    if not isinstance(profile, dict) or not isinstance(profile.get("attributes"), list):
+        raise SyncError("Current user profile is invalid")
+    updated = copy.deepcopy(profile)
+    found: set[str] = set()
+    changed: list[str] = []
+    optional: list[str] = []
+    for attribute in updated["attributes"]:
+        if not isinstance(attribute, dict):
+            continue
+        if attribute.get("name") in OPTIONAL_NAMES and "required" in attribute:
+            del attribute["required"]
+            optional.append(attribute["name"])
+        if attribute.get("name") not in ADMIN_EDIT_ONLY:
+            continue
+        name = attribute["name"]
+        found.add(name)
+        permissions = attribute.setdefault("permissions", {})
+        if not isinstance(permissions, dict):
+            raise SyncError("Current user profile permissions are invalid")
+        view = permissions.get("view") if isinstance(permissions.get("view"), list) else []
+        missing_viewers = [role for role in VIEWERS if role not in view]
+        if permissions.get("edit") != ["admin"] or missing_viewers:
+            permissions["edit"] = ["admin"]
+            permissions["view"] = view + missing_viewers
+            changed.append(name)
+    if found != set(ADMIN_EDIT_ONLY):
+        raise SyncError("Current user profile lacks the email or username attribute")
+    return updated, sorted(changed), sorted(optional)
 
 
 def run(command: list[str], *, operation: str, root: Path, data: str | None = None) -> str:
@@ -122,19 +159,6 @@ def parse_result(raw: str, operation: str) -> Any:
         raise SyncError(f"{operation} returned invalid JSON") from None
 
 
-def find_user_id(cli: list[str], config_path: str, realm: str, field: str, value: str, root: Path) -> str | None:
-    """Id of the user whose username or email is exactly value, or None. Anything unexpected is an error, not "absent"."""
-    users = parse_result(run(cli + ["get", "users", "--config", config_path, "-r", realm, "-q", f"{field}={value}", "-q", "exact=true", "--fields", f"id,{field}"], operation="Find demo user", root=root), "Find demo user")
-    if not isinstance(users, list) or not all(isinstance(user, dict) for user in users):
-        raise SyncError("Unexpected demo user lookup result")
-    matches = [user for user in users if str(user.get(field, "")).lower() == value.lower()]
-    if not matches:
-        return None
-    if len(matches) != 1 or not re.fullmatch(r"[A-Za-z0-9-]+", str(matches[0].get("id", ""))):
-        raise SyncError("Unexpected demo user lookup result")
-    return str(matches[0]["id"])
-
-
 def synchronize(root: Path, theme: str) -> None:
     if not re.fullmatch(r"[A-Za-z0-9._-]+", theme):
         raise SyncError("Invalid theme name")
@@ -144,7 +168,6 @@ def synchronize(root: Path, theme: str) -> None:
             raise SyncError(f"Missing required environment variable: {key}")
     source = parse_result((root / "infrastructure/keycloak/imbc-realm.json").read_text(), "Desired realm configuration")
     realm, realm_patch, client_patch = desired_settings(source, env, theme)
-    renames = legacy_user_renames(source)
     container_ids = run(["docker", "compose", "-f", "compose.yaml", "-f", "compose.azure.yaml", "ps", "-q", "keycloak"], operation="Find Keycloak container", root=root).split()
     if len(container_ids) != 1 or not re.fullmatch(r"[a-fA-F0-9]{12,64}", container_ids[0]):
         raise SyncError("Expected one running Keycloak container")
@@ -173,17 +196,11 @@ def synchronize(root: Path, theme: str) -> None:
         # kcadm accepts '-f -' for JSON on stdin. No desired users or client secrets are submitted.
         run(cli + ["update", f"realms/{realm}", "--config", config_path, "-f", "-"], operation="Update managed realm settings", root=root, data=json.dumps(realm_patch))
         run(cli + ["update", client_path, "--config", config_path, "-r", realm, "-f", "-"], operation="Update managed client settings", root=root, data=json.dumps(client_patch))
-        for old, new in renames.items():
-            legacy_id = find_user_id(cli, config_path, realm, "username", old, root)
-            if legacy_id is None:
-                continue
-            # The new address may already belong to another user as username or as email.
-            if any(find_user_id(cli, config_path, realm, field, new, root) is not None for field in ("username", "email")):
-                print("Legacy demo user kept: target already exists")
-                continue
-            # Only username and email change; credentials and the id stay with the user.
-            run(cli + ["update", f"users/{legacy_id}", "--config", config_path, "-r", realm, "-s", f"username={new}", "-s", f"email={new}"], operation="Rename legacy demo user", root=root)
-            print("Renamed legacy demo user")
+        # Declarative user profile: read it whole, change only the managed keys, write it back only if needed.
+        profile = parse_result(run(cli + ["get", "users/profile", "--config", config_path, "-r", realm], operation="Read user profile", root=root), "Read user profile")
+        managed, admin_only, made_optional = managed_user_profile(profile)
+        if admin_only or made_optional:
+            run(cli + ["update", "users/profile", "--config", config_path, "-r", realm, "-f", "-"], operation="Update user profile", root=root, data=json.dumps(managed))
     except BaseException as error:
         original_error = error
         raise
@@ -198,7 +215,12 @@ def synchronize(root: Path, theme: str) -> None:
                 print("ERROR: Temporary admin configuration cleanup also failed", file=sys.stderr)
     print("Updated realm settings: " + ", ".join(sorted(realm_patch)))
     print("Updated imbc-bff settings: " + ", ".join(sorted(client_patch)))
-    print("Realm synchronization complete; legacy demo users renamed where present, other users, client secrets and unrelated settings preserved")
+    profile_changes = "; ".join(part for part in (
+        "updated: " + ", ".join(admin_only) if admin_only else "",
+        "optional: " + ", ".join(made_optional) if made_optional else "",
+    ) if part) or "already set"
+    print(f"User profile: email and username editable by admin only, first and last name optional ({profile_changes})")
+    print("Realm synchronization complete; existing users, client secrets and unrelated settings preserved")
 
 
 def main() -> int:

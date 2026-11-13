@@ -21,6 +21,8 @@ export const QUEUES = {
   activitySnapshotMonthly: 'activity-snapshot-monthly',
   runSubscriptions: 'run-subscriptions',
   adataPrefill: 'adata-prefill',
+  identitySync: 'identity-sync',
+  inactivityReset: 'inactivity-reset',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -31,7 +33,11 @@ export const PLATFORM_TZ = 'Asia/Almaty';
 export const SCHEDULES: ReadonlyArray<{ queue: QueueName; cron: string; note: string }> = [
   { queue: QUEUES.certificateExpiry, cron: '30 0 * * *', note: 'истечение сертификатов (REV-20)' },
   { queue: QUEUES.purgeExportFiles, cron: '0 1 * * *', note: 'удаление файлов выгрузок старше 90 дней (OPR-23)' },
-  { queue: QUEUES.accountInactivity, cron: '0 2 * * *', note: 'неактивные учётные записи (AUTH-30)' },
+  {
+    queue: QUEUES.accountInactivity,
+    cron: '0 2 * * *',
+    note: 'три месяца без входа → inactive и ссылка сброса (AUTH-07, NOT-26)',
+  },
   { queue: QUEUES.updateStatus, cron: '0 9 * * *', note: 'квартальный цикл актуализации (UPD-01…05)' },
   { queue: QUEUES.runSubscriptions, cron: '0 6 * * *', note: 'подписки на выгрузки (OPR-20)' },
   { queue: QUEUES.purgeSessions, cron: '15 * * * *', note: 'просроченные сеансы, коды и доверенные устройства' },
@@ -62,6 +68,20 @@ export interface SendNotificationJob {
 
 export interface IdentityJob {
   subject: string;
+}
+
+/**
+ * Keycloak догоняет строку аккаунта после действия администратора (ADM-02, ADM-05, AUTH-06): включён,
+ * если не blocked, почта — из БД, `logout` завершает сеансы IdP. Почты в задании нет — только id.
+ */
+export interface IdentitySyncJob {
+  accountId: string;
+  logout: boolean;
+}
+
+/** Аккаунт, ставший inactive (AUTH-07): письмо NOT-01 ссылкой сброса. Почты в задании нет — только id. */
+export interface AccountJob {
+  accountId: string;
 }
 
 export interface RefreshCatalogJob {

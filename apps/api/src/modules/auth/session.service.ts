@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, gt, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import { ENV, type Env } from '../../config/env.js';
 import { DB, type Database } from '../../database/database.module.js';
+import { boundLockWaits } from '../../database/lock-waits.js';
 import {
   organizations,
   authSecurityEvents,
@@ -26,6 +27,12 @@ export const OTP_TTL_MS = 10 * 60 * 1000;
 export const OTP_MAX_ATTEMPTS = 5;
 export const OTP_RESEND_MS = 60 * 1000;
 export const RESPONSIBILITY_TEXT_VERSION = '1';
+/**
+ * Допуск расхождения часов при возврате из inactive (AUTH-07): `inactive_since` — часы платформы, время
+ * пароля — часы Keycloak. Пароль, заданный за минуту до перехода, тоже возвращает: человек только что
+ * подтвердил владение ящиком или паролем. Отказ тому, кто сменил пароль после перехода, недопустим.
+ */
+export const REACTIVATION_CLOCK_SKEW_MS = 60_000;
 
 @Injectable()
 export class SessionService {
@@ -423,12 +430,9 @@ export class SessionService {
       await tx.update(sessions).set({ authVersion }).where(eq(sessions.userId, account.id));
       await tx
         .update(userAccounts)
-        .set({
-          authVersion,
-          credentialsChangedAt: at,
-          ...(account.state === 'inactive' && at >= account.updatedAt ? { state: 'active' as const } : {}),
-        })
+        .set({ authVersion, credentialsChangedAt: at })
         .where(eq(userAccounts.id, account.id));
+      await this.reactivate(tx, account.id, at, 'password_event');
       await tx.insert(auditEntries).values({
         userId: account.id,
         organizationId: account.organizationId,
@@ -438,6 +442,58 @@ export class SessionService {
         isAccountEvent: true,
       });
     });
+  }
+
+  /**
+   * Возврат из inactive новым паролем (AUTH-07): пароль задан не раньше `inactive_since` (с допуском
+   * `REACTIVATION_CLOCK_SKEW_MS`). Правило одно для события пароля (worker) и входа (callback): кто первый,
+   * тот возвращает и пишет `account.reactivated { via }`, второй ничего не пишет. true — аккаунт active.
+   */
+  async reactivateAfterReset(
+    accountId: string,
+    passwordSetAt: Date,
+    via: 'sign_in' | 'password_event',
+  ): Promise<boolean> {
+    return this.db.transaction(async (tx) => {
+      await boundLockWaits(tx);
+      if (await this.reactivate(tx, accountId, passwordSetAt, via)) return true;
+      const [account] = await tx
+        .select({ state: userAccounts.state })
+        .from(userAccounts)
+        .where(eq(userAccounts.id, accountId));
+      return account?.state === 'active';
+    });
+  }
+
+  private async reactivate(
+    tx: Database,
+    accountId: string,
+    passwordSetAt: Date,
+    via: 'sign_in' | 'password_event',
+  ): Promise<boolean> {
+    // UPDATE ждёт блокировку строки и проверяет условие заново: одновременный второй вызов ничего не находит.
+    const [account] = await tx
+      .update(userAccounts)
+      .set({ state: 'active', inactiveSince: null })
+      .where(
+        and(
+          eq(userAccounts.id, accountId),
+          eq(userAccounts.state, 'inactive'),
+          lte(userAccounts.inactiveSince, new Date(passwordSetAt.getTime() + REACTIVATION_CLOCK_SKEW_MS)),
+        ),
+      )
+      .returning({ organizationId: userAccounts.organizationId });
+    if (!account) return false;
+    await tx.insert(auditEntries).values({
+      userId: accountId,
+      organizationId: account.organizationId,
+      action: 'account.reactivated',
+      objectType: 'account',
+      objectId: accountId,
+      diff: { via },
+      isAccountEvent: true,
+    });
+    return true;
   }
 
   async acceptResponsibility(userId: string, ip: string | null): Promise<void> {

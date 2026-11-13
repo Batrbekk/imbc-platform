@@ -95,7 +95,7 @@ ALLOW_FROM=1.2.3.4/32 ADMIN_ALLOWED_IPS="1.2.3.4/32 127.0.0.1/32 ::1/128" ./infr
 ./infrastructure/azure/deploy.sh info
 ```
 
-Realm Keycloak импортируется только при первом создании. После каждого развёртывания `infrastructure/azure/sync-realm.py --theme imbc` обновляет разрешённый набор настроек темы, политик, событий, SMTP и клиента BFF из `imbc-realm.json` и серверной `.env`. Пользователи, client secrets и посторонние настройки сохраняются; исключение — переименование одного демо-пользователя при переходе на v1.3 (см. [ниже](#переход-на-спецификацию-v13)). Повторный импорт realm не выполняется. Изменения управляемых полей только в консоли будут заменены следующей синхронизацией.
+Realm Keycloak импортируется только при первом создании. После каждого развёртывания `infrastructure/azure/sync-realm.py --theme imbc` обновляет разрешённый набор настроек темы, политик, событий, SMTP и клиента BFF из `imbc-realm.json` и серверной `.env`. Ещё один шаг — профиль пользователя realm (MAN-05): скрипт читает его (`kcadm.sh get users/profile`), у атрибутов `email` и `username` ставит `edit: ["admin"]` (просмотр — `admin` и `user`), у `firstName` и `lastName` снимает `required`, всё остальное оставляет как есть и записывает профиль обратно, только если что-то изменилось; в выводе — строка `User profile: email and username editable by admin only, first and last name optional (updated: email, username; optional: firstName, lastName)` или `… (already set)` при повторе. Пользователи, client secrets и посторонние настройки сохраняются. Повторный импорт realm не выполняется. Изменения управляемых полей только в консоли будут заменены следующей синхронизацией.
 
 Смена домена или OIDC-секретов требует согласованной миграции Keycloak и серверной `.env`. Скрипт сохраняет существующую конфигурацию и останавливается, если её HTTPS-параметры не соответствуют ожидаемым.
 
@@ -205,47 +205,240 @@ az vm run-command invoke -g imbc-dev-rg -n imbc-dev --command-id RunShellScript 
 
 ## Переход на спецификацию v1.3
 
-Спецификация v1.3 (раздел 3.1, UPD-06) переименовала роль и тип организации `spectator` в `observer` и статус актуальности профиля `inactive` в `unresponsive`; профиль unresponsive остаётся видимым и сортируется ниже (UPD-04). Демо-наблюдатель `spectator@spectator.local` стал `observer@observer.local`. Переход идёт по правилу expand → перенос данных → contract (NFR-06): этот релиз добавляет новые значения и переносит данные, прежние значения удаляет следующий релиз contract (миграция `0006`, состав — `docs/handoff/2026-11-11-context.md`, §8). На dev-стенде переход выполнен 12.11.2026 первым выкатом ветки `feat/spec-v1.3-contracts` (`851660b`): в журнале `migrate` — строка формата «Перенос v1.3: organizations N, user_accounts N, manufacturer_profiles N, catalog_visible N» с organizations 1, user_accounts 1, manufacturer_profiles 0, catalog_visible 0.
+Спецификация v1.3 (раздел 3.1, UPD-06) переименовала роль и тип организации `spectator` в `observer` и статус актуальности профиля `inactive` в `unresponsive`; профиль unresponsive остаётся видимым и сортируется ниже (UPD-04). Демо-наблюдатель `spectator@spectator.local` стал `observer@observer.local`. Переход шёл по правилу expand → перенос данных → contract (NFR-06) и завершается релизом contract — миграцией `0006_spec_v13_contract` этапа 1.
+
+- **Expand и перенос данных** выполнены на dev-стенде 12.11.2026 первым выкатом ветки `feat/spec-v1.3-contracts` (`851660b`): миграция `0003_spec_v13_expand` добавила новые значения, прежние остались в типах; перенос `backfillSpecV13()` после миграций заменил данные, а seed и `sync-realm.py` переименовали демо-наблюдателя на месте (id, пароль и пара в `DEV_FIXED_OTP_ACCOUNTS` сохранились). В журнале `migrate` была строка «Перенос v1.3: organizations 1, user_accounts 1, manufacturer_profiles 0, catalog_visible 0». Стенд работает на ветке `demo/prototype-cabinets` (`8c748ea`), миграции `0000`–`0005` применены.
+- **Contract** (`0006`): из типов `role`, `organization_type` и `update_status` удаляются `spectator` и `inactive`, удаляются пустые таблицы каркаса `external_checks`, `nda_versions`, `nda_acceptances` и тип `check_status`. Вместе с ним из кода удалены перенос данных (`backfill.ts`), псевдоним роли `spectator` в `DEV_FIXED_OTP_ACCOUNTS` и переименование демо-наблюдателя в seed и `sync-realm.py`. Состояние аккаунта `inactive` (тип `account_state`, AUTH-07) не меняется: это другое понятие.
+
+### Релиз contract (0006)
+
+Миграция сначала проверяет данные: если в `organizations.type` или `user_accounts.role` осталось `spectator`, в `manufacturer_profiles.update_status` или `catalog_visible.update_status` — `inactive`, или в одной из таблиц каркаса есть строка, она останавливается с ошибкой `spec v1.3 contract: …` до любой правки. Миграции выката мигратор применяет одной транзакцией, поэтому база остаётся в прежнем состоянии, `migrate` завершается ошибкой, а новые `api` и `worker` не стартуют (`service_completed_successfully`). Прямой выкат на базу версии до v1.3 так и остановится: переноса данных в этой версии больше нет — сначала нужен выкат любой версии v1.3 до contract (например, `8c748ea`).
+
+**Что выкатывается на стенд.** Стенд работает на ветке стенда `demo/prototype-cabinets` (`8c748ea`): в её дереве есть прототип кабинетов (`apps/api/src/modules/prototype/*`, `apps/api/src/database/prototype-store.ts`, `packages/contracts/src/prototype.ts`, `apps/web/src/prototype/**`). Ручной выкат загружает дерево через `rsync` без `--delete` (`sync_tree` в `infrastructure/azure/vm-deploy.sh`), поэтому файлы прототипа на VM остаются, даже если в загружаемом дереве их нет. Дерево без прототипа на сборке образа остановится: `prototype.controller.ts` импортирует `prototypeWriteSchema`, а `@imbc/contracts` этой ветки его не экспортирует. Поэтому этот релиз выкатывается на стенд **из ветки стенда `demo/prototype-cabinets`, в которую влита ветка этапа**: прототип остаётся в дереве, сборка проходит. `apps/api/src/database/migrate.ts` при слиянии конфликтует: в ветке стенда он вызывает `backfillSpecV13` и сам выдаёт права, в ветке этапа перенос удалён, а права выдаёт `applyAppRoleGrants`. После слияния в нём должно быть: миграции Drizzle → при `PROTOTYPE_CABINETS=true` `createPrototypeTable(pool)` (таблица прототипа создаётся **до** выдачи прав, чтобы `GRANT` её захватил) → `applyAppRoleGrants(pool, appRole)` из `./app-role.js` (выдаёт права и отзывает UPDATE/DELETE на `audit_entries` и `nda_acceptance`); импорта `./backfill.js` и вызова `backfillSpecV13` нет — файл удалён. До выката в чистом checkout слитой ветки стенда должны пройти `pnpm install --frozen-lockfile && pnpm typecheck && pnpm build`: оставшийся на VM старый `backfill.ts` (ручной выкат его не удаляет) иначе спрятал бы забытый импорт — сборка на VM прошла бы, а локальная бы упала. Общее правило для любого выката дерева, в котором нет части файлов, лежащих на VM: до `redeploy` удалить на VM файлы, которых нет в выкатываемом коммите (см. «[Файлы, которых нет в выкатываемом коммите](#файлы-которых-нет-в-выкатываемом-коммите)»).
+
+**До выката** — в `/home/imbc/imbc-platform` на VM (`./infrastructure/azure/deploy.sh ssh`). Команды можно вставлять блоком: у каждой `docker compose exec -T` без входного файла стоит `</dev/null`, иначе она прочитала бы следующие строки вставленного текста. Успех команд, которые создают или меняют что-то, виден по строке `…-ok` после `&&`; если её нет, дальше не идти.
+
+1. Строк со старыми значениями и строк в таблицах каркаса нет — все семь чисел `0`:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -v ON_ERROR_STOP=1 -c "
+     select 'organizations' as t, count(*) from organizations where type::text = 'spectator'
+     union all select 'user_accounts', count(*) from user_accounts where role::text = 'spectator'
+     union all select 'manufacturer_profiles', count(*) from manufacturer_profiles where update_status::text = 'inactive'
+     union all select 'catalog_visible', count(*) from catalog_visible where update_status::text = 'inactive'
+     union all select 'external_checks', count(*) from external_checks
+     union all select 'nda_versions', count(*) from nda_versions
+     union all select 'nda_acceptances', count(*) from nda_acceptances;" </dev/null
+   ```
+
+   Если в первых четырёх строках не `0` — данные не перенесены: выкатите версию v1.3 до contract и повторите проверку. Если не `0` в таблицах каркаса — выкат остановить и разобраться: ни одна версия приложения эти таблицы не заполняет.
+
+   Вторая проверка — данные не нарушают уникальные индексы `0007_accounts_registration` того же выката: организация IMBC одна (`organizations_imbc_uq`), у организаций, кроме производителей, нет двух одного типа с одинаковым названием без учёта регистра (`organizations_name_uq`), у организации нет двух аккаунтов роли manufacturer (`user_accounts_manufacturer_org_uq`). На стенде есть строки, внесённые руками (личный аккаунт администратора владельца, остатки сценариев регистрации — [проверка 10.11.2026](verification-2026-11-10.md)). Типы до `0006` ещё прежние, поэтому сравнение — через `::text`:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -v ON_ERROR_STOP=1 -c "
+     select 'imbc_orgs' as t, count(*) from organizations where type::text = 'imbc'
+     union all select 'dup_name_non_manufacturer', count(*) from (select 1 from organizations where type::text <> 'manufacturer' group by type::text, lower(name) having count(*) > 1) d
+     union all select 'dup_manufacturer_acc', count(*) from (select 1 from user_accounts where role::text = 'manufacturer' group by organization_id having count(*) > 1) d;" </dev/null
+   ```
+
+   Ожидается: `imbc_orgs` — `1` (`0` на пустой базе: тогда организацию IMBC создаст `0008`), `dup_name_non_manufacturer` и `dup_manufacturer_acc` — `0`. При любом другом результате выкат не начинать: лишние строки разобрать с владельцем; ограничения не ослаблять. Иначе выкат упадёт так: `migrate` завершится ошибкой `23505` (`duplicate key value violates unique constraint …` с именем индекса), вся пачка `0006`–`0008` откатится, новые `api` и `worker` не стартуют, а прежние `api` и `worker` продолжат работать.
+
+2. Демо-наблюдателя под прежним адресом нет ни в базе, ни в Keycloak. Проверка в базе — ожидается `0`:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -At -v ON_ERROR_STOP=1 -c "
+     select count(*) from user_accounts where lower(email) = 'spectator@spectator.local';" </dev/null
+   ```
+
+   Проверка в Keycloak: консоль `/kc/admin/` (с IP из `ADMIN_ALLOWED_IPS`, вход — `KEYCLOAK_ADMIN_USER` из серверной `.env`), realm `imbc`, Users, поиск `spectator@spectator.local` — пользователя нет. Почему это важно: адрес переименовывал удалённый теперь код seed и `sync-realm.py`. Если переименование не состоялось, после `0006` seed создаст второй аккаунт `observer@observer.local` в состоянии `invited`, а прежний аккаунт и пользователь Keycloak останутся под старым адресом. Если адрес найден, переименуйте его до выката так же, как это делал удалённый код. В базе:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -v ON_ERROR_STOP=1 -c "
+     UPDATE user_accounts SET email = 'observer@observer.local'
+     WHERE lower(email) = 'spectator@spectator.local'
+       AND NOT EXISTS (SELECT 1 FROM user_accounts WHERE lower(email) = 'observer@observer.local');" </dev/null
+   ```
+
+   В Keycloak у этого пользователя заменить email на `observer@observer.local` (username меняется вместе с ним: `registrationEmailAsUsername`; проверьте оба поля, id и пароль не меняются). Если `UPDATE` изменил 0 строк, потому что `observer@observer.local` уже есть, выкат остановить: два аккаунта нужно разобрать вручную (см. «Если второй аккаунт всё же появился»).
+
+3. В серверной `.env` нет прежнего имени роли. Команда печатает только число строк, не содержимое файла:
+
+   ```bash
+   sudo grep -c spectator .env
+   ```
+
+   Ожидается `0`. Иначе откройте `.env` в редакторе (не выводя его в терминал) и замените в `DEV_FIXED_OTP_ACCOUNTS` роль `spectator` на `observer` в той записи кавычек, что используется в файле (`"role":"spectator"` или `\"role\":\"spectator\"`); UUID не менять. Без псевдонима `api` и `worker` с прежним именем роли не стартуют: в журнале `api` — ошибка конфигурации `DEV_FIXED_OTP_ACCOUNTS.N.role`. Если это всё же случилось при выкате, `migrate` уже применил `0006`: исправьте `.env` и повторите `redeploy` — ничего не потеряно.
+
+4. Резервная копия базы — единственный способ вернуться после `0006` на версию до v1.3 (см. «Откат»). `umask 077` делает файл доступным только пользователю `imbc`; `&& echo dump-ok` печатается, только если `pg_dump` завершился успешно — без `dump-ok` дальше не идти. Проверьте, что на диске хватит места на копию и на пробную базу (`df -h /`):
+
+   ```bash
+   umask 077
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres pg_dump -U imbc -d imbc -Fc </dev/null > /home/imbc/backup-before-0006.dump && echo dump-ok
+   ls -lh /home/imbc/backup-before-0006.dump
+   ```
+
+   Файл хранится на VM вне каталога приложения и Git; удалить его можно, когда откат на версию до v1.3 больше не нужен.
+
+5. Копия проверяется полным пробным восстановлением в отдельную базу того же сервера. Оглавление (`pg_restore --list`) копию не проверяет: при `-Fc` в поток оно пишется до данных, и копия, оборванная посреди данных, его проходит. Пробное восстановление — это и репетиция отката:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres createdb -U imbc -O imbc imbc_restore_check </dev/null && echo createdb-ok
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres pg_restore -U imbc -d imbc_restore_check --exit-on-error --single-transaction < /home/imbc/backup-before-0006.dump && echo restore-ok
+   for db in imbc imbc_restore_check; do
+     printf '%s: ' "$db"
+     sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d "$db" -At -v ON_ERROR_STOP=1 -c "
+       select (select count(*) from user_accounts) || ' user_accounts, ' || (select count(*) from manufacturer_profiles) || ' manufacturer_profiles';" </dev/null
+   done
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres dropdb -U imbc imbc_restore_check </dev/null && echo dropdb-ok
+   ```
+
+   Ожидается `createdb-ok`, `restore-ok`, две одинаковые строки чисел и `dropdb-ok`. Запишите эти два числа: по ним проверяется восстановление при откате. Если числа разошлись, а между копией и проверкой на стенде регистрировались или создавались профили, повторите шаги 4 и 5. Если `restore-ok` нет, копия негодна: снимите её заново и не выкатывайте, пока пробное восстановление не пройдёт. `dropdb` здесь удаляет только пробную базу `imbc_restore_check`.
+
+6. Аккаунтов в состоянии `inactive` нет — ожидается `0`. Колонки `inactive_since` до выката ещё нет (её добавляет `0007`), а вернуть аккаунт `inactive` без этой отметки новым паролем нельзя (AUTH-07: возврат — пароль, заданный не раньше `inactive_since`); ни одна прежняя версия такие аккаунты не создавала:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -At -v ON_ERROR_STOP=1 -c "
+     select count(*) from user_accounts where state = 'inactive';" </dev/null
+   ```
+
+   Если не `0` — выкат остановить и разобрать эти аккаунты с владельцем.
 
 ### Что делает выкат
 
 Шаги одинаковы для `./infrastructure/azure/deploy.sh redeploy` и для [конвейера](#конвейер-развёртывания): оба запускают на VM `infrastructure/azure/vm-deploy.sh`. Отдельной команды для перехода нет.
 
-1. **Compose** (`up -d --build --wait`, шаг `compose-up`). Одноразовый сервис `migrate` выполняет `node dist/database/migrate.js`:
-   - миграция `0003_spec_v13_expand` добавляет `observer` в типы `role` и `organization_type` и `unresponsive` в тип `update_status`; прежние значения остаются, поэтому прежняя версия приложения продолжает работать с базой;
-   - миграция `0004_catalog_tier` добавляет в `catalog_visible` вычисляемую колонку `tier` (IMBC-19, IMBC-20);
-   - после фиксации миграций — перенос данных `backfillSpecV13()` (`apps/api/src/database/backfill.ts`): `spectator → observer` в `organizations.type` и `user_accounts.role`, `inactive → unresponsive` в `manufacturer_profiles.update_status` и `catalog_visible.update_status`. Число изменённых строк печатается строкой «Перенос v1.3: …». Повторный запуск ничего не меняет.
-2. Затем, при `SEED_DEMO=true`, `seed.js` переименовывает демо-аккаунт в `user_accounts`: `spectator@spectator.local` → `observer@observer.local`. Идентификатор аккаунта, `idp_subject`, принятая ответственность, доверенные устройства и пара в `DEV_FIXED_OTP_ACCOUNTS` сохраняются. Если новый адрес уже занят, оба аккаунта остаются как были.
+1. **Compose** (`up -d --build --wait`, шаг `compose-up`). Одноразовый сервис `migrate` выполняет `node dist/database/migrate.js`: применяет миграции, которых нет в базе, — на стенде с `0000`–`0005` это `0006_spec_v13_contract` и следующие миграции выката. Переноса данных больше нет: строка «Перенос v1.3: …» не печатается, в конце — «Миграции применены».
+2. Затем, при `SEED_DEMO=true`, `seed.js` создаёт недостающие демо-данные; демо-наблюдатель — `observer@observer.local`, прежний адрес seed больше не переименовывает.
 3. `api` и `worker` новой версии стартуют только после успешного `migrate` (`service_completed_successfully`).
-4. Шаг `realm-sync`: `sync-realm.py --theme imbc` переименовывает пользователя Keycloak `spectator@spectator.local` → `observer@observer.local` (username и email; id и пароль сохраняются). Если новый адрес уже занят другим пользователем, скрипт печатает `Legacy demo user kept: target already exists` и ничего не меняет.
+4. Шаг `realm-sync`: `sync-realm.py --theme imbc` обновляет только настройки realm и клиента BFF; пользователей Keycloak он не переименовывает.
 5. Готовность HTTPS/API и отказ закрытых маршрутов, как при любом выкате.
 
-**Известное ограничение.** Перенос данных идёт в `migrate`, пока прежний `api` ещё работает: до его замены запрос наблюдателя к прежней версии завершается ошибкой 500. Окно — секунды, до старта нового `api`. Повторный запуск `migrate` безопасен.
+**Блокировки.** `0006` меняет тип колонок `user_accounts`, `organizations`, `manufacturer_profiles` и `catalog_visible` и берёт на них исключительные блокировки. Они держатся, пока не зафиксируется вся пачка миграций выката (`0006`–`0008`). Всё это время запросы прежнего `api`, который ещё работает, к этим таблицам ждут. Возможна взаимоблокировка с транзакцией прежнего `api`: PostgreSQL прервёт одну из них. Если жертвой окажется `migrate`, пачка откатится целиком, `migrate` завершится ошибкой, новые `api` и `worker` не стартуют, а прежний `api` продолжит работать — выкат не удался безопасно, и его можно повторить. Ручной выкат не удаляет на VM файлы, удалённые из репозитория (раздел «Обновление приложения»): оставшийся `apps/api/src/database/backfill.ts` собирается, но ничем не вызывается.
 
 ### Проверка после выката
-
-Команды ниже приведены для проверки; на стенде 12.11 выполнены только проверки снаружи без входа (readiness, отказ закрытых маршрутов), SQL-запросы и вход наблюдателя не выполнялись.
 
 ```bash
 ./infrastructure/azure/deploy.sh ssh
 cd /home/imbc/imbc-platform
-sudo docker compose -f compose.yaml -f compose.azure.yaml logs migrate | grep 'Перенос v1.3'
+sudo docker compose -f compose.yaml -f compose.azure.yaml logs migrate </dev/null | grep 'Миграции применены'
 sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
-  select 'organizations' as t, count(*) from organizations where type::text = 'spectator'
-  union all select 'user_accounts', count(*) from user_accounts where role::text = 'spectator'
-  union all select 'manufacturer_profiles', count(*) from manufacturer_profiles where update_status::text = 'inactive'
-  union all select 'catalog_visible', count(*) from catalog_visible where update_status::text = 'inactive';"
+  select enum_range(null::role) as role, enum_range(null::organization_type) as organization_type,
+         enum_range(null::update_status) as update_status, to_regclass('external_checks') as external_checks,
+         to_regclass('nda_versions') as nda_versions, to_regclass('nda_acceptances') as nda_acceptances,
+         to_regtype('check_status') as check_status;" </dev/null
 sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
-  select email, role from user_accounts where lower(email) in ('spectator@spectator.local', 'observer@observer.local');"
+  select email, role from user_accounts where lower(email) in ('spectator@spectator.local', 'observer@observer.local');" </dev/null
 ```
 
-Ожидается: во всех четырёх строках первого запроса `0`; второй запрос возвращает одну строку `observer@observer.local | observer`.
+Ожидается: в `role` — `{manufacturer,expert,administrator,director,operator,observer}`, в `organization_type` — `{manufacturer,operator,observer,imbc}`, в `update_status` — `{active,outdated,unresponsive}`, четыре последние колонки пусты; третий запрос возвращает одну строку `observer@observer.local | observer`.
 
-Ожидаемый вход: `observer@observer.local` с прежним паролем демо-аккаунтов (`KEYCLOAK_DEV_USER_PASSWORD`) и кодом `000000` открывает `/dashboard`; страница компании не показывает focal point. Вход `spectator@spectator.local` после выката больше не работает: пользователь Keycloak переименован.
+Неактивность (AUTH-07): аккаунт `inactive` без `inactive_since` никогда не вернётся новым паролем — код таких не создаёт, ожидается `0`:
+
+```bash
+sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -At -v ON_ERROR_STOP=1 -c "
+  select count(*) from user_accounts where state = 'inactive' and inactive_since is null;" </dev/null
+```
+
+Первые переходы в `inactive` на стенде случатся не раньше 09.02.2027: аккаунты не старше 09.11.2026. С этого дня задание `inactivity-reset` шлёт письма сброса на настоящие адреса аккаунтов через почтовый отправитель стенда (адреса `.local` остаются в Mailpit).
+
+Ожидаемый вход: `observer@observer.local` с прежним паролем демо-аккаунтов (`KEYCLOAK_DEV_USER_PASSWORD`) и кодом `000000` открывает `/dashboard`; страница компании не показывает focal point.
+
+### Файлы, которых нет в выкатываемом коммите
+
+`deploy.sh redeploy` дополняет каталог приложения и ничего в нём не удаляет. Сборка образа (`tsc` по всему `src`) подхватывает файлы, оставшиеся от прежних выкатов. Поэтому перед выкатом дерева, в котором части файлов VM нет (откат, выкат другой ветки), эти файлы удаляют на VM. Удаляются файлы, добавленные после целевого коммита, — по всем коммитам, которые выкатывались на VM. Защищённых файлов (`.env*`, relay-секрет) в списке быть не может: Git их не отслеживает.
+
+Развёрнутые коммиты записывает `vm-deploy.sh`: `.deployed-source-commit` (последний успешный `deploy.sh redeploy`), `.deployed-revision` (конвейер), `.synced-revision` (что синхронизировано на диск, `<sha> pipeline|local`) в `/home/imbc/imbc-platform`, а также имена журналов `/var/log/imbc-deploy/deploy-<время>-<режим>-<sha12>-<pid>.log` (последние 20). Список строится локально, в чистом checkout репозитория с актуальными ветками (`git fetch`), из корня:
+
+```bash
+TARGET=   # целевой коммит, например TARGET=d6ea422
+: "${TARGET:?задайте целевой коммит}"
+ssh -i ~/.ssh/imbc-dev-azure imbc@20.215.209.224 'cd /home/imbc/imbc-platform && cat .deployed-source-commit .deployed-revision .synced-revision 2>/dev/null; sudo ls /var/log/imbc-deploy/' </dev/null \
+  | sed -nE 's/^([0-9a-f]{7,40})( .*)?$/\1/p; s/^deploy-[0-9TZ]+-[a-z]+-([0-9a-f]{7,40})-[0-9]+\.log$/\1/p' | sort -u > /tmp/imbc-revs.txt
+cat /tmp/imbc-revs.txt
+while read -r rev; do
+  git rev-parse -q --verify "$rev^{commit}" >/dev/null || { echo "нет в локальном репозитории: $rev" >&2; continue; }
+  git diff --name-only --no-renames --diff-filter=A "$TARGET" "$rev"
+done < /tmp/imbc-revs.txt | sort -u > /tmp/imbc-added.txt
+wc -l < /tmp/imbc-added.txt
+```
+
+Строка «нет в локальном репозитории» означает, что коммит не получен (`git fetch` нужной ветки). На стенде к этому списку должны попасть `8c748ea` и выкатываемый сейчас коммит ветки стенда. Просмотрите `/tmp/imbc-added.txt` и удалите эти файлы на VM:
+
+```bash
+ssh -i ~/.ssh/imbc-dev-azure imbc@20.215.209.224 'cd /home/imbc/imbc-platform && sudo xargs -d "\n" rm -f -- && echo rm-ok' < /tmp/imbc-added.txt
+```
+
+Если журналы старше последних 20 выкатов уже удалены, а целевой коммит содержит режим `preview`, сверьте результат: `./infrastructure/azure/deploy.sh preview <целевой коммит>` (коммит должен быть отправлен в GitHub) сравнивает дерево VM с целевым и печатает в строках `*deleting` всё, что осталось лишним, с теми же правилами защиты.
 
 ### Откат
 
-Откат между коммитами v1.3 — как обычно (раздел «Откат» конвейера). Откат на версию до v1.3 (последний такой коммит этой ветки — `d6ea422`; его код в `apps`, `packages`, `infrastructure` и `compose.yaml` совпадает с концом ветки `azure-dev-deployment`, `71a2df5`) делается только вручную: эти коммиты старше конвейера. Схема не откатывается: прежние значения `spectator` и `inactive` остаются в типах до релиза contract, поэтому прежняя версия работает с этой базой, если вернуть ей данные и адрес демо-наблюдателя. Откат на стенде не выполнялся; порядок ниже выведен из кода.
+GitHub Actions на аккаунте владельца заблокирован (раздел «Конвейер развёртывания»), поэтому любой откат делается вручную: чистый checkout целевого коммита (`git switch --detach <коммит>`, `git status --short` пуст) → удаление лишних файлов на VM («[Файлы, которых нет в выкатываемом коммите](#файлы-которых-нет-в-выкатываемом-коммите)», `TARGET` — целевой коммит) → `./infrastructure/azure/deploy.sh redeploy` из этого checkout → последняя строка `IMBC_DEPLOY_RESULT=ok`.
+
+**После `0006` — на версию v1.3 до contract** (любой коммит, начиная с `851660b`; на стенде — `8c748ea` ветки `demo/prototype-cabinets`). Схема назад не откатывается и не нужна: код этих версий не пишет удалённых значений, его `backfillSpecV13()` сравнивает текст (`type::text = 'spectator'`) и на базе после `0006` ничего не меняет, Drizzle не применяет миграций старше последней применённой, а удалённые таблицы каркаса этот код не читает. Порядок — ручной, описанный выше; серверную `.env` менять не нужно, эти версии принимают роль `observer`. `migrate` прежней версии снова выдаёт роли приложения UPDATE и DELETE на `nda_acceptance` (его список прав не знает об отзыве для этой таблицы); следующий выкат этого релиза снимает их снова.
+
+**После `0006` — на версию до v1.3** (`d6ea422`). Только восстановлением резервной копии `/home/imbc/backup-before-0006.dump` (шаги 4–5 «До выката»): типам базы нужны прежние значения, а `0006` их удалила. Всё, что записано после копии, теряется. Копия восстанавливается в новую базу; живая база `imbc` не удаляется, пока замена не проверена и прежняя версия не выкачена. Команды — в `/home/imbc/imbc-platform` на VM; база Keycloak `keycloak` и роли кластера не затрагиваются.
+
+1. Остановить новую версию:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml stop api worker </dev/null && echo stop-ok
+   ```
+
+2. Восстановить копию в новую базу `imbc_restore` и проверить её: те же два числа, что записаны при пробном восстановлении (шаг 5 «До выката»), и прежние значения в типе `role` (`spectator` есть — это копия до `0006`):
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres createdb -U imbc -O imbc imbc_restore </dev/null && echo createdb-ok
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres pg_restore -U imbc -d imbc_restore --exit-on-error --single-transaction < /home/imbc/backup-before-0006.dump && echo restore-ok
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc_restore -At -v ON_ERROR_STOP=1 -c "
+     select (select count(*) from user_accounts) || ' user_accounts, ' || (select count(*) from manufacturer_profiles)
+       || ' manufacturer_profiles, role ' || enum_range(null::role)::text;" </dev/null
+   ```
+
+3. Выдать роли приложения `imbc_app` то, что ей выдают `infrastructure/postgres/init.sql` и `migrate.ts`. Права на уровне базы копия `-Fc` не содержит; права на схемы и таблицы в копии есть, но выдаются повторно, чтобы не зависеть от этого:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc_restore -v ON_ERROR_STOP=1 \
+     -c 'GRANT CONNECT, CREATE ON DATABASE imbc_restore TO imbc_app' \
+     -c 'GRANT USAGE ON SCHEMA public TO imbc_app' \
+     -c 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO imbc_app' \
+     -c 'REVOKE UPDATE, DELETE, TRUNCATE ON audit_entries FROM imbc_app' </dev/null && echo grants-ok
+   ```
+
+   Права на базу переходят вместе с ней при переименовании.
+
+4. Убедиться, что к `imbc` никто не подключён (ожидается `0`), и поменять базы местами. Переименование выполняется из служебной базы `postgres`:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d postgres -At -v ON_ERROR_STOP=1 -c "
+     select count(*) from pg_stat_activity where datname = 'imbc';" </dev/null
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d postgres -v ON_ERROR_STOP=1 \
+     -c 'ALTER DATABASE imbc RENAME TO imbc_after_0006' \
+     -c 'ALTER DATABASE imbc_restore RENAME TO imbc' </dev/null && echo swap-ok
+   ```
+
+   Если подключения есть, посмотрите, чьи они (`select pid, usename, application_name, state from pg_stat_activity where datname = 'imbc'`), и остановите их источник. Если первое переименование прошло, а второе нет, `swap-ok` не печатается: верните базу командой `ALTER DATABASE imbc_after_0006 RENAME TO imbc` и разберитесь. После `swap-ok` новую версию не запускать: её `migrate` применил бы `0006` к восстановленной базе снова.
+
+5. Сверить Keycloak с восстановленной базой. База Keycloak `keycloak` при восстановлении копии не откатывается: пользователи, созданные или изменённые после времени копии (регистрации, приглашения, смена почты-логина администратором), остаются в Keycloak без строк в базе платформы или с другим адресом. Повторная регистрация или приглашение с тем же адресом получат отказ «адрес занят», а почта-логин, сменённая после копии, не совпадёт со строкой `user_accounts`. Консоль `/kc/admin/` (IP из `ADMIN_ALLOWED_IPS`), realm `imbc`, Users: просмотрите пользователей, созданных или изменённых после времени копии (время файла — `ls -l --time-style=full-iso /home/imbc/backup-before-0006.dump`), и сравните с восстановленной базой:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -At -v ON_ERROR_STOP=1 \
+     -c 'select email, idp_subject from user_accounts order by email' </dev/null
+   ```
+
+   Пользователя без строки в базе удалите; у пользователя с другой почтой верните адрес из базы (email и username — `registrationEmailAsUsername`). На dev-стенде допустимо принять это расхождение без правки — тогда запишите в отчёт выката, какие адреса заняты только в Keycloak.
+
+6. Дальше — шаги 2–6 подраздела ниже (шаг 1 уже выполнен): база в состоянии до `0006`, данные — v1.3, прежние значения снова есть в типах. Лишние файлы (шаг 5) считаются для `TARGET=d6ea422`.
+
+7. Только после того, как прежняя версия выкачена и проверена (вход, данные), удалить базу после `0006`. До этого она — полная копия данных на момент отката, и обратный путь — остановить `api` и `worker` и переименовать базы обратно:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres dropdb -U imbc imbc_after_0006 </dev/null && echo dropdb-ok
+   ```
+
+#### Откат на версию до v1.3 — только до выката 0006
+
+Откат на версию до v1.3 (последний такой коммит этой ветки — `d6ea422`; его код в `apps`, `packages`, `infrastructure` и `compose.yaml` совпадает с концом ветки `azure-dev-deployment`, `71a2df5`) делается только вручную: эти коммиты старше конвейера. Схема не откатывается: до `0006` прежние значения `spectator` и `inactive` остаются в типах, поэтому прежняя версия работает с этой базой, если вернуть ей данные и адрес демо-наблюдателя. Откат на стенде не выполнялся; порядок ниже выведен из кода.
 
 Почему порядок именно такой:
 
@@ -257,31 +450,25 @@ sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql 
 
 Шаги:
 
-1. Остановить новую версию: `sudo docker compose -f compose.yaml -f compose.azure.yaml stop api worker` в `/home/imbc/imbc-platform`.
+1. Остановить новую версию: `sudo docker compose -f compose.yaml -f compose.azure.yaml stop api worker </dev/null` в `/home/imbc/imbc-platform`.
 2. Вернуть данные одной транзакцией. Значения и колонки — как в схеме `d6ea422` (`organizations.type`, `user_accounts.role`, `manufacturer_profiles.update_status`, `catalog_visible.update_status`); в типах базы есть и прежние, и новые значения:
 
-   ```sql
-   BEGIN;
-   UPDATE user_accounts SET email = 'spectator@spectator.local'
-     WHERE lower(email) = 'observer@observer.local'
-       AND NOT EXISTS (SELECT 1 FROM user_accounts WHERE lower(email) = 'spectator@spectator.local');
-   UPDATE organizations SET type = 'spectator' WHERE type::text = 'observer';
-   UPDATE user_accounts SET role = 'spectator' WHERE role::text = 'observer';
-   UPDATE manufacturer_profiles SET update_status = 'inactive' WHERE update_status::text = 'unresponsive';
-   UPDATE catalog_visible SET update_status = 'inactive' WHERE update_status::text = 'unresponsive';
-   COMMIT;
-   ```
-
-   Выполнить через `sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -v ON_ERROR_STOP=1`. Первый `UPDATE` должен изменить одну строку; если он изменил 0 строк, а аккаунт `spectator@spectator.local` уже есть, см. «Если второй аккаунт всё же появился».
-3. Переименовать пользователя Keycloak обратно: консоль `/kc/admin/` (IP из `ADMIN_ALLOWED_IPS`), realm `imbc`, Users, `observer@observer.local`. Email заменить на `spectator@spectator.local`. В realm включено `registrationEmailAsUsername`, поэтому username должен смениться вместе с email; после сохранения проверьте оба поля. Это обратный вызов к тому, что делает новый `sync-realm.py`: `kcadm.sh update users/<id> -s username=… -s email=…`. id и пароль пользователя не меняются.
-4. Серверная `.env`: если пара демо-наблюдателя в `DEV_FIXED_OTP_ACCOUNTS` уже переписана на `"role":"observer"`, вернуть `"role":"spectator"`. Прежняя версия не знает роли `observer`, и `api` с такой `.env` не запустится. UUID в паре менять не нужно.
-5. Удалить на VM файлы, добавленные после целевого коммита. Список готовится локально по `git`, защищённые файлы (`.env*`, relay-секрет) в нём быть не могут: Git их не отслеживает.
-
    ```bash
-   DEPLOYED=8fe0fd4   # развёрнутый коммит: /home/imbc/imbc-platform/.deployed-source-commit на VM
-   git diff --name-only --no-renames --diff-filter=A d6ea422 "$DEPLOYED" > /tmp/imbc-added.txt
-   ssh -i ~/.ssh/imbc-dev-azure imbc@20.215.209.224 'cd /home/imbc/imbc-platform && sudo xargs -d "\n" rm -f --' < /tmp/imbc-added.txt
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -v ON_ERROR_STOP=1 --single-transaction \
+     -c "UPDATE user_accounts SET email = 'spectator@spectator.local'
+           WHERE lower(email) = 'observer@observer.local'
+             AND NOT EXISTS (SELECT 1 FROM user_accounts WHERE lower(email) = 'spectator@spectator.local')" \
+     -c "UPDATE organizations SET type = 'spectator' WHERE type::text = 'observer'" \
+     -c "UPDATE user_accounts SET role = 'spectator' WHERE role::text = 'observer'" \
+     -c "UPDATE manufacturer_profiles SET update_status = 'inactive' WHERE update_status::text = 'unresponsive'" \
+     -c "UPDATE catalog_visible SET update_status = 'inactive' WHERE update_status::text = 'unresponsive'" \
+     </dev/null && echo revert-ok
    ```
+
+   `--single-transaction` объединяет все `-c` в одну транзакцию; psql печатает число строк каждого `UPDATE`, `revert-ok` — только после фиксации. Первый `UPDATE` должен изменить одну строку; если он изменил 0 строк, а аккаунт `spectator@spectator.local` уже есть, см. «Если второй аккаунт всё же появился».
+3. Переименовать пользователя Keycloak обратно: консоль `/kc/admin/` (IP из `ADMIN_ALLOWED_IPS`), realm `imbc`, Users, `observer@observer.local`. Email заменить на `spectator@spectator.local`. В realm включено `registrationEmailAsUsername`, поэтому username должен смениться вместе с email; после сохранения проверьте оба поля. Это обратный вызов к тому, что делал `sync-realm.py` версий v1.3 до contract: `kcadm.sh update users/<id> -s username=… -s email=…`. id и пароль пользователя не меняются.
+4. Серверная `.env`: если пара демо-наблюдателя в `DEV_FIXED_OTP_ACCOUNTS` уже переписана на `"role":"observer"`, вернуть `"role":"spectator"`. Прежняя версия не знает роли `observer`, и `api` с такой `.env` не запустится. UUID в паре менять не нужно.
+5. Удалить на VM файлы, добавленные после целевого коммита, — по всем коммитам, которые выкатывались на VM (на стенде — и `8c748ea` с прототипом, и откатываемая голова ветки стенда): «[Файлы, которых нет в выкатываемом коммите](#файлы-которых-нет-в-выкатываемом-коммите)» с `TARGET=d6ea422`. Развёрнутые коммиты берутся из маркеров и журналов на VM, а не из записанного в runbook SHA.
 
 6. Выкатить прежнюю версию: `./infrastructure/azure/deploy.sh redeploy` из checkout `d6ea422`. Прежний seed найдёт `spectator@spectator.local` и второго аккаунта не создаст. Строки демо-компаний в `catalog_visible` он перезапишет со статусом `active`.
 
@@ -302,7 +489,7 @@ WHERE lower(email) = 'spectator@spectator.local' AND state = 'invited'
   AND idp_subject IS NULL AND last_sign_in_at IS NULL;
 ```
 
-После релиза contract такой откат невозможен: в типах не останется прежних значений.
+После `0006` этот подраздел применяется только после восстановления копии (см. «После `0006` — на версию до v1.3» выше).
 
 ## Статус и логи на VM
 
@@ -326,6 +513,32 @@ df -h /
 ```bash
 curl --fail --show-error https://imbc-dev-e1cde8dd.polandcentral.cloudapp.azure.com/api/health/ready
 ```
+
+### Задание `identity-sync`
+
+Блокировка, разблокировка и смена почты-логина действуют в БД сразу (сеансы BFF завершены в той же транзакции); Keycloak догоняет их заданием `identity-sync` worker: включён ли пользователь, почта из БД и выход из сеансов IdP. Задание несёт только id аккаунта и всегда приводит Keycloak к текущей строке БД, поэтому повтор безопасен. Состояние очереди:
+
+```bash
+sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
+  select state, count(*) from pgboss.job where name = 'identity-sync' group by state;" </dev/null
+```
+
+`failed` — пять повторов не прошли (обычно Keycloak недоступен или клиент `imbc-admin-api` без `manage-users`). Пользователь, удалённый в Keycloak (404), задание не валит: оно завершается, в журнале worker — `identity-sync: user not found in Keycloak` с `accountId`. Решение администратора от этого не меняется: вход проверяет состояние в БД. Если в журнале API есть `Failed to enqueue identity-sync` (очередь была недоступна сразу после смены почты), задания нет вовсе — возьмите `accountId` из этой строки. В обоих случаях после восстановления поставьте задание для аккаунта заново (команда печатает только id задания):
+
+```bash
+sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T worker node --input-type=module -e "
+import { PgBoss } from 'pg-boss';
+const boss = new PgBoss({ connectionString: process.env.DATABASE_URL, schema: process.env.PGBOSS_SCHEMA ?? 'pgboss', supervise: false, schedule: false });
+await boss.start();
+console.log(await boss.send('identity-sync', { accountId: '<id>', logout: true }));
+await boss.stop();"
+```
+
+В `output` неудачного задания — операция и статус Keycloak (`Keycloak update user: 503`, `Keycloak logout user: …`) или сетевая ошибка; почты нет ни в задании, ни в тексте ошибки.
+
+Консоль аккаунта Keycloak закрыта на Caddy: `curl -s -o /dev/null -w '%{http_code}' https://<стенд>/kc/realms/imbc/account/` — `404`, а `…/kc/realms/imbc/.well-known/openid-configuration` — `200`.
+
+Почту-логин сам пользователь в Keycloak не меняет (MAN-05). Проверка после развёртывания: в журнале шага `realm-sync` — строка `User profile: …`; войдите демо-производителем и откройте `https://<стенд>/kc/realms/imbc/protocol/openid-connect/auth?client_id=imbc-bff&response_type=code&scope=openid&redirect_uri=https://<стенд>/api/auth/callback&kc_action=UPDATE_PROFILE` — на странице профиля только имя и фамилия (необязательные), поля почты нет, подставленное поле `email` игнорируется. Установка пароля по ссылке NOT-01 (регистрация или приглашение) заканчивается страницей «Всё готово» без шага «Данные учётной записи». Профиль realm: консоль `/kc/admin/` → realm `imbc` → Realm settings → User profile → у `email` и `username` «Who can edit» — только Admin, у `firstName` и `lastName` «Required field» выключено.
 
 ## Чтение Adata (IMBC-07, EXT-02)
 
@@ -533,7 +746,7 @@ DEV_FIXED_OTP_ACCOUNTS='[{"id":"<UUID expert@imbc.local>","role":"expert"},{"id"
 DEV_FIXED_OTP_USER_ID=<UUID test-admin@imbc.local>
 ```
 
-До релиза contract (см. [переход](#переход-на-спецификацию-v13)) прежняя пара `"role":"spectator"` в серверной `.env` принимается как `"role":"observer"`: UUID демо-наблюдателя при переименовании не меняется, поэтому `.env` после выката v1.3 править не нужно. Заменить `spectator` на `observer` нужно до релиза contract: после него прежнее имя роли отклоняется при старте.
+Прежнее имя роли `"role":"spectator"` с релиза contract (`0006`) отклоняется при старте: перед его выкатом пару демо-наблюдателя переписывают на `"role":"observer"`, UUID не меняется (см. [релиз contract](#релиз-contract-0006)).
 
 По умолчанию tier — `production`, флаг выключен, `DEV_FIXED_OTP_ACCOUNTS=[]`. Список содержит объекты строго с полями `id` и `role`. Неверный JSON, недопустимые UUID/роли, повтор UUID и совпадение UUID из списка с legacy-настройкой отклоняются при старте даже при выключенном флаге. Включённый флаг требует `development` и хотя бы одну запись в списке или legacy UUID. `DEV_FIXED_OTP_USER_ID` остаётся совместимым способом разрешить отдельного администратора и не даёт исключения другим ролям. `NODE_ENV=production` означает оптимизированную сборку и не заменяет явный deployment tier.
 

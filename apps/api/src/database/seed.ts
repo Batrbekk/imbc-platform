@@ -18,7 +18,18 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import * as schema from './schema/index.js';
 
-const { organizations, userAccounts, manufacturerProfiles, catalogVisible } = schema;
+const { organizations, userAccounts, manufacturerProfiles, catalogVisible, ndaVersion } = schema;
+
+/**
+ * Версия 1 NDA на стенде — явная заглушка на трёх языках (FC-02, Р-5): текст NDA предоставит IMBC,
+ * и он придёт миграцией следующей версией. Миграция заглушку не кладёт — иначе она попала бы в продакшен.
+ */
+export const NDA_PLACEHOLDER_BODY = [
+  'УАҚЫТША МӘТІН — ЗАҢДЫҚ ҚҰЖАТ ЕМЕС. Платформаның құпияны жария етпеу туралы келісімінің (NDA) мәтінін IMBC ұсынады. Бұл мәтін тек сынақ стендіне арналған, оған сүйенуге болмайды.',
+  'ВРЕМЕННЫЙ ТЕКСТ — НЕ ЮРИДИЧЕСКИЙ ДОКУМЕНТ. Текст соглашения о неразглашении (NDA) платформы предоставит IMBC. Этот текст существует только для тестового стенда, полагаться на него нельзя.',
+  'PLACEHOLDER — NOT A LEGAL TEXT. IMBC will provide the text of the platform non-disclosure agreement (NDA). This text exists only for the test environment and must not be relied on.',
+].join('\n\n');
+const NDA_PUBLISHER_EMAIL = 'admin@imbc.local';
 
 function demoBin(seed: number): string {
   for (let i = 0; i < 100; i++) {
@@ -29,15 +40,12 @@ function demoBin(seed: number): string {
   throw new Error('не удалось подобрать БИН');
 }
 
-/** Адрес демо-наблюдателя до v1.3 и после (GEN-06), в нижнем регистре. */
-const OBSERVER_EMAIL = { legacy: 'spectator@spectator.local', current: 'observer@observer.local' } as const;
-
 const PEOPLE: { email: string; role: Role; org: 'imbc' | 'operator' | 'observer' | 'manufacturer'; name: string }[] = [
   { email: 'expert@imbc.local', role: 'expert', org: 'imbc', name: 'Эксперт IMBC' },
   { email: 'admin@imbc.local', role: 'administrator', org: 'imbc', name: 'Администратор IMBC' },
   { email: 'director@imbc.local', role: 'director', org: 'imbc', name: 'Директор IMBC' },
   { email: 'operator@operator.local', role: 'operator', org: 'operator', name: 'Специалист оператора' },
-  { email: OBSERVER_EMAIL.current, role: 'observer', org: 'observer', name: 'Наблюдатель' },
+  { email: 'observer@observer.local', role: 'observer', org: 'observer', name: 'Наблюдатель' },
   { email: 'manufacturer@demo.local', role: 'manufacturer', org: 'manufacturer', name: 'Производитель (демо)' },
 ];
 
@@ -176,10 +184,16 @@ export async function seedDemo(pool: pg.Pool): Promise<void> {
       ['operator', 'Оператор (демо)', 'operator'],
       ['observer', 'Наблюдатель (демо)', 'observer'],
     ] as const) {
+      // Ключи уникальных индексов: IMBC одна (organizations_imbc_uq) — по типу, даже если её переименовали;
+      // оператор и наблюдатель — по типу и имени без учёта регистра (organizations_name_uq).
       const existing = await tx
         .select({ id: organizations.id })
         .from(organizations)
-        .where(sql`${organizations.name} = ${name}`);
+        .where(
+          type === 'imbc'
+            ? sql`${organizations.type} = 'imbc'`
+            : sql`${organizations.type} = ${type} and lower(${organizations.name}) = lower(${name})`,
+        );
       orgIds[key] =
         existing[0]?.id ??
         (
@@ -261,14 +275,6 @@ export async function seedDemo(pool: pg.Pool): Promise<void> {
       await tx.insert(catalogVisible).values(row).onConflictDoUpdate({ target: catalogVisible.profileId, set: row });
     }
 
-    // Прежний адрес демо-наблюдателя (до v1.3, GEN-06) меняется на месте: id аккаунта не меняется,
-    // поэтому пара в DEV_FIXED_OTP_ACCOUNTS, idp_subject, принятая ответственность и доверенные
-    // устройства сохраняются. Если новый адрес уже занят, оба аккаунта остаются как были.
-    await tx.execute(sql`
-      UPDATE user_accounts SET email = ${OBSERVER_EMAIL.current}
-      WHERE lower(email) = ${OBSERVER_EMAIL.legacy}
-        AND NOT EXISTS (SELECT 1 FROM user_accounts WHERE lower(email) = ${OBSERVER_EMAIL.current})`);
-
     for (const p of PEOPLE) {
       await tx
         .insert(userAccounts)
@@ -281,6 +287,18 @@ export async function seedDemo(pool: pg.Pool): Promise<void> {
           locale: 'ru',
         })
         .onConflictDoNothing();
+    }
+
+    // NDA: заглушка — только в пустую таблицу; версию, которая уже есть (текст IMBC), seed не трогает.
+    const [anyVersion] = await tx.select({ id: ndaVersion.id }).from(ndaVersion).limit(1);
+    if (!anyVersion) {
+      const [publisher] = await tx
+        .select({ id: userAccounts.id })
+        .from(userAccounts)
+        .where(sql`lower(${userAccounts.email}) = ${NDA_PUBLISHER_EMAIL}`);
+      await tx
+        .insert(ndaVersion)
+        .values({ versionNumber: 1, body: NDA_PLACEHOLDER_BODY, isCurrent: true, publishedBy: publisher!.id });
     }
 
     // Очередь SME. Статус, назначение и дата регистрации задаются при каждом запуске: строки

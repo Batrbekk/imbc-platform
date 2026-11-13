@@ -1,7 +1,9 @@
 import { type AdminAccounts, adminAccountsSchema } from '@imbc/contracts';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AccountLifecycleService } from '../src/modules/admin/account-lifecycle.service.js';
 import { AccountsController } from '../src/modules/admin/accounts.controller.js';
 import { AccountsService } from '../src/modules/admin/accounts.service.js';
+import { InvitationsService } from '../src/modules/admin/invitations.service.js';
 import { type HttpStand, startHttp } from './support/http.js';
 
 // Граница HTTP списка аккаунтов: настоящий SessionGuard, право accounts.manage только у администратора (GEN-08, ADM-02).
@@ -24,6 +26,7 @@ const ACCOUNTS: AdminAccounts = {
       ],
     },
   ],
+  imbcMailbox: 'mail@imbc.local',
 };
 
 const list = vi.fn(async (): Promise<AdminAccounts> => structuredClone(ACCOUNTS));
@@ -35,7 +38,12 @@ describe('GET /api/v1/admin/accounts', () => {
   beforeAll(async () => {
     http = await startHttp({
       controllers: [AccountsController],
-      providers: [{ provide: AccountsService, useValue: { list } }],
+      providers: [
+        { provide: AccountsService, useValue: { list } },
+        // Приглашения, блокировка, роль и почта — admin.http.test.ts.
+        { provide: InvitationsService, useValue: {} },
+        { provide: AccountLifecycleService, useValue: {} },
+      ],
     });
   });
 
@@ -51,7 +59,9 @@ describe('GET /api/v1/admin/accounts', () => {
   it('администратор — 200', async () => {
     const res = await http.get(URL_PATH, 'administrator');
     expect(res.status).toBe(200);
-    expect(adminAccountsSchema.parse(await res.json())).toEqual(ACCOUNTS);
+    const body = (await res.json()) as object;
+    expect(Object.keys(body)).toEqual(['organizations', 'imbcMailbox']);
+    expect(adminAccountsSchema.parse(body)).toEqual(ACCOUNTS);
     expect(list).toHaveBeenCalledOnce();
   });
 

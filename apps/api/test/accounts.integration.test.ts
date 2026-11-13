@@ -38,16 +38,18 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('организации и ак�
     await pool?.end();
   });
 
-  it('15 организаций, 6 аккаунтов, last sign-in null у невошедших (ADM-02)', async () => {
+  it('18 организаций, 6 аккаунтов, last sign-in null у невошедших (ADM-02)', async () => {
     const { organizations } = await accounts.list();
-    // Числа — из того, что записал seed: 15 организаций и 6 аккаунтов после задачи 3.
+    // 15 организаций seed и NCOC, TCO, KPO из 0008 (GEN-05); IMBC из 0008 seed находит по типу.
+    expect(organizations).toHaveLength(18);
     expect(organizations).toHaveLength(await count('organizations'));
     const all = organizations.flatMap((o) => o.accounts);
+    expect(all).toHaveLength(6);
     expect(all).toHaveLength(await count('user_accounts'));
 
     for (const account of all)
       expect(account.lastSignInAt, account.email).toBe(account.email === SIGNED_IN ? SIGNED_IN_AT : null);
-    // Организации без аккаунтов (производители каталога и очереди) тоже в списке.
+    // Организации без аккаунтов (производители каталога и очереди, операторы из 0008) тоже в списке.
     const withoutAccounts = organizations.filter((o) => o.accounts.length === 0);
     expect(withoutAccounts.length).toBe(
       Number(
@@ -58,7 +60,12 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('организации и ак�
         ).rows[0]!.n,
       ),
     );
-    expect(withoutAccounts.every((o) => o.type === 'manufacturer')).toBe(true);
+    expect(
+      withoutAccounts
+        .filter((o) => o.type !== 'manufacturer')
+        .map((o) => o.name)
+        .sort(),
+    ).toEqual(['KPO', 'NCOC', 'TCO']);
   });
 
   it('порядок: по типу imbc, operator, observer, manufacturer, затем по имени; аккаунты — по email', async () => {
@@ -84,13 +91,18 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('организации и ак�
     expect(imbc.name).toBe('IMBC');
     expect(imbc.accounts.map((a) => a.email)).toEqual(['admin@imbc.local', 'director@imbc.local', 'expert@imbc.local']);
     expect(imbc.accounts.map((a) => a.role)).toEqual(['administrator', 'director', 'expert']);
-    expect(organizations.find((o) => o.type === 'operator')!.isMajorOperator).toBe(true);
+    // Операторы: демо-оператор seed и NCOC, TCO, KPO из 0008 — все major (GEN-05).
+    const operators = organizations.filter((o) => o.type === 'operator');
+    expect(operators.map((o) => o.name).sort()).toEqual(['KPO', 'NCOC', 'TCO', 'Оператор (демо)'].sort());
+    expect(operators.every((o) => o.isMajorOperator)).toBe(true);
   });
 
   it('в ответе нет ключей профиля: status, bin, updateStatus, tier, completenessPct (ADM-06)', async () => {
     const result = await accounts.list();
     expect(() => adminAccountsSchema.strict().parse(result)).not.toThrow();
-    expect(Object.keys(result)).toEqual(['organizations']);
+    expect(Object.keys(result)).toEqual(['organizations', 'imbcMailbox']);
+    // Ящик IMBC seed не задаёт (раздел 8.2).
+    expect(result.imbcMailbox).toBeNull();
 
     const profileKeys = ['status', 'bin', 'updateStatus', 'tier', 'completenessPct'];
     for (const organization of result.organizations) {

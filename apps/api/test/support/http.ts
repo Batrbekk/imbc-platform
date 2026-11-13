@@ -14,6 +14,7 @@ import { SessionService } from '../../src/modules/auth/session.service.js';
 import { ORGANIZATION_TYPE } from './organization-type.js';
 
 const COOKIE = 'imbc-session';
+const ORIGIN = 'https://imbc.example.kz';
 
 export interface HttpStand {
   /** Адрес сервера, например http://127.0.0.1:54321; маршруты — под /api. */
@@ -22,6 +23,11 @@ export interface HttpStand {
   audit: { record: Mock };
   /** GET с cookie `imbc-session=<role>`; без роли — без сеанса. */
   get(path: string, role?: Role): Promise<Response>;
+  /**
+   * Изменяющий запрос со своего origin (`origin: https://imbc.example.kz`) и телом JSON; cookie — как у `get`.
+   * Запрос с чужим Origin тест делает сам через `fetch(\`${base}${path}\`, …)`.
+   */
+  send(method: 'POST' | 'PUT', path: string, role?: Role, body?: unknown): Promise<Response>;
   close(): Promise<void>;
 }
 
@@ -62,7 +68,7 @@ export async function startHttp(options: {
 
   const env: Record<string, unknown> = {
     SESSION_COOKIE_NAME: COOKIE,
-    PUBLIC_URL: 'https://imbc.example.kz',
+    PUBLIC_URL: ORIGIN,
     ...options.env,
   };
   class HttpStandModule {}
@@ -87,6 +93,16 @@ export async function startHttp(options: {
     base,
     audit,
     get: (path, role) => fetch(`${base}${path}`, role ? { headers: { cookie: `${COOKIE}=${role}` } } : undefined),
+    send: (method, path, role, body) =>
+      fetch(`${base}${path}`, {
+        method,
+        headers: {
+          origin: ORIGIN,
+          'content-type': 'application/json',
+          ...(role ? { cookie: `${COOKIE}=${role}` } : {}),
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      }),
     close: () => app.close(),
   };
 }

@@ -135,13 +135,14 @@ export class ProfilesService {
   }
 
   /**
-   * Профиль Draft с восемью секциями (MAN-03). Создаётся при регистрации — Draft виден
-   * только производителю и IMBC (MAN-04) — и при первом входе, если его ещё нет. Идемпотентно.
+   * Профиль Draft с восемью секциями (MAN-03). Создаётся, когда задан пароль (NOT-23): событием Keycloak
+   * или первым входом — `ManufacturerOnboardingService.onPasswordSet`. Draft виден только производителю
+   * и IMBC (MAN-04). `registeredAt` — момент установки пароля (DBML). Идемпотентно.
    */
   async ensureDraft(
     organizationId: string,
     authorId: string,
-    opts: { heardAboutUs?: string | null; outer?: Database } = {},
+    opts: { heardAboutUs?: string | null; registeredAt?: Date; outer?: Database } = {},
   ): Promise<string> {
     return (opts.outer ?? this.db).transaction(async (tx) => {
       const existing = await tx.query.manufacturerProfiles.findFirst({
@@ -151,7 +152,7 @@ export class ProfilesService {
 
       const [profile] = await tx
         .insert(manufacturerProfiles)
-        .values({ organizationId, heardAboutUs: opts.heardAboutUs ?? null })
+        .values({ organizationId, heardAboutUs: opts.heardAboutUs ?? null, registeredAt: opts.registeredAt })
         .onConflictDoNothing({ target: manufacturerProfiles.organizationId })
         .returning({ id: manufacturerProfiles.id });
       if (!profile) {

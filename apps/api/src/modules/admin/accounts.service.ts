@@ -11,7 +11,7 @@ const TYPE_ORDER = sql`case ${organizations.type} when 'imbc' then 0 when 'opera
 /**
  * Организации и аккаунты для администратора (ADM-02). Читает только organizations и user_accounts:
  * профиль производителя и проекцию каталога администратор не видит, БИН не отдаётся (ADM-06).
- * Приглашение и блокировка — этап 1.
+ * Ящик IMBC отдаётся отдельным ключом `imbcMailbox`.
  */
 @Injectable()
 export class AccountsService {
@@ -24,6 +24,7 @@ export class AccountsService {
         name: organizations.name,
         type: organizations.type,
         isMajorOperator: organizations.isMajorOperator,
+        notificationMailbox: organizations.notificationMailbox,
       })
       .from(organizations)
       .orderBy(TYPE_ORDER, asc(organizations.name), asc(organizations.id));
@@ -46,7 +47,14 @@ export class AccountsService {
       list.push({ ...account, lastSignInAt: lastSignInAt?.toISOString() ?? null });
       byOrganization.set(organizationId, list);
     }
-    const result = { organizations: orgs.map((o) => ({ ...o, accounts: byOrganization.get(o.id) ?? [] })) };
+    // Ящик IMBC — только в imbcMailbox, не в строке организации (раздел 8.2).
+    const result = {
+      organizations: orgs.map(({ notificationMailbox: _mailbox, ...o }) => ({
+        ...o,
+        accounts: byOrganization.get(o.id) ?? [],
+      })),
+      imbcMailbox: orgs.find((o) => o.type === 'imbc')?.notificationMailbox ?? null,
+    };
     return parseResponse(adminAccountsSchema, result, 'организации и аккаунты');
   }
 }

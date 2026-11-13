@@ -94,8 +94,15 @@ export class KeycloakAdminService {
     return id;
   }
 
-  /** Письмо NOT-01 со ссылкой установки пароля (AUTH-01). Один поток для регистрации и приглашения. */
-  async sendPasswordEmail(userId: string): Promise<void> {
+  /**
+   * Письмо NOT-01 со ссылкой установки пароля (AUTH-01). Один поток для регистрации и приглашения; ссылка
+   * сброса неактивному аккаунту (AUTH-07, NOT-26) — только `UPDATE_PASSWORD`: адрес уже подтверждён.
+   * Язык письма — атрибут `locale` пользователя Keycloak.
+   */
+  async sendPasswordEmail(
+    userId: string,
+    actions: ReadonlyArray<'VERIFY_EMAIL' | 'UPDATE_PASSWORD'> = ['VERIFY_EMAIL', 'UPDATE_PASSWORD'],
+  ): Promise<void> {
     const params = new URLSearchParams({
       lifespan: String(PASSWORD_LINK_LIFESPAN_S),
       client_id: this.env.OIDC_CLIENT_ID,
@@ -103,24 +110,42 @@ export class KeycloakAdminService {
     });
     const response = await this.call(`/users/${userId}/execute-actions-email?${params}`, {
       method: 'PUT',
-      body: JSON.stringify(['VERIFY_EMAIL', 'UPDATE_PASSWORD']),
+      body: JSON.stringify(actions),
     });
     if (!response.ok) throw new Error(`Keycloak execute-actions-email: ${response.status}`);
   }
 
-  /** Неактивность после трёх месяцев (AUTH-07): пароль задаётся заново. */
-  async requirePasswordReset(userId: string): Promise<void> {
-    const response = await this.call(`/users/${userId}`, {
-      method: 'PUT',
-      body: JSON.stringify({ requiredActions: ['UPDATE_PASSWORD'] }),
-    });
-    if (!response.ok) throw new Error(`Keycloak required action: ${response.status}`);
+  /**
+   * Когда задан текущий пароль (AUTH-07): наибольший `createdDate` среди учётных данных типа `password`
+   * (`GET /users/{id}/credentials`; смена пароля обновляет его). Пароля нет — null.
+   */
+  async passwordUpdatedAt(subject: string): Promise<Date | null> {
+    const response = await this.call(`/users/${subject}/credentials`);
+    if (!response.ok) throw new KeycloakRequestError(response.status, 'credentials');
+    const credentials = (await response.json()) as Array<{ type?: unknown; createdDate?: unknown }>;
+    const times = credentials
+      .filter((c) => c.type === 'password' && typeof c.createdDate === 'number' && Number.isFinite(c.createdDate))
+      .map((c) => c.createdDate as number);
+    return times.length ? new Date(Math.max(...times)) : null;
   }
 
-  /** Блокировка: отключить пользователя и завершить его сеансы в IdP (AUTH-06). */
-  async disableUser(userId: string): Promise<void> {
-    await this.call(`/users/${userId}`, { method: 'PUT', body: JSON.stringify({ enabled: false }) });
-    await this.call(`/users/${userId}/logout`, { method: 'POST' });
+  /**
+   * Частичное обновление пользователя (`PUT /users/{id}`): включён ли он, почта-логин и её подтверждение,
+   * обязательные действия. Поля вне `patch` Keycloak не меняет; при `registrationEmailAsUsername` username
+   * следует за почтой. Почта и субъект в текст ошибки не попадают.
+   */
+  async updateUser(
+    subject: string,
+    patch: { email?: string; emailVerified?: boolean; enabled?: boolean; requiredActions?: string[] },
+  ): Promise<void> {
+    const response = await this.call(`/users/${subject}`, { method: 'PUT', body: JSON.stringify(patch) });
+    if (!response.ok) throw new KeycloakRequestError(response.status, 'update user');
+  }
+
+  /** Завершить сеансы пользователя в IdP (AUTH-06); пользователя уже нет — завершать нечего. */
+  async logoutUser(subject: string): Promise<void> {
+    const response = await this.call(`/users/${subject}/logout`, { method: 'POST' });
+    if (!response.ok && response.status !== 404) throw new KeycloakRequestError(response.status, 'logout user');
   }
 
   async deleteUser(userId: string): Promise<void> {

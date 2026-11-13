@@ -1,4 +1,5 @@
 import { computeBinCheckDigit, reviewQueueSchema } from '@imbc/contracts';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -48,7 +49,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('очередь проверки
     db = drizzle(pool, { schema, casing: 'snake_case' });
     reviews = new ReviewsService(db);
 
-    const [imbc] = await db.insert(schema.organizations).values({ type: 'imbc', name: 'IMBC' }).returning();
+    // Организация IMBC — из миграции 0008.
+    const [imbc] = await db.select().from(schema.organizations).where(eq(schema.organizations.type, 'imbc'));
     const [named] = await db
       .insert(schema.userAccounts)
       .values({ organizationId: imbc!.id, email: 'expert@imbc.local', fullName: 'Эксперт IMBC', role: 'expert' })

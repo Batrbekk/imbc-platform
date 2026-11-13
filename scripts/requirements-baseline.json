@@ -59,7 +59,6 @@
     "MAN-95": 1,
     "MAN-96": 1,
     "NFR-20": 1,
-    "NFR-32": 1,
     "NFR-43": 1,
     "NOT-36": 1,
     "NOT-37": 1,
@@ -103,7 +102,6 @@
     "REV-19": 1,
     "REV-20": 2
   },
-  "apps/api/src/app.module.ts": { "NFR-32": 1 },
   "apps/api/src/database/schema/exchange.ts": { "ADM-20": 1, "ADM-21": 1, "ADM-22": 1, "ADM-23": 1 },
   "apps/api/src/database/schema/platform.ts": { "DATA-35": 1 },
   "apps/api/src/database/schema/profiles.ts": {
@@ -135,7 +133,7 @@
     "OPR-64": 1,
     "OPR-65": 1
   },
-  "apps/api/src/jobs/queues.ts": { "AUTH-30": 1, "GEN-30": 1, "OPR-74": 2, "REV-20": 1 },
+  "apps/api/src/jobs/queues.ts": { "GEN-30": 1, "OPR-74": 2, "REV-20": 1 },
   "apps/api/src/modules/catalog/catalog.service.ts": { "DATA-34": 1 },
   "apps/api/src/modules/profiles/profiles.service.ts": {
     "MAN-47": 1,
