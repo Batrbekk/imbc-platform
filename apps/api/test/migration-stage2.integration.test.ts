@@ -456,7 +456,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('этап 2: миграции 00
       const key = 'NOT-03\nsub-2:1700000000000\nperson@stage2.local';
       await send('NOT-03', key);
       await expect(send('NOT-03', key)).rejects.toMatchObject(refusal('23505', 'notification_dedup_uq'));
-      await expect(send('NOT-99', 'NOT-99\nx\nperson@stage2.local')).rejects.toMatchObject(
+      await expect(send('UNKNOWN-RULE', 'UNKNOWN-RULE\nx\nperson@stage2.local')).rejects.toMatchObject(
         refusal('23503', 'notification_rule_code_notification_rule_code_fk'),
       );
       const sent = await pool.query<{ sent_at: Date | null }>('select sent_at from notification where dedup_key = $1', [

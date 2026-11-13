@@ -202,11 +202,36 @@ describe('файлы справочников: схема, шаблоны код
     for (const bad of ['1.1', '25.', '25.11.', '25-11'])
       expect(DICTIONARY_CODE_PATTERNS.kpved.test(bad), bad).toBe(false);
 
-    // Остальные: буквы, цифры, пробел и ._-/, 1–64 символа, без пробела по краям.
-    for (const good of ['KZ-AKT', 'ISO 9001', 'Extract from e-Ondiris', 'registration_certificate', 'A/B.c-d_e', 'Ж'])
-      expect(DICTIONARY_CODE_PATTERNS.certificate_type.test(good), good).toBe(true);
-    for (const bad of ['', ' ISO', 'ISO ', 'a;b', 'a,b', 'a\nb', 'x'.repeat(65)])
-      expect(DICTIONARY_CODE_PATTERNS.certificate_type.test(bad), JSON.stringify(bad)).toBe(false);
+    // Остальные: латинские буквы, цифры, пробел и ._-/, 1–64 символа, без пробела по краям.
+    const generic = [
+      'region',
+      'legal_form',
+      'commodity_type',
+      'process',
+      'equipment_type',
+      'contact_role',
+      'certificate_type',
+      'document_type',
+    ] as const;
+    for (const dictionary of generic) {
+      const pattern = DICTIONARY_CODE_PATTERNS[dictionary];
+      const good = [
+        'KZ-AKT',
+        'ISO 9001',
+        'API Q1',
+        'LLP',
+        'Extract from e-Ondiris',
+        'registration_certificate',
+        'A/B.c-d_e',
+      ];
+      for (const code of good) expect(pattern.test(code), `${dictionary}: ${code}`).toBe(true);
+      // Код — устойчивый идентификатор, не название: кириллица и прочие буквы Unicode не допускаются
+      // (в базе с локалью C lower() не меняет их регистр, а уникальность держится на lower(code)).
+      for (const code of ['ЖШС', 'é', 'Ж', 'ISO 9001ё', 'ТОО'])
+        expect(pattern.test(code), `${dictionary}: ${code}`).toBe(false);
+      for (const code of ['', ' ISO', 'ISO ', 'a;b', 'a,b', 'a\nb', 'x'.repeat(65)])
+        expect(pattern.test(code), `${dictionary}: ${JSON.stringify(code)}`).toBe(false);
+    }
     expect(DICTIONARY_CODE_PATTERNS.region.test('x'.repeat(64))).toBe(true);
   });
 });
