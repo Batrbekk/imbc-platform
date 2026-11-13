@@ -530,5 +530,75 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('этап 2: миграции 00
       const left = await pool.query('select count(*)::int as n from pg_roles where rolname = $1', [ROLE]);
       expect(left.rows).toEqual([{ n: 0 }]);
     });
+
+    it('права роли приложения выдаются одной транзакцией: сбой посреди выдачи (на отзыве прав у журнала писем) — откат, права роли не меняются; UPDATE и DELETE на журналах не остаются (AUD-02, NOT-18)', async () => {
+      const ROLE = 'imbc_grants_tx_test';
+      const dropRole = () =>
+        pool.query(`DO $$ BEGIN
+          IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${ROLE}') THEN
+            REVOKE ALL ON ALL TABLES IN SCHEMA public FROM ${ROLE};
+            DROP ROLE ${ROLE};
+          END IF;
+        END $$`);
+      /** Права роли на таблицы схемы public: таблица и вид права. */
+      const privileges = async () =>
+        (
+          await pool.query<{ table_name: string; privilege_type: string }>(
+            `select table_name, privilege_type from information_schema.role_table_grants
+              where grantee = $1 and table_schema = 'public' order by table_name, privilege_type`,
+            [ROLE],
+          )
+        ).rows;
+      /** Пул, у которого оператор с `failOn` в тексте падает — и через pool.query, и у клиента pool.connect. */
+      const failingPool = (failOn: string): pg.Pool => {
+        const guarded =
+          (run: (text: string, ...rest: unknown[]) => Promise<unknown>) =>
+          (text: string, ...rest: unknown[]) =>
+            typeof text === 'string' && text.includes(failOn)
+              ? Promise.reject(new Error('сбой посреди выдачи прав'))
+              : run(text, ...rest);
+        return {
+          query: guarded((text, ...rest) => (pool.query as (...a: unknown[]) => Promise<unknown>)(text, ...rest)),
+          connect: async () => {
+            const client = await pool.connect();
+            return new Proxy(client, {
+              get(target, property) {
+                if (property === 'query')
+                  return guarded((text, ...rest) =>
+                    (target.query as (...a: unknown[]) => Promise<unknown>).call(target, text, ...rest),
+                  );
+                const value = Reflect.get(target, property, target) as unknown;
+                return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+              },
+            });
+          },
+        } as unknown as pg.Pool;
+      };
+
+      await dropRole();
+      await pool.query(`CREATE ROLE ${ROLE} NOLOGIN`);
+      try {
+        expect(await privileges()).toEqual([]);
+        await expect(applyAppRoleGrants(failingPool('ON notification FROM'), ROLE)).rejects.toThrow(
+          'сбой посреди выдачи прав',
+        );
+        // GRANT на все таблицы и отзыв у аудита и NDA до сбоя откатились вместе с ним.
+        expect(await privileges()).toEqual([]);
+
+        // Без сбоя — права целиком, журнал писем только SELECT и INSERT.
+        await applyAppRoleGrants(pool, ROLE);
+        const granted = await privileges();
+        const on = (table: string) => granted.filter((g) => g.table_name === table).map((g) => g.privilege_type);
+        expect(on('notification')).toEqual(['INSERT', 'SELECT']);
+        expect(on('audit_entries')).toEqual(['INSERT', 'SELECT']);
+        // Сбой при повторной выдаче (каждый выкат) прежние права не трогает.
+        await expect(applyAppRoleGrants(failingPool('ON notification FROM'), ROLE)).rejects.toThrow(
+          'сбой посреди выдачи прав',
+        );
+        expect(await privileges()).toEqual(granted);
+      } finally {
+        await dropRole();
+      }
+    });
   });
 });

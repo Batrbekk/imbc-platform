@@ -7,9 +7,9 @@
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
 import { applyAppRoleGrants } from './app-role.js';
+import { applyMigrations } from './migrator.js';
 import { loadReferenceDirectory, REFERENCE_DATA_DIR, referenceLoadSummary } from './reference-data.js';
 import * as schema from './schema/index.js';
 
@@ -21,12 +21,12 @@ async function main(): Promise<void> {
   if (!url) throw new Error('DATABASE_URL не задан');
   const pool = new pg.Pool({ connectionString: url, max: 1, application_name: 'imbc-migrate' });
   try {
-    // Расширения создаются до миграций: pg_trgm нужен индексам каталога.
-    await pool.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
-    await migrate(drizzle(pool), { migrationsFolder });
+    // Расширения и миграции — на одном соединении с lock_timeout сеанса (MIGRATION_LOCK_TIMEOUT, migrator.ts):
+    // чужая открытая транзакция записи даёт отказ выката, а не зависание.
+    await applyMigrations(pool, migrationsFolder);
 
-    // Права роли приложения; журналы аудита и писем, принятия NDA — только добавление, правила писем и
-    // справочники — только чтение (app-role.ts).
+    // Права роли приложения, одной транзакцией; журналы аудита и писем, принятия NDA — только добавление,
+    // правила писем и справочники — только чтение (app-role.ts).
     const appRole = process.env.DB_APP_ROLE;
     if (appRole) await applyAppRoleGrants(pool, appRole);
     console.log('Миграции применены');
