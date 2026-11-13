@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { request } from 'node:http';
 import { ROLES, type Role } from '@imbc/contracts';
 import { Module, type Provider, type Type } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, NestFactory } from '@nestjs/core';
@@ -109,4 +110,29 @@ export async function startHttp(options: {
       }),
     close: () => app.close(),
   };
+}
+
+/**
+ * Сколько строк заголовка `name` пришло в ответе. `fetch` склеивает повторы через запятую (`nosniff, nosniff`),
+ * поэтому счёт — по сырым строкам ответа (`rawHeaders`); тело читается и отбрасывается.
+ */
+export function headerLines(
+  url: string,
+  name: string,
+  init: { method?: 'GET' | 'HEAD'; cookie?: string } = {},
+): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const req = request(
+      url,
+      { method: init.method ?? 'GET', headers: init.cookie ? { cookie: init.cookie } : {} },
+      (res) => {
+        const count = res.rawHeaders.filter((value, i) => i % 2 === 0 && value.toLowerCase() === name).length;
+        res.resume();
+        res.on('end', () => resolve(count));
+        res.on('error', reject);
+      },
+    );
+    req.on('error', reject);
+    req.end();
+  });
 }

@@ -22,6 +22,7 @@ import { CatalogController } from '../src/modules/catalog/catalog.controller.js'
 import { CatalogService } from '../src/modules/catalog/catalog.service.js';
 import { ManufacturerOnboardingService } from '../src/modules/registration/onboarding.service.js';
 import { RegistrationController } from '../src/modules/registration/registration.controller.js';
+import { headerLines } from './support/http.js';
 
 // Ответы API и BFF не кешируются браузером: после выхода «Назад» не показывает чужие данные (NFR-11).
 const COOKIE = 'imbc-session';
@@ -88,6 +89,14 @@ describe('Cache-Control: no-store на ответах API и BFF (NFR-11)', () =
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+  });
+
+  it('X-Content-Type-Options — одной строкой на 200, 401 и 404 problem+json: источник один — helmet приложения, edge второй не добавляет', async () => {
+    const lines = (path: string, cookie?: string) =>
+      headerLines(`${base}${path}`, 'x-content-type-options', { cookie });
+    expect(await lines('/api/v1/catalog/search', `${COOKIE}=valid`)).toBe(1);
+    expect(await lines('/api/v1/catalog/search')).toBe(1);
+    expect(await lines('/api/v1/unknown', `${COOKIE}=valid`)).toBe(1);
   });
 
   it('401 problem+json без сеанса — no-store', async () => {

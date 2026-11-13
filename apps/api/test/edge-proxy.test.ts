@@ -262,3 +262,35 @@ describe('ClamAV: пределы проверки и отказ на превы�
     expect(() => clamdBytes(undefined)).toThrow();
   });
 });
+
+// X-Content-Type-Options приходит одной строкой: у ответов API его ставит приложение (helmet в configureHttp), а edge
+// добавляет его только ответам без своего — статике web, ответам самого прокси. Иначе через nginx заголовок
+// приходит дважды (`nosniff, nosniff`): add_header nginx добавляет строку, а не заменяет ответ upstream.
+describe('edge: X-Content-Type-Options — один источник на ответ', () => {
+  const uncommented = (conf: string) => conf.replace(/^\s*#.*$/gm, '');
+
+  it('nginx.conf: nosniff добавляется только ответам без заголовка от upstream (map по $upstream_http_x_content_type_options)', () => {
+    const conf = uncommented(nginxConf);
+    const map = conf.match(/map\s+\$upstream_http_x_content_type_options\s+(\$\w+)\s*\{([^}]*)\}/);
+    expect(map).not.toBeNull();
+    const [, variable, body] = map!;
+    const entries = body!
+      .split(';')
+      .map((line) => line.trim().split(/\s+/))
+      .filter((parts) => parts[0]);
+    expect(entries).toEqual([
+      ["''", 'nosniff'],
+      ['default', "''"],
+    ]);
+    const headers = [...conf.matchAll(/add_header\s+X-Content-Type-Options\s+(\S+?)\s*(always)?;/gi)];
+    expect(headers.map((h) => [h[1], h[2]])).toEqual([[variable, 'always']]);
+  });
+
+  it('Caddyfile: nosniff — значение по умолчанию (?), не замена и не вторая строка к ответу API', () => {
+    const lines = uncommented(caddyfile)
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => /X-Content-Type-Options/i.test(line));
+    expect(lines).toEqual(['?X-Content-Type-Options "nosniff"']);
+  });
+});

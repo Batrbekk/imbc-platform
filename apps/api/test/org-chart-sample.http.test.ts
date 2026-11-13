@@ -15,7 +15,7 @@ import { ProblemException } from '../src/common/problem.js';
 import { OrgChartSampleController } from '../src/modules/files/org-chart-sample.controller.js';
 import { orgChartSampleAccess } from '../src/modules/files/org-chart-sample.rules.js';
 import { ORG_CHART_SAMPLE_ROUTES, OrgChartSampleService } from '../src/modules/files/org-chart-sample.service.js';
-import { type HttpStand, startHttp } from './support/http.js';
+import { headerLines, type HttpStand, startHttp } from './support/http.js';
 
 // Граница HTTP образца оргструктуры: настоящий SessionGuard, перехватчик загрузки и проверка файла; права — из
 // матрицы: просмотр reference.read, загрузка reference.manage; текущий образец — без действия матрицы, доступ
@@ -282,5 +282,15 @@ describe('образец оргструктуры: просмотр и загр�
     const forbidden = await http.get(ORG_CHART_SAMPLE_ROUTES.current, 'operator');
     expect(forbidden.status).toBe(403);
     expect(await forbidden.json()).toMatchObject({ status: 403, code: 'forbidden' });
+  });
+
+  it('X-Content-Type-Options приходит одной строкой: скачивание GET и HEAD, отказ 403 и 401 problem+json (заголовок ставит только приложение)', async () => {
+    const url = `${http.base}${ORG_CHART_SAMPLE_ROUTES.currentContent}`;
+    const cookie = 'imbc-session=manufacturer';
+    expect(await headerLines(url, 'x-content-type-options', { cookie })).toBe(1);
+    expect(await headerLines(url, 'x-content-type-options', { cookie, method: 'HEAD' })).toBe(1);
+    samples.openCurrent.mockRejectedValueOnce(new ProblemException(403, 'forbidden', 'Нет прав'));
+    expect(await headerLines(url, 'x-content-type-options', { cookie })).toBe(1);
+    expect(await headerLines(url, 'x-content-type-options')).toBe(1);
   });
 });

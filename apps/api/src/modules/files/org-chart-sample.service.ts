@@ -14,10 +14,10 @@ import { AuditService } from '../../common/audit.service.js';
 import { ProblemException } from '../../common/problem.js';
 import { parseResponse } from '../../common/response.js';
 import { DB, type Database, PG_POOL } from '../../database/database.module.js';
+import { databaseErrorSummary } from '../../database/pg-errors.js';
 import { fileVersion, orgChartSample } from '../../database/schema/index.js';
 import type { AuthContext, AuthUser } from '../auth/auth.types.js';
 import { type FileDescription, FilesService, type OpenedFile } from './files.service.js';
-import { storageFailureSummary } from './object-storage.js';
 import { orgChartSampleAccess } from './org-chart-sample.rules.js';
 import type { AcceptedUpload } from './upload.js';
 
@@ -111,11 +111,12 @@ export class OrgChartSampleService {
 
   /**
    * Описание текущего образца для ссылки «Скачать» (MAN-19): имя, размер, тип, время загрузки — без id файла,
-   * состояния скана и истории. Роли без доступа (`orgChartSampleAccess` — null) — 403 и `file.read` `denied`.
+   * состояния скана и истории. Роли без доступа (`orgChartSampleAccess` — null) — 403 и `file.read` `denied` с
+   * маршрутом `current`.
    * Текущего нет (в том числе только загрузки на проверке или отклонённые) — `current: null`.
    */
   async current(user: AuthUser, ip: string | null): Promise<OrgChartSampleCurrent> {
-    if (!orgChartSampleAccess(user.role)) await this.deny(user, ip);
+    if (!orgChartSampleAccess(user.role)) await this.deny(user, ORG_CHART_SAMPLE_ROUTES.current, ip);
     const row = await this.findCurrent();
     return parseResponse(
       orgChartSampleCurrentSchema,
@@ -135,8 +136,8 @@ export class OrgChartSampleService {
 
   /**
    * Байты текущего образца (стабильная ссылка, id файла не раскрывается): доступ — `orgChartSampleAccess`
-   * (null — 403 и `file.read` `denied`), текущего нет — 404, затем `FilesService.open` с его правом, проверкой
-   * скана и аудитом `file.downloaded` (GEN-09, DATA-07, NFR-09).
+   * (null — 403 и `file.read` `denied` с маршрутом `currentContent`), текущего нет — 404, затем `FilesService.open`
+   * с его правом, проверкой скана и аудитом `file.downloaded` (GEN-09, DATA-07, NFR-09).
    */
   async openCurrent(auth: AuthContext, ip: string | null): Promise<OpenedFile> {
     const current = await this.locateCurrent(auth.user, ip);
@@ -150,7 +151,7 @@ export class OrgChartSampleService {
   }
 
   private async locateCurrent(user: AuthUser, ip: string | null) {
-    if (!orgChartSampleAccess(user.role)) await this.deny(user, ip);
+    if (!orgChartSampleAccess(user.role)) await this.deny(user, ORG_CHART_SAMPLE_ROUTES.currentContent, ip);
     const current = await this.findCurrent();
     if (!current) throw notFound();
     return current;
@@ -174,23 +175,24 @@ export class OrgChartSampleService {
   }
 
   /**
-   * Отказ роли без доступа к образцам — как отказ в чтении файла (`FilesService`): `file.read` `denied`,
-   * `objectType: 'file_object'`; id файла нет — текущий образец для отказа не ищется. Сбой записи не подменяет
-   * 403 ошибкой 500: в журнал — сводка.
+   * Отказ роли без доступа к образцам: `file.read` `denied` с маршрутом — `objectType: 'route'`, `objectId` —
+   * шаблон пути, как у отказа SessionGuard по `@Can`; по записи видно, какой маршрут отказал. Текущий образец для
+   * отказа не ищется, id файла нет. Сбой записи не подменяет 403 ошибкой 500: в журнал — сводка ошибки базы
+   * (как `auditActorDenial`).
    */
-  private async deny(user: AuthUser, ip: string | null): Promise<never> {
+  private async deny(user: AuthUser, route: string, ip: string | null): Promise<never> {
     try {
       await this.audit.record({
         userId: user.id,
         organizationId: user.organizationId,
         action: 'file.read',
-        objectType: 'file_object',
-        objectId: null,
+        objectType: 'route',
+        objectId: route,
         outcome: 'denied',
         ip,
       });
     } catch (error) {
-      logger.error(storageFailureSummary(error), 'Denied organisation chart sample read audit failed');
+      logger.error(databaseErrorSummary(error) ?? error, 'Denied organisation chart sample read audit failed');
     }
     throw forbidden();
   }

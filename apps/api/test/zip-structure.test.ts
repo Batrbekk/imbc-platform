@@ -228,6 +228,10 @@ describe('zipStructureIssue: архив, который антивирус и Of
       () =>
         zip(withEntry(0, { flags: 0x0800, localExtra: Buffer.alloc(3), centralExtra: extra(0x5455, Buffer.alloc(5)) })),
     ],
+    [
+      'запись-каталог нулевой длины (word/)',
+      () => zip([ENTRIES[0]!, { name: 'word/', data: Buffer.alloc(0) }, ENTRIES[1]!]),
+    ],
     ['sample.docx', () => fixture('sample.docx')],
     ['sample.xlsx', () => fixture('sample.xlsx')],
     ['DOCX, записанный Python zipfile с ZIP_DEFLATED', () => fixture('sample-deflated.docx')],
@@ -367,6 +371,7 @@ describe('zipStructureIssue: архив, который антивирус и Of
     ],
     ['шифрование: бит 0 только в каталоге', () => zip(withEntry(1, { central: { flags: 0x0001 } })), 'encrypted'],
     ['шифрование каталога: бит 13', () => zip(withEntry(1, { flags: 0x2000 })), 'encrypted'],
+    ['сильное шифрование: бит 6 сам по себе', () => zip(withEntry(1, { flags: 0x0040 })), 'encrypted'],
     ['бит 3 только в каталоге', () => zip(deflated({ central: { flags: DESCRIPTOR } })), 'descriptor_flag_mismatch'],
     [
       'бит 3 только в локальном заголовке',
@@ -409,6 +414,34 @@ describe('zipStructureIssue: архив, который антивирус и Of
       'бит 3 установлен, в локальном заголовке сжатый 0, несжатый настоящий',
       () => zip(deflated({ descriptor: 'signed', local: { compressed: 0, uncompressed: TEXT.length } })),
       'local_sizes_mismatch',
+    ],
+    // Несжатая запись: clamd и Office читают её данные по разным размерам, если они не равны.
+    [
+      'stored: несжатый размер не равен сжатому (в обоих заголовках)',
+      () => zip(withEntry(1, { local: { uncompressed: 99 }, central: { uncompressed: 99 } })),
+      'stored_sizes_mismatch',
+    ],
+    [
+      'stored с описателем данных: в каталоге несжатый размер не равен сжатому',
+      () => zip(withEntry(1, { descriptor: 'signed', central: { uncompressed: 99 } })),
+      'stored_sizes_mismatch',
+    ],
+    // Каталог описывает пакет Office: хотя бы одна запись и [Content_Types].xml в корне.
+    ['каталог из нуля записей', () => zip([]), 'directory_empty'],
+    [
+      'нет записи [Content_Types].xml',
+      () => zip([{ name: 'word/document.xml', data: Buffer.from('<w:document/>') }]),
+      'content_types_missing',
+    ],
+    [
+      '[content_types].xml в другом регистре',
+      () => zip(withEntry(0, { name: '[content_types].xml' })),
+      'content_types_missing',
+    ],
+    [
+      '[Content_Types].xml не в корне архива',
+      () => zip(withEntry(0, { name: 'word/[Content_Types].xml' })),
+      'content_types_missing',
     ],
     // Две записи каталога на одни данные (архивная бомба с перекрытием).
     [

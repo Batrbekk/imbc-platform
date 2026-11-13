@@ -52,8 +52,20 @@ export type ZipStructureIssue =
    * и не равны.
    */
   | 'local_sizes_mismatch'
+  /**
+   * Несжатая (stored) запись, у которой сжатый и несжатый размеры в каталоге различаются: данные такой записи
+   * читатели берут по разной длине.
+   */
+  | 'stored_sizes_mismatch'
   /** Данные двух записей перекрываются (так строят архивные бомбы). */
-  | 'entries_overlap';
+  | 'entries_overlap'
+  /** В каталоге нет ни одной записи. */
+  | 'directory_empty'
+  /**
+   * В каталоге нет записи `[Content_Types].xml` в корне (точное имя): тип файла определён по содержимому как DOCX
+   * или XLSX, и проверенный каталог должен описывать тот же пакет Office.
+   */
+  | 'content_types_missing';
 
 const SIGNATURE = {
   local: 0x04034b50,
@@ -75,6 +87,8 @@ const ENCRYPTION_FLAGS = 0x0001 | 0x0040 | 0x2000;
 const DESCRIPTOR_FLAG = 0x0008;
 const STORED = 0;
 const DEFLATE = 8;
+/** Описание типов частей пакета Office (OPC) — обязательная запись в корне DOCX и XLSX. */
+const CONTENT_TYPES = Buffer.from('[Content_Types].xml', 'latin1');
 
 /**
  * Запись конца каталога — ровно последние 22 байта файла с пустым комментарием: clamd и читатели Office берут первую
@@ -114,7 +128,9 @@ function extraFieldsIssue(bytes: Buffer, start: number, length: number): 'zip64'
  * - каталог вплотную к записи своего конца, каждая его запись и её локальный заголовок — в пределах файла, данные
  *   записей не перекрываются;
  * - у каждой записи локальный заголовок совпадает с каталогом: без шифрования, бит 3 одинаков, метод одинаков и это
- *   stored или deflate, размеры равны (с описателем данных — нули или равны).
+ *   stored или deflate, размеры равны (с описателем данных — нули или равны); у stored сжатый размер равен
+ *   несжатому;
+ * - в каталоге хотя бы одна запись и есть `[Content_Types].xml` в корне — каталог описывает пакет Office.
  * Имена файлов в двух заголовках не сверяются; записи вне каталога и промежутки между записями не проверяются.
  * Известное ограничение: вложенные архивы (например, `word/embeddings/*.xlsx`) не разбираются — до открытия
  * загрузок производителю (этап 3).
@@ -143,8 +159,10 @@ export function zipStructureIssue(bytes: Buffer): ZipStructureIssue | null {
       return 'zip64_end_record';
     return 'central_directory_bounds';
   }
+  if (entries === 0) return 'directory_empty';
 
   const records: { start: number; end: number }[] = [];
+  let contentTypes = false;
   let at = directoryOffset;
   for (let index = 0; index < entries; index++) {
     if (at + CENTRAL_HEADER > end || bytes.readUInt32LE(at) !== SIGNATURE.central) return 'central_entry_malformed';
@@ -162,6 +180,8 @@ export function zipStructureIssue(bytes: Buffer): ZipStructureIssue | null {
     if (compressed === U32_MAX || uncompressed === U32_MAX || localOffset === U32_MAX || diskStart === U16_MAX)
       return 'zip64_central_values';
     if (diskStart !== 0) return 'multi_disk';
+    const name = bytes.subarray(at + CENTRAL_HEADER, at + CENTRAL_HEADER + nameLength);
+    if (name.equals(CONTENT_TYPES)) contentTypes = true;
     const centralExtra = extraFieldsIssue(bytes, at + CENTRAL_HEADER + nameLength, extraLength);
     if (centralExtra === 'zip64') return 'zip64_central_extra';
     if (centralExtra === 'malformed') return 'central_entry_malformed';
@@ -194,6 +214,7 @@ export function zipStructureIssue(bytes: Buffer): ZipStructureIssue | null {
     // Размер данных — из каталога: при описателе данных (бит 3) в локальном заголовке нули.
     const dataEnd = localExtraStart + localExtraLength + compressed;
     if (dataEnd > directoryOffset) return 'local_header_malformed';
+    if (method === STORED && compressed !== uncompressed) return 'stored_sizes_mismatch';
     records.push({ start: localOffset, end: dataEnd });
     at = next;
   }
@@ -202,5 +223,6 @@ export function zipStructureIssue(bytes: Buffer): ZipStructureIssue | null {
   records.sort((a, b) => a.start - b.start);
   for (let index = 1; index < records.length; index++)
     if (records[index]!.start < records[index - 1]!.end) return 'entries_overlap';
+  if (!contentTypes) return 'content_types_missing';
   return null;
 }

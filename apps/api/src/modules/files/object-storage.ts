@@ -3,9 +3,9 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   PutObjectCommand,
-  type S3Client,
+  S3Client,
 } from '@aws-sdk/client-s3';
-import { Readable } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import { databaseErrorSummary } from '../../database/pg-errors.js';
 
 /**
@@ -64,7 +64,57 @@ export function storageFailureSummary(error: unknown): Record<string, unknown> {
   return { error: reasonOf(error) };
 }
 
-/** RustFS и любой S3-совместимый сервер (path-style, клиент `S3` из InfraModule). */
+/**
+ * Сроки обработчика запросов клиента S3 (`@smithy/node-http-handler` 4.14): хранилище стоит на горячем пути —
+ * put при загрузке, get/copy/remove в скане, get при скачивании. Без сроков зависший сервер держит запрос API с
+ * буфером до 25 МБ, а обработчик очереди `file-scan` — до перезапуска worker.
+ * - `connectionTimeout` — установка TCP-соединения;
+ * - `socketTimeout` — простой сокета в любой момент запроса, в том числе на теле ответа GetObject: застывшее
+ *   тело обрывается с `TimeoutError` (поток `get` отдаёт его как `ObjectStorageError`);
+ * - `requestTimeout` — от начала запроса до заголовков ответа (отправка тела put входит); ошибкой он становится
+ *   только с `throwOnRequestTimeout: true`, без него обработчик лишь пишет предупреждение.
+ * Временный сбой клиент повторяет сам (по умолчанию три попытки), каждая — в этих сроках.
+ */
+export const S3_TIMEOUTS = { connectionTimeout: 5_000, socketTimeout: 30_000, requestTimeout: 120_000 } as const;
+
+export type S3Timeouts = {
+  readonly connectionTimeout: number;
+  readonly socketTimeout: number;
+  readonly requestTimeout: number;
+};
+
+export interface S3Settings {
+  endpoint: string;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+}
+
+/** Клиент S3 платформы (InfraModule): path-style для RustFS, сроки обработчика — `S3_TIMEOUTS`. */
+export function createS3Client(settings: S3Settings, timeouts: S3Timeouts = S3_TIMEOUTS): S3Client {
+  return new S3Client({
+    endpoint: settings.endpoint,
+    region: settings.region,
+    forcePathStyle: true,
+    credentials: { accessKeyId: settings.accessKeyId, secretAccessKey: settings.secretAccessKey },
+    requestHandler: { ...timeouts, throwOnRequestTimeout: true },
+  });
+}
+
+/**
+ * Тело объекта для потребителя. Сбой чтения после заголовков (обрыв, `socketTimeout` на застывшем теле) приходит
+ * из потока, а не из `send`, — его тоже заменяет `ObjectStorageError` без бакета и ключа. Закрытие потока
+ * потребителем (клиент ушёл, скан закончен) закрывает тело ответа и соединение.
+ */
+function storageStream(body: Readable): Readable {
+  const out = new PassThrough();
+  body.on('error', (error) => out.destroy(new ObjectStorageError('get', reasonOf(error))));
+  out.on('close', () => body.destroy());
+  body.pipe(out);
+  return out;
+}
+
+/** RustFS и любой S3-совместимый сервер (path-style, клиент `S3` из InfraModule — `createS3Client`). */
 export class S3ObjectStorage implements ObjectStorage {
   constructor(private readonly s3: S3Client) {}
 
@@ -85,7 +135,7 @@ export class S3ObjectStorage implements ObjectStorage {
   async get(bucket: string, key: string): Promise<Readable> {
     const output = await this.call('get', () => this.s3.send(new GetObjectCommand({ Bucket: bucket, Key: key })));
     if (!(output.Body instanceof Readable)) throw new ObjectStorageError('get', 'NoStream');
-    return output.Body;
+    return storageStream(output.Body);
   }
 
   async copy(fromBucket: string, key: string, toBucket: string): Promise<void> {

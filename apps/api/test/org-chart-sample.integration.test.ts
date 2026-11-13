@@ -197,7 +197,7 @@ describe.skipIf(!databaseUrl)(
       const res = await call(ORG_CHART_SAMPLE_ROUTES.current, role);
       return { status: res.status, code: res.code, json: res.status === 200 ? JSON.parse(res.body.toString()) : null };
     };
-    /** Записи `file.read` `denied` о файле `objectId` (null — отказ маршрута текущего образца, без id файла). */
+    /** Записи `file.read` `denied` о файле `objectId` (null — запись без объекта). */
     const readDenials = async (objectId: string | null) =>
       (
         await pool.query(
@@ -421,6 +421,64 @@ describe.skipIf(!databaseUrl)(
       ]);
       expect(await samples.state()).toEqual({ current: passed(fourth), latest: null });
       expect((await rows()).filter((r) => r.is_current)).toEqual([{ file_object_id: fourth.fileId, is_current: true }]);
+    });
+
+    it('смена текущего образца — аудит org_chart_sample.current_changed { from, to } без исполнителя в транзакции хука; без смены текущего записи нет (AUD-01)', async () => {
+      const sampleId = async (fileId: string) =>
+        (await pool.query<{ id: string }>('select id from org_chart_sample where file_object_id = $1', [fileId]))
+          .rows[0]!.id;
+      const changes = async (fileIds: string[]) =>
+        (
+          await pool.query(
+            `select user_id, organization_id, object_type, object_id, outcome, diff, is_account_event, ip
+               from audit_entries
+              where action = 'org_chart_sample.current_changed' and diff->>'to' = any($1::text[])
+              order by at, id`,
+            [fileIds],
+          )
+        ).rows;
+      const change = async (from: string | null, to: string) => ({
+        user_id: null,
+        organization_id: null,
+        object_type: 'org_chart_sample',
+        object_id: await sampleId(to),
+        outcome: 'ok',
+        diff: { from, to },
+        is_account_event: false,
+        ip: null,
+      });
+
+      const first = await upload('Бірінші.pdf');
+      expect(await scanAs(first.fileId)).toBe('passed');
+      const second = await upload('Екінші.pdf');
+      expect(await scanAs(second.fileId)).toBe('passed');
+      // Более новый прошёл раньше более старого: старый текущим не становится — записи о нём нет.
+      const older = await upload('Ескі.pdf');
+      const newer = await upload('Жаңа.pdf');
+      expect(await scanAs(newer.fileId)).toBe('passed');
+      expect(await scanAs(older.fileId)).toBe('passed');
+      // Отклонённый текущим не становится.
+      const rejected = await upload('Вирус.pdf');
+      expect(await scanAs(rejected.fileId, { clean: false, signature: 'Eicar-Test-Signature' })).toBe('rejected');
+      // Повтор хука для уже текущего образца ничего не меняет и не пишет.
+      await db.transaction((tx) =>
+        orgChartSamplePassed(tx as unknown as Database, {
+          id: randomUUID(),
+          fileObjectId: newer.fileId,
+          purpose: 'organisation_chart_sample',
+        }),
+      );
+
+      const ids = [first, second, older, newer, rejected].map((f) => f.fileId);
+      expect(await changes(ids)).toEqual([
+        await change(null, first.fileId),
+        await change(first.fileId, second.fileId),
+        await change(second.fileId, newer.fileId),
+      ]);
+      // Имени файла и ключа объекта в записи нет.
+      const text = JSON.stringify(await changes(ids));
+      for (const part of ['Бірінші', 'Екінші', 'Жаңа', (await versionOf(newer.fileId)).storage_key])
+        expect(text).not.toContain(part);
     });
 
     it('хуки двух сканов: второй ждёт, пока первый (более старый образец) зафиксирует смену, и перечитывает текущий — текущим становится более новый', async () => {
@@ -650,10 +708,17 @@ describe.skipIf(!databaseUrl)(
       });
     });
 
-    it('текущий образец: SME, оператор и наблюдатель — 403 на описание и на ссылку (GET и HEAD) с записью file.read denied без id файла', async () => {
+    it('текущий образец: SME, оператор и наблюдатель — 403 на описание и на ссылку (GET и HEAD) с записью file.read denied по маршруту, без id файла', async () => {
       const file = await upload('Құрылым.pdf');
       expect(await scanAs(file.fileId)).toBe('passed');
-      const before = (await readDenials(null)).length;
+      const routeDenials = async () =>
+        (
+          await pool.query(
+            `select user_id, organization_id, object_type, object_id, outcome, diff, host(ip) as ip from audit_entries
+              where action = 'file.read' and outcome = 'denied' and object_type = 'route' order by at, id`,
+          )
+        ).rows;
+      const before = (await routeDenials()).length;
       const versionId = (await versionOf(file.fileId)).id;
 
       for (const role of ['expert', 'operator', 'observer'] as const) {
@@ -664,20 +729,27 @@ describe.skipIf(!databaseUrl)(
         });
         expect((await call(ORG_CHART_SAMPLE_ROUTES.currentContent, role, 'HEAD')).status, role).toBe(403);
       }
-      const denials = (await readDenials(null)).slice(before);
+      const denials = (await routeDenials()).slice(before);
+      // По записи видно, какой маршрут отказал: описание текущего или его байты (GET и HEAD).
+      const routes = [
+        ORG_CHART_SAMPLE_ROUTES.current,
+        ORG_CHART_SAMPLE_ROUTES.currentContent,
+        ORG_CHART_SAMPLE_ROUTES.currentContent,
+      ];
       expect(denials).toEqual(
-        Array.from({ length: 9 }, () => ({
+        [...routes, ...routes, ...routes].map((route) => ({
           user_id: SESSION_USER,
           organization_id: imbcId,
-          object_type: 'file_object',
-          object_id: null,
+          object_type: 'route',
+          object_id: route,
           outcome: 'denied',
           diff: null,
           ip: expect.stringMatching(/127\.0\.0\.1/),
         })),
       );
-      // Отказ — до поиска образца: записи с id файла нет, «скачано» нет.
+      // Отказ — до поиска образца: записи с id файла нет, записи без объекта нет, «скачано» нет.
       expect(await readDenials(file.fileId)).toEqual([]);
+      expect(await readDenials(null)).toEqual([]);
       expect(await audits('file.downloaded', versionId)).toEqual([]);
     });
 

@@ -1,7 +1,7 @@
 import { can, type Role } from '@imbc/contracts';
 import { Logger } from '@nestjs/common';
 import { and, asc, eq, sql } from 'drizzle-orm';
-import { orgChartSample } from '../../database/schema/index.js';
+import { auditEntries, orgChartSample } from '../../database/schema/index.js';
 import type { ScanPassedHook } from '../../worker/file-scan.job.js';
 import type { FileReadRule } from './file-access.js';
 
@@ -49,6 +49,10 @@ const logger = new Logger('OrgChartSample');
  * (сравнение в SQL, с микросекундами), при равенстве по id — или если текущего нет; прежний текущий получает
  * `is_current = false` и остаётся строкой истории. Порядок «снять, затем поставить» — частичный уникальный индекс
  * `org_chart_sample_current_uq` не откладывается.
+ *
+ * Смена текущего — запись аудита `org_chart_sample.current_changed` в той же транзакции (AUD-01, смена
+ * состояния): `diff: { from, to }` — id файловых объектов прежнего и нового текущего (`from` — null, если
+ * текущего не было), без исполнителя — это действие системы после скана. Без смены записи нет.
  */
 export const orgChartSamplePassed: ScanPassedHook = async (tx, version) => {
   const samples = await tx
@@ -63,14 +67,23 @@ export const orgChartSamplePassed: ScanPassedHook = async (tx, version) => {
     return;
   }
   if (sample.isCurrent) return;
+  // Строки взяты for update: прежний текущий — прочитанный выше, другая транзакция его до фиксации не изменит.
+  const previous = samples.find((s) => s.isCurrent) ?? null;
   await tx.execute(sql`
     update org_chart_sample c set is_current = false
       from org_chart_sample s
      where s.id = ${sample.id} and c.is_current and (c.uploaded_at, c.id) < (s.uploaded_at, s.id)`);
-  await tx
+  const [changed] = await tx
     .update(orgChartSample)
     .set({ isCurrent: true })
-    .where(
-      and(eq(orgChartSample.id, sample.id), sql`not exists (select 1 from org_chart_sample c where c.is_current)`),
-    );
+    .where(and(eq(orgChartSample.id, sample.id), sql`not exists (select 1 from org_chart_sample c where c.is_current)`))
+    .returning({ id: orgChartSample.id });
+  if (!changed) return;
+  await tx.insert(auditEntries).values({
+    action: 'org_chart_sample.current_changed',
+    objectType: 'org_chart_sample',
+    objectId: sample.id,
+    diff: { from: previous?.fileObjectId ?? null, to: sample.fileObjectId },
+    isAccountEvent: false,
+  });
 };

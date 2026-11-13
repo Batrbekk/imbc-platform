@@ -1,4 +1,4 @@
-import { S3Client } from '@aws-sdk/client-s3';
+import type { S3Client } from '@aws-sdk/client-s3';
 import { Global, Inject, Logger, Module, type OnApplicationShutdown, type OnModuleInit } from '@nestjs/common';
 import { Redis } from 'ioredis';
 import nodemailer, { type Transporter } from 'nodemailer';
@@ -6,7 +6,7 @@ import { PgBoss } from 'pg-boss';
 import { ENV, type Env } from '../config/env.js';
 import { databaseErrorSummary } from '../database/pg-errors.js';
 import { ADATA_QUEUE_OPTIONS, FILE_SCAN_QUEUE_OPTIONS, NOTIFY_QUEUE_OPTIONS, QUEUES } from '../jobs/queues.js';
-import { OBJECT_STORAGE, S3ObjectStorage } from '../modules/files/object-storage.js';
+import { createS3Client, OBJECT_STORAGE, S3ObjectStorage } from '../modules/files/object-storage.js';
 
 export const VALKEY = Symbol('VALKEY');
 export const S3 = Symbol('S3');
@@ -40,12 +40,13 @@ export function logQueueError(logger: Pick<Logger, 'error'>, error: unknown): vo
     {
       provide: S3,
       inject: [ENV],
+      // Сроки соединения, простоя сокета и запроса — S3_TIMEOUTS: зависший RustFS не держит API и worker.
       useFactory: (env: Env) =>
-        new S3Client({
+        createS3Client({
           endpoint: env.S3_ENDPOINT,
           region: env.S3_REGION,
-          forcePathStyle: true,
-          credentials: { accessKeyId: env.S3_ACCESS_KEY, secretAccessKey: env.S3_SECRET_KEY },
+          accessKeyId: env.S3_ACCESS_KEY,
+          secretAccessKey: env.S3_SECRET_KEY,
         }),
     },
     // Байты файлов — только через этот интерфейс: карантин, рабочий бакет, без presigned URL (NFR-09).
