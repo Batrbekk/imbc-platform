@@ -24,7 +24,12 @@ import { withQueueTransaction } from '../src/database/transaction.js';
 import { FILE_SCAN_QUEUE_OPTIONS, QUEUES } from '../src/jobs/queues.js';
 import type { AuthContext } from '../src/modules/auth/auth.types.js';
 import { Auth } from '../src/modules/auth/guards.js';
-import { denyAll, FILE_READ_RULES, manufacturerFileRule } from '../src/modules/files/file-access.js';
+import {
+  denyAll,
+  FILE_READ_RULES,
+  manufacturerFileRule,
+  orgChartSampleReadRule,
+} from '../src/modules/files/file-access.js';
 import { FilesController } from '../src/modules/files/files.controller.js';
 import { FILE_ROUTES, FilesService } from '../src/modules/files/files.service.js';
 import { type AcceptedUpload, acceptUpload, uploadInterceptor } from '../src/modules/files/upload.js';
@@ -583,9 +588,14 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
   });
 
   it('права по назначению: владелец, SME и директор читают файл производителя; оператор и наблюдатель — 403; назначение без правила (site_survey_report) — 403 всем ролям', async () => {
+    // Образец оргструктуры — своё правило (org-chart-sample.integration.test.ts).
     for (const purpose of FILE_PURPOSES)
       expect(FILE_READ_RULES[purpose], purpose).toBe(
-        (MANUFACTURER_FILE_PURPOSES as readonly FilePurpose[]).includes(purpose) ? manufacturerFileRule : denyAll,
+        (MANUFACTURER_FILE_PURPOSES as readonly FilePurpose[]).includes(purpose)
+          ? manufacturerFileRule
+          : purpose === 'organisation_chart_sample'
+            ? orgChartSampleReadRule
+            : denyAll,
       );
 
     const cv = await createFile({ purpose: 'cv' });

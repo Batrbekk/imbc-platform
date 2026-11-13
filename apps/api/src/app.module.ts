@@ -29,6 +29,8 @@ import { DictionariesController } from './modules/dictionaries/dictionaries.cont
 import { DictionariesService } from './modules/dictionaries/dictionaries.service.js';
 import { FilesController } from './modules/files/files.controller.js';
 import { FilesService } from './modules/files/files.service.js';
+import { OrgChartSampleController } from './modules/files/org-chart-sample.controller.js';
+import { OrgChartSampleService } from './modules/files/org-chart-sample.service.js';
 import { HealthController } from './modules/health/health.controller.js';
 import { ProfilesController } from './modules/profiles/profiles.controller.js';
 import { ProfilesService } from './modules/profiles/profiles.service.js';
@@ -59,6 +61,7 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     OrganizationsController,
     DictionariesController,
     FilesController,
+    OrgChartSampleController,
   ],
   providers: [
     OidcService,
@@ -74,6 +77,7 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     AccountLifecycleService,
     DictionariesService,
     FilesService,
+    OrgChartSampleService,
     MailService,
     AdataScheduler,
     IdentityProvisioningService,

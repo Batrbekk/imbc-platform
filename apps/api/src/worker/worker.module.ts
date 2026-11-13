@@ -1,3 +1,4 @@
+import type { FilePurpose } from '@imbc/contracts';
 import { Inject, Logger, Module, type OnApplicationBootstrap } from '@nestjs/common';
 import { LoggerModule } from 'nestjs-pino';
 import type { PgBoss } from 'pg-boss';
@@ -15,6 +16,7 @@ import { SessionService } from '../modules/auth/session.service.js';
 import { ProfilesService } from '../modules/profiles/profiles.service.js';
 import { ManufacturerOnboardingService } from '../modules/registration/onboarding.service.js';
 import { ANTIVIRUS, ClamdAntivirus } from '../modules/files/antivirus.js';
+import { orgChartSamplePassed } from '../modules/files/org-chart-sample.service.js';
 import {
   ADATA_QUEUE_OPTIONS,
   FILE_SCAN_QUEUE_OPTIONS,
@@ -25,7 +27,7 @@ import {
 } from '../jobs/queues.js';
 import { AccountInactivityJob } from './account-inactivity.job.js';
 import { ADATA_CLIENT_FACTORY, ADATA_TIMING, AdataPrefillJob, defaultAdataClientFactory } from './adata-prefill.job.js';
-import { FileScanJob, SCAN_PASSED_HOOKS } from './file-scan.job.js';
+import { FileScanJob, SCAN_PASSED_HOOKS, type ScanPassedHook } from './file-scan.job.js';
 import { JobHandlers } from './handlers.service.js';
 
 @Module({
@@ -59,8 +61,13 @@ import { JobHandlers } from './handlers.service.js';
     { provide: ADATA_TIMING, useValue: ADATA_DEFAULT_TIMING },
     // ClamAV вызывает только worker (DATA-07).
     { provide: ANTIVIRUS, inject: [ENV], useFactory: (env: Env) => new ClamdAntivirus(env) },
-    // Действия назначений после скана; образец оргструктуры добавляет задача 5.
-    { provide: SCAN_PASSED_HOOKS, useValue: {} },
+    // Действия назначений после скана: образец оргструктуры становится текущим (ADM-11, DATA-07).
+    {
+      provide: SCAN_PASSED_HOOKS,
+      useValue: { organisation_chart_sample: orgChartSamplePassed } satisfies Partial<
+        Record<FilePurpose, ScanPassedHook>
+      >,
+    },
   ],
 })
 export class WorkerModule implements OnApplicationBootstrap {

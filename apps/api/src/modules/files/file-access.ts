@@ -1,5 +1,7 @@
 import { can, type FilePurpose } from '@imbc/contracts';
+import { eq } from 'drizzle-orm';
 import type { Database } from '../../database/database.module.js';
+import { orgChartSample } from '../../database/schema/index.js';
 import type { AuthContext } from '../auth/auth.types.js';
 
 /**
@@ -27,8 +29,25 @@ export const manufacturerFileRule: FileReadRule = async ({ auth, file }) => {
 export const denyAll: FileReadRule = async () => false;
 
 /**
- * Правило на каждое из 15 назначений `file_purpose`; по умолчанию — отказ. Заменяют своё правило: задача 5 —
- * `organisation_chart_sample` (ADM-11, MAN-19), этапы 5–8 — отчёты IMBC, оператора, AGAR/CDP и выгрузки.
+ * Образец оргструктуры (ADM-11, MAN-19, расхождение 2 плана этапа 2): администратор и директор
+ * (`reference.read`) читают любой образец; производитель (`profile.edit` — `own`) — только текущий: строка
+ * `org_chart_sample` этого файла с `is_current`. Прежний образец, образец на проверке и отклонённый ему закрыты;
+ * SME, оператору и наблюдателю — закрыт любой.
+ */
+export const orgChartSampleReadRule: FileReadRule = async ({ tx, auth, file }) => {
+  if (can(auth.user.role, 'reference.read')) return true;
+  if (can(auth.user.role, 'profile.edit') !== 'own') return false;
+  const [sample] = await tx
+    .select({ isCurrent: orgChartSample.isCurrent })
+    .from(orgChartSample)
+    .where(eq(orgChartSample.fileObjectId, file.id));
+  return sample?.isCurrent === true;
+};
+
+/**
+ * Правило на каждое из 15 назначений `file_purpose`; по умолчанию — отказ. `organisation_chart_sample` —
+ * `orgChartSampleReadRule` (ADM-11, MAN-19); свои правила заменят этапы 5–8 — отчёты IMBC, оператора,
+ * AGAR/CDP и выгрузки.
  */
 export const FILE_READ_RULES: Record<FilePurpose, FileReadRule> = {
   organisation_chart: manufacturerFileRule,
@@ -44,6 +63,6 @@ export const FILE_READ_RULES: Record<FilePurpose, FileReadRule> = {
   operator_visit_file: denyAll,
   technical_requirements: denyAll,
   agar_cdp_report: denyAll,
-  organisation_chart_sample: denyAll,
+  organisation_chart_sample: orgChartSampleReadRule,
   export: denyAll,
 };

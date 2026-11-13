@@ -91,6 +91,35 @@ export const fileContentQuerySchema = z
 export type FileContentQuery = z.infer<typeof fileContentQuerySchema>;
 
 /**
+ * Образец оргструктуры (ADM-11, MAN-19): файл и его проверка. `fileId` — id `file_object` для
+ * `GET /api/v1/files/:id/content`; `uploadedAt` — ISO-строка времени загрузки.
+ */
+export const orgChartSampleFileSchema = z
+  .object({
+    fileId: z.uuid(),
+    originalName: z.string(),
+    byteSize: z.number().int(),
+    mediaType: z.string(),
+    scanState: z.enum(FILE_SCAN_STATES),
+    uploadedAt: z.string(),
+  })
+  .strict();
+export type OrgChartSampleFile = z.infer<typeof orgChartSampleFileSchema>;
+
+/**
+ * `GET /api/v1/org-chart-sample`: `current` — текущий образец (прошёл скан, DATA-07), `latest` — последняя
+ * загрузка, если она не текущая (`pending` — проверяется, `rejected` — не прошла проверку).
+ */
+export const orgChartSampleStateSchema = z
+  .object({ current: orgChartSampleFileSchema.nullable(), latest: orgChartSampleFileSchema.nullable() })
+  .strict();
+export type OrgChartSampleState = z.infer<typeof orgChartSampleStateSchema>;
+
+/** `POST /api/v1/org-chart-sample` — 202: загрузка принята, файл ждёт скана (`pending`). */
+export const orgChartSampleUploadSchema = z.object({ upload: orgChartSampleFileSchema }).strict();
+export type OrgChartSampleUpload = z.infer<typeof orgChartSampleUploadSchema>;
+
+/**
  * Коды problem+json маршрутов файлов (загрузка, скачивание; их сервис, правила чтения, транзакция исполнителя
  * и SessionGuard): по ним экран выбирает сообщение. `validation` — ошибка схемы query или разбора multipart,
  * `internal` — сбой 500.
