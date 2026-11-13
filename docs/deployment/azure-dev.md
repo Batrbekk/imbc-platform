@@ -1,6 +1,6 @@
 # IMBC: dev-среда в Azure
 
-Конфигурация одного dev-сервера для Docker-стека IMBC. Здесь используются вымышленные демо-данные и Mailpit с Azure Communication Services SMTP relay: настоящие адреса получают письма, письма демо-адресам `.local` остаются в Mailpit. Для шести seed-аккаунтов и отдельного тестового администратора задан OTP `000000` без письма; исключение ограничено списком UUID и ожидаемых ролей. Общая авторизация использует собственные экраны IMBC на shadcn/ui; у ролей есть стартовые страницы и демо-экраны только для чтения, предметные кабинеты ещё разрабатываются. С 12.11.2026 стенд работает на спецификации v1.3 — см. [Переход на спецификацию v1.3](#переход-на-спецификацию-v13); этап 1 (регистрация, организации, аккаунты) выкачен 13.11.2026 (`306b58e`), этап 2 (справочники, файлы, уведомления) реализован в ветке `feat/stage-2-foundation` и на стенд не выкачен — [порядок выката](#справочники-файлы-и-уведомления-этап-2). Эта инструкция описывает конфигурацию и обслуживание, а результаты проверки конкретного развёртывания фиксируются отдельно.
+Конфигурация одного dev-сервера для Docker-стека IMBC. Здесь используются вымышленные демо-данные и Mailpit с Azure Communication Services SMTP relay: настоящие адреса получают письма, письма демо-адресам `.local` остаются в Mailpit. Для шести seed-аккаунтов и отдельного тестового администратора задан OTP `000000` без письма; исключение ограничено списком UUID и ожидаемых ролей. Общая авторизация использует собственные экраны IMBC на shadcn/ui; у ролей есть стартовые страницы и демо-экраны только для чтения, предметные кабинеты ещё разрабатываются. С 12.11.2026 стенд работает на спецификации v1.3 — см. [Переход на спецификацию v1.3](#переход-на-спецификацию-v13); этап 1 (регистрация, организации, аккаунты) выкачен 13.11.2026 (`306b58e`), этап 2 (справочники, файлы, уведомления) реализован в ветке `feat/stage-2-foundation`, прошёл итоговое ревью и готов к выкату (владелец разрешил выкат 13.11.2026; выкат — после слияния в ветку стенда) — [порядок выката](#справочники-файлы-и-уведомления-этап-2). Эта инструкция описывает конфигурацию и обслуживание, а результаты проверки конкретного развёртывания фиксируются отдельно.
 
 ## Ресурсы и адреса
 
@@ -546,7 +546,7 @@ WHERE lower(email) = 'spectator@spectator.local' AND state = 'invited'
 
 ## Справочники, файлы и уведомления (этап 2)
 
-Этап 2 — миграции `0009_stage2_foundation` и `0010_stage2_reference_data`, двенадцать справочников с загрузкой значений из файлов репозитория, файлы с проверкой ClamAV и образец оргструктуры, журнал писем `notification` с диспетчером `notify`, тема писем Keycloak `imbc` (план — `docs/superpowers/plans/2026-11-13-stage-2-dictionaries-files-notifications.md`). **Состояние на 13.11.2026: этап реализован в ветке `feat/stage-2-foundation` и на стенд не выкатывался; на стенде работает этап 1 (`306b58e`, ветка стенда `demo/prototype-cabinets`).** Выкат — только по отдельной команде владельца. Раздел написан по коду и схеме ветки: команды ниже на стенде ещё не выполнялись; отмечено, что проверялось на живых системах и что нет. Результат выката записывается в `docs/deployment/verification-<дата>.md`.
+Этап 2 — миграции `0009_stage2_foundation` и `0010_stage2_reference_data`, двенадцать справочников с загрузкой значений из файлов репозитория, файлы с проверкой ClamAV и образец оргструктуры, журнал писем `notification` с диспетчером `notify`, тема писем Keycloak `imbc` (план — `docs/superpowers/plans/2026-11-13-stage-2-dictionaries-files-notifications.md`). **Состояние на 14.11.2026: этап реализован в ветке `feat/stage-2-foundation`, прошёл итоговое ревью ветки и общую правку по нему (код — `c0e7e2e`) и готов к выкату; на стенд не выкатывался, на стенде работает этап 1 (`306b58e`, ветка стенда `demo/prototype-cabinets`).** Владелец разрешил выкат 13.11.2026; выкат — после слияния ветки этапа в ветку стенда (шаг 1 ниже). Раздел написан по коду и схеме ветки и сверен с кодом `c0e7e2e`: команды на стенде ещё не выполнялись; там, где вывод на стенде не наблюдался, это сказано; что проверялось на живых системах локально и что нет — отмечено. Результат выката записывается в `docs/deployment/verification-<дата>.md`.
 
 Миграции этапа только добавляют (`0009` — `CREATE TYPE`, `CREATE TABLE`, индексы и внешние ключи; `0010` — `INSERT … ON CONFLICT DO NOTHING`), поэтому код откатывается на этап 1 без восстановления базы (NFR-06); таблицы, которые читает или пишет прежняя версия, остаются до отдельного релиза contract («Contract этапа 2» ниже).
 
@@ -554,7 +554,11 @@ WHERE lower(email) = 'spectator@spectator.local' AND state = 'invited'
 
 Команды — в `/home/imbc/imbc-platform` на VM (`./infrastructure/azure/deploy.sh ssh`); формат тот же, что в разделе «[Релиз contract (0006)](#релиз-contract-0006)»: блоки можно вставлять целиком, у каждой `docker compose exec -T` стоит `</dev/null`.
 
-1. **Что выкатывается.** Выкат — из ветки стенда `demo/prototype-cabinets`, в которую влита ветка этапа (как при выкате этапа 1: прототип остаётся в дереве, ручной выкат файлов на VM не удаляет). Два места конфликтуют при слиянии. В `apps/api/src/database/migrate.ts` порядок должен быть: миграции Drizzle → при `PROTOTYPE_CABINETS=true` `createPrototypeTable(pool)` → `applyAppRoleGrants(pool, appRole)` → `loadReferenceDirectory(…, 'release')` (таблица прототипа создаётся до выдачи прав, а справочники грузятся после прав). В меню прототипа администратора есть свой пункт «Справочники» — дубль убирается так же, как пункт «Организации и аккаунты» в `306b58e`. До выката в чистом checkout слитой ветки проходят `pnpm install --frozen-lockfile && pnpm typecheck && pnpm lint && pnpm test && pnpm build` и `docker compose config -q` (с оверлеем Azure — `PUBLIC_HOST=<хост> docker compose -f compose.yaml -f compose.azure.yaml config -q`: без `PUBLIC_HOST` оверлей не собирается). Этап 2 не удаляет файлов ветки этапа 1 (`git diff --diff-filter=D --name-only f453d39..<коммит>` пуст), но список «[Файлы, которых нет в выкатываемом коммите](#файлы-которых-нет-в-выкатываемом-коммите)» всё равно проходят: он строится по маркерам на VM.
+1. **Что выкатывается.** Выкат — из ветки стенда `demo/prototype-cabinets`, в которую влита ветка этапа (как при выкате этапа 1: прототип остаётся в дереве, ручной выкат файлов на VM не удаляет). При слиянии `feat/stage-2-foundation` в `demo/prototype-cabinets` конфликтуют два файла (проверено `git merge-tree` для `306b58e` и `c0e7e2e`; остальное сливается само):
+   - `apps/api/src/database/migrate.ts` — порядок должен быть: миграции Drizzle (`applyMigrations` из `./migrator.js`, на одном соединении с `lock_timeout`) → при `PROTOTYPE_CABINETS=true` `createPrototypeTable(pool)` → `applyAppRoleGrants(pool, appRole)` → строка «Миграции применены» → `loadReferenceDirectory(…, 'release')` (таблица прототипа создаётся до выдачи прав, чтобы `GRANT` её захватил, а справочники грузятся после прав);
+   - `apps/web/src/components/ui/tabs.tsx` — add/add: компонент добавлен в обеих ветках, берётся версия ветки этапа (выдача реестра `base-nova`, `pnpm dlx shadcn@4.23.0 add tabs` из `apps/web`), версия прототипа не остаётся.
+
+   Дубль меню: в прототипе администратора есть свой пункт «Справочники» — в `apps/web/src/prototype/administrator/index.tsx` убирается `item("references", "menu.references", BookOpenIcon)` (и ставший ненужным импорт `BookOpenIcon`), как раньше пункт «Организации и аккаунты» в `306b58e`: настоящая страница — `/references`, маршрут и экран прототипа остаются по прямому адресу `/proto/administrator/references`; в тесте меню (`apps/web/test/prototype/administrator/access.test.tsx`) убирается «Reference lists» из списка пунктов и уменьшается число пунктов, ключ `menu.references` удаляется, если он больше нигде не используется (образец правки — `git show 306b58e`). До выката в чистом checkout слитой ветки проходят `pnpm install --frozen-lockfile && pnpm typecheck && pnpm lint && pnpm test && pnpm build` и `docker compose config -q` (с оверлеем Azure — `PUBLIC_HOST=<хост> docker compose -f compose.yaml -f compose.azure.yaml config -q`: без `PUBLIC_HOST` оверлей не собирается). Этап 2 не удаляет файлов ветки этапа 1 (`git diff --diff-filter=D --name-only f453d39..<коммит>` пуст), но список «[Файлы, которых нет в выкатываемом коммите](#файлы-которых-нет-в-выкатываемом-коммите)» всё равно проходят: он строится по маркерам на VM.
 
 2. **На стенде этап 1 и девять миграций** (после выката их будет 11):
 
@@ -602,17 +606,55 @@ WHERE lower(email) = 'spectator@spectator.local' AND state = 'invited'
 Шаги одинаковы для `./infrastructure/azure/deploy.sh redeploy` и для [конвейера](#конвейер-развёртывания) (оба запускают `infrastructure/azure/vm-deploy.sh`).
 
 1. **Compose** (`up -d --build --remove-orphans --wait --wait-timeout 600`):
-   - одноразовый `migrate` применяет `0009` и `0010` (в `drizzle.__drizzle_migrations` — 11 строк), выдаёт права роли приложения (`notification` — только добавление; `notification_rule` и `dictionary` — только чтение) и загружает `apps/api/reference-data/release`: в журнале по строке «Справочники: <код> +N (+M переводов)» — при первой загрузке `legal_form +3 (+9 переводов)`, `commodity_group +5 (+15 переводов)`, `contact_role +3 (+9 переводов)`, `certificate_type +10 (+30 переводов)`, `document_type +4 (+12 переводов)`;
-   - затем при `SEED_DEMO=true` (на стенде так) `seed` грузит временные значения `provisional`, строки «Справочники (временные): <код> +N (+M переводов)»: `region +9`, `oked +4`, `tn_ved +4`, `kpved +2`, `commodity_type +5`, `process +3`, `equipment_type +2` (у каждого переводов столько же, сколько значений: в файлах одно название). Без `SEED_DEMO` эти семь списков остаются пустыми — как в продакшене. Повторный выкат везде показывает `+0`;
+   - одноразовый `migrate` применяет `0009` и `0010` (в `drizzle.__drizzle_migrations` — 11 строк) на соединении с `lock_timeout` 10 с (если прежние `api` и `worker` держат открытую транзакцию записи, выкат падает с `55P03` — ветка «Если `migrate` упал с `55P03`» ниже), выдаёт права роли приложения одной транзакцией (`notification` — только добавление; `notification_rule` и `dictionary` — только чтение; сбой посередине ничего не меняет) и загружает `apps/api/reference-data/release`: в журнале по строке «Справочники: <код> +N (+M переводов), пропущено удалённых: K» — при первой загрузке `legal_form +3 (+9 переводов), пропущено удалённых: 0`, `commodity_group +5 (+15 переводов)`, `contact_role +3 (+9 переводов)`, `certificate_type +10 (+30 переводов)`, `document_type +4 (+12 переводов)` (у каждой — `, пропущено удалённых: 0`); `K` — число значений файла, которые не загружены, потому что администратор их удалил (счётчик печатается всегда; на первом выкате этапа 2 удалённых нет);
+   - затем при `SEED_DEMO=true` (на стенде так) `seed` грузит временные значения `provisional`, строки «Справочники (временные): <код> +N (+M переводов), пропущено удалённых: K»: `region +9`, `oked +4`, `tn_ved +4`, `kpved +2`, `commodity_type +5`, `process +3`, `equipment_type +2` (у каждого переводов столько же, сколько значений: в файлах одно название). Без `SEED_DEMO` эти семь списков остаются пустыми — как в продакшене. Повторный выкат везде показывает `+0 (+0 переводов)`;
    - новые `api` и `worker` стартуют только после успешного `migrate`; `worker` создаёт очереди `file-scan` (политика `exclusive`), `file-scan-sweep`, `notify` и расписание `file-scan-sweep` (`*/15 * * * *`, Asia/Almaty); очереди `scan-file` и `send-notification` остаются в `pgboss.queue` без обработчиков;
-   - **`clamav` пересоздаётся**: в его конфигурации появился том с `infrastructure/clamav/clamd.conf` (файл монтируется только для чтения и заменяет файл образа целиком: `AlertExceedsMax yes`, `MaxScanSize 1024M`, `MaxFileSize 512M`, `MaxScanTime 120000`, `StreamMaxLength 100M`). После старта контейнер заново поднимает clamd на сигнатурах из тома `clamav-db`; пока он не здоров (проверка здоровья даёт `start_period` 300 секунд), проверка файлов недоступна, задания `file-scan` повторяются (до 5 раз с нарастающей паузой), остальное подберёт зачистка `file-scan-sweep`. До выката на стенде работали настройки образа (проверка 13.11.2026 командой `clamconf`, только чтение: `StreamMaxLength` 104857600, `MaxFileSize` 104857600, `MaxScanSize` 419430400, `AlertExceedsMax` выключен);
+   - **`clamav` пересоздаётся**: в его конфигурации появился том с `infrastructure/clamav/clamd.conf` (файл монтируется только для чтения и заменяет файл образа целиком: `AlertExceedsMax yes`, `MaxScanSize 1024M`, `MaxFileSize 512M`, `MaxScanTime 120000`, `StreamMaxLength 100M`). После старта контейнер заново поднимает clamd на сигнатурах из тома `clamav-db`; пока он не здоров (проверка здоровья даёт `start_period` 300 секунд), проверка файлов недоступна, задания `file-scan` повторяются (до 5 раз с нарастающей паузой), остальное подберёт зачистка `file-scan-sweep`. `--wait` ждёт, пока `clamav` станет `healthy`, — если не станет за 600 секунд, выкат объявлен неудачным (ветка «Если `clamav` не стал healthy» ниже). До выката на стенде работали настройки образа (проверка 13.11.2026 командой `clamconf`, только чтение: `StreamMaxLength` 104857600, `MaxFileSize` 104857600, `MaxScanSize` 419430400, `AlertExceedsMax` выключен);
    - `keycloak` пересобирается (в образ входит JAR темы с новой темой писем `imbc`) и пересоздаётся, `api` и `worker` — тоже: вход и письма пароля недоступны на время старта Keycloak.
 2. **`realm-sync`**: `sync-realm.py --theme imbc` ставит realm-настройку `emailTheme` = `imbc` (аргумент `--email-theme` по умолчанию `imbc`; значение из серверной `.env` не читается); в журнале выката строка `Updated realm settings: …` с `emailTheme` в списке.
 3. Готовность HTTPS/API и отказ закрытых маршрутов — как при любом выкате.
 
 **Окно выката.** Пока прежний `worker` не остановлен, блокировка входа, обработанная им, пишется в `notifications_sent`: новый код сверяет NOT-03 и с этой таблицей, но прежний код журнала `notification` не знает, поэтому при гонке в окне в минуты NOT-03 может уйти дважды. Письма, записанные прежней версией до `0010`, перенесены в `notification` и дубля не дают.
 
-**Файлы, смонтированные как файл** (`nginx.conf`, `clamd.conf`): выкат пересоздаёт контейнер, только если изменилась его конфигурация в Compose; правка одного файла контейнер не пересоздаёт (на выкате этапа 1 `nginx` до ручного пересоздания работал на прежнем `nginx.conf` — [проверка выката](verification-2026-11-13.md)). После правки любого из них: `sudo docker compose -f compose.yaml -f compose.azure.yaml up -d --force-recreate --no-deps <сервис>`. На этом выкате `nginx.conf` не менялся; `clamav` пересоздаётся самим выкатом.
+**Если `migrate` упал с `55P03`.** Мигратор ждёт блокировку не дольше 10 с (`MIGRATION_LOCK_TIMEOUT`, `lock_timeout` его соединения): внешние ключи `0009` берут на `user_accounts` и `organizations` блокировку, несовместимую с записью, и открытая транзакция записи прежних `api` и `worker` дольше 10 с делает ожидание невозможным. Это безопасный отказ выката, а не зависание: пачка миграций откатилась целиком (в `drizzle.__drizzle_migrations` по-прежнему 9 строк), новые `api` и `worker` не стартуют (`service_completed_successfully`), прежние работают на прежней схеме. Выглядит так: последняя строка выката `IMBC_DEPLOY_RESULT=failed step=compose-up`, контейнер `migrate` завершился с кодом 1, в его журнале ошибка `canceling statement due to lock timeout` с `code: '55P03'` (Drizzle печатает её как `cause` строки `Failed query: …`). Что делать: найти долгую транзакцию и повторить выкат.
+
+```bash
+cd /home/imbc/imbc-platform
+sudo docker compose -f compose.yaml -f compose.azure.yaml logs --tail 40 migrate </dev/null
+sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -v ON_ERROR_STOP=1 -c "
+  select pid, usename, application_name, state, now() - xact_start as xact_age
+  from pg_stat_activity
+  where datname = 'imbc' and xact_start is not null and pid <> pg_backend_pid()
+  order by xact_start;" </dev/null
+```
+
+Вторая команда печатает открытые транзакции базы `imbc` по возрасту: источник — строка со `state` `idle in transaction` или долгий запрос записи в `user_accounts` и `organizations`. Дождаться, пока она завершится (или выяснить, чья она), и повторить `./infrastructure/azure/deploy.sh redeploy`: миграции применяются заново с начала, повтор безопасен. Вывод этой ветки на стенде не наблюдался: она описана по коду и по тесту `apps/api/test/migrate.integration.test.ts`.
+
+**Если `clamav` не стал healthy.** Выкат идёт с `up -d --build --remove-orphans --wait --wait-timeout 600`, а `clamav` пересоздаётся с новым `clamd.conf` и заново загружает сигнатуры. Если за 600 секунд он не стал `healthy` (ошибка разбора `clamd.conf`, нехватка памяти, долгая загрузка сигнатур), `--wait` вернёт ошибку и выкат будет объявлен неудачным — `IMBC_DEPLOY_RESULT=failed step=compose-up`, — хотя `migrate` прошёл и остальные сервисы подняты (`api` и `worker` от `clamav` не зависят). Шаги после `compose-up` — `caddy-reload`, `realm-sync` (`emailTheme` realm), `readiness`, `route-check` и маркер выката — в этом случае не выполнены. Посмотреть, что с контейнером:
+
+```bash
+cd /home/imbc/imbc-platform
+sudo docker compose -f compose.yaml -f compose.azure.yaml ps -a clamav </dev/null
+sudo docker compose -f compose.yaml -f compose.azure.yaml logs --tail 50 clamav </dev/null
+free -h
+```
+
+- `Up … (health: starting)` или `(unhealthy)` и в журнале загрузка сигнатур — подождать и повторять `ps clamav` (проверка здоровья продолжается и после `unhealthy`: при первом успешном ответе clamd статус станет `healthy`). Сигнатуры лежат в томе `clamav-db` и между выкатами сохраняются, поэтому загрузка обычно короткая; на пустом томе — минуты.
+- `Restarting` и в журнале сообщение clamd о разборе `/etc/clamav/clamd.conf` с номером строки — ошибка конфигурации: поправить `infrastructure/clamav/clamd.conf` (правка на VM временная — настоящую внести в репозиторий и выкатить, иначе следующая синхронизация вернёт файл репозитория) и пересоздать контейнер, потому что файл смонтирован как файл:
+
+  ```bash
+  sudo docker compose -f compose.yaml -f compose.azure.yaml up -d --force-recreate --no-deps clamav
+  ```
+
+- Контейнер перезапускается без сообщений об ошибке или в `ps -a` код выхода 137 — вероятна нехватка памяти: `free -h` и `sudo docker stats --no-stream` покажут, кто её держит.
+
+Когда `ps clamav` показывает `healthy`, а последняя строка выката была `failed step=compose-up`, повторить `./infrastructure/azure/deploy.sh redeploy` из того же чистого checkout: он идемпотентен (повторный `migrate` и загрузка справочников ничего не меняют — `+0 (+0 переводов), пропущено удалённых: 0`, неизменившиеся контейнеры не пересоздаются), выполнит оставшиеся шаги и запишет маркер. **Файлы за это время не теряются**: загруженная версия остаётся `pending`, задания `file-scan` повторяются (до 5 раз с нарастающей паузой), затем версию снова ставит в очередь зачистка `file-scan-sweep` раз в 15 минут; недоступность clamd (отказ соединения, ответ не OK и не FOUND) — ошибка задания, а не «чистый» и не `rejected`. В это время страница `/references` показывает у нового образца «Проверяется антивирусом».
+
+**Файлы, смонтированные как файл** (`nginx.conf`, `clamd.conf`): выкат пересоздаёт контейнер, только если изменилась его конфигурация в Compose; правка одного файла контейнер не пересоздаёт (на выкате этапа 1 `nginx` до ручного пересоздания работал на прежнем `nginx.conf` — [проверка выката](verification-2026-11-13.md)). После правки любого из них: `sudo docker compose -f compose.yaml -f compose.azure.yaml up -d --force-recreate --no-deps <сервис>`. На этом выкате:
+
+- `clamd.conf` — новая строка тома у `clamav`, поэтому `clamav` пересоздаётся самим выкатом;
+- **`nginx.conf` изменён** (одна строка: `X-Content-Type-Options` добавляется, только если upstream его не прислал), а конфигурация `nginx` в Compose нет — контейнер сам не пересоздаётся и до ручного пересоздания работает на прежнем файле. На Azure он стоит вне пути запросов (Caddy проксирует сервисы напрямую), поэтому снаружи расхождение не видно, только на `127.0.0.1:8080`. После выката пересоздать его: `sudo docker compose -f compose.yaml -f compose.azure.yaml up -d --force-recreate --no-deps nginx`, затем `ps nginx` — `Up` (шаг 11 «Проверок после выката этапа 2»);
+- `Caddyfile` лежит в каталоге, смонтированном целиком (`./infrastructure/azure:/etc/caddy`), и перечитывается шагом выката `caddy-reload` (`caddy reload`); контейнер не пересоздаётся. В нём изменена одна строка — `?X-Content-Type-Options "nosniff"` (значение по умолчанию: пишется, только если ответ приложения его не принёс). Синтаксис `caddy validate` не проверялся (бинарника на машине исполнителя не было; префикс `?` описан в документации Caddy 2.10, в образе стенда — `caddy:2.10.2-alpine`). Если Caddy отклонит файл, `caddy reload` вернёт ошибку, выкат остановится на шаге `caddy-reload`, а Caddy продолжит работать на прежней конфигурации.
 
 ### Проверки после выката этапа 2
 
@@ -626,7 +668,7 @@ WHERE lower(email) = 'spectator@spectator.local' AND state = 'invited'
      select count(*) from drizzle.__drizzle_migrations;" </dev/null
    ```
 
-   Ожидается: «Миграции применены», пять строк «Справочники: …» (значения — в разделе «Что делает выкат этапа 2») и семь «Справочники (временные): …»; число `11`.
+   Ожидается: «Миграции применены», пять строк «Справочники: …, пропущено удалённых: 0» (значения — в разделе «Что делает выкат этапа 2») и семь «Справочники (временные): …, пропущено удалённых: 0»; число `11`. На повторном выкате `K` в «пропущено удалённых» — число значений, которые администратор удалил на `/references`; ненулевое число там не ошибка.
 
 2. Двенадцать справочников и число действующих значений в каждом:
 
@@ -677,7 +719,7 @@ WHERE lower(email) = 'spectator@spectator.local' AND state = 'invited'
                   where n.dedup_key = s.code || E'\n' || s.dedupe_key || E'\n' || lower(s.recipient))) as not_moved;" </dev/null
    ```
 
-   Ожидается `not_moved` = `0`. Прежняя версия писала в журнал только NOT-03, поэтому сразу после выката `legacy` = `journal_not03`; позже второе число растёт (новые письма пишутся только в `notification`).
+   Ожидается `not_moved` = `0`: это опорное условие, оно верно всегда. Равенство `legacy` = `journal_not03` верно только в момент выката — прежняя версия писала в журнал только NOT-03, и перенос идёт строка в строку; после первого же письма NOT-03 новой версии `journal_not03` станет больше (новые письма пишутся только в `notification`), и расхождение при этом не ошибка.
 
 5. Права роли приложения на новые таблицы:
 
@@ -732,16 +774,110 @@ WHERE lower(email) = 'spectator@spectator.local' AND state = 'invited'
     sudo docker compose -f compose.yaml -f compose.azure.yaml ps </dev/null
     ```
 
+11. Заголовок `X-Content-Type-Options` приходит одной строкой (у ответов API его ставит приложение, edge добавляет только ответу без него). Сначала на VM пересоздать `nginx` (выкат его не пересоздаёт, раздел «Что делает выкат этапа 2», «Файлы, смонтированные как файл») и проверить его:
+
+    ```bash
+    sudo docker compose -f compose.yaml -f compose.azure.yaml up -d --force-recreate --no-deps nginx && echo nginx-ok
+    curl -sI http://127.0.0.1:8080/api/health/ready | grep -ci '^x-content-type-options'
+    ```
+
+    Затем с локальной машины — три адреса через Caddy (API, web, Keycloak):
+
+    ```bash
+    for path in api/health/ready '' kc/realms/imbc/.well-known/openid-configuration; do
+      printf '/%s: ' "$path"
+      curl -sI "https://imbc-dev-e1cde8dd.polandcentral.cloudapp.azure.com/$path" | grep -ci '^x-content-type-options'
+    done
+    ```
+
+    Ожидается `nginx-ok` и `1` в каждой из четырёх строк. `2` — второй источник не убран (`nginx` не пересоздан или Caddy не перечитал `Caddyfile`), `0` — заголовка нет вовсе (ответ без заголовка и `?X-Content-Type-Options` в Caddy не сработал). Если `HEAD` отвечает `405`, взять `curl -s -o /dev/null -D - <адрес>`. Вывод на стенде не наблюдался.
+
+### Посмотреть при первом выкате этапа 2
+
+Это не критерии приёмки, а наблюдения, которые по коду не предсказать: значения записать в проверку выката (`verification-<дата>.md`). На 14.11.2026 ни одно из них на стенде не наблюдалось.
+
+1. **Длительность `migrate`.** Миграции, загрузка `release` и `seed` идут в одном контейнере; время старта и конца:
+
+   ```bash
+   sudo docker inspect --format '{{.State.StartedAt}} -> {{.State.FinishedAt}}' "$(sudo docker compose -f compose.yaml -f compose.azure.yaml ps -a -q migrate </dev/null)"
+   ```
+
+   Ожидаются секунды: миграции только добавляют таблицы и вставляют строки; предел ожидания блокировки — 10 с (ветка `55P03` выше).
+
+2. **Настоящий файл 20–25 МБ через Caddy** — по одному PDF и XLSX. Под `admin@imbc.local` загрузить образец на `/references` (Caddy принимает тело до 30 МБ и ждёт ответ API до 120 с); файл — настоящий документ, сохранённый Word, Excel или сканером, а не набор нулей (такой архив ведёт себя в clamd иначе). Время до `passed` — по строкам версий:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -v ON_ERROR_STOP=1 -c "
+     select byte_size, detected_media_type, scan_state, scanned_at - uploaded_at as scan_time
+     from file_version order by uploaded_at desc limit 5;" </dev/null
+   ```
+
+   Ожидается `passed`, `scan_time` — до минуты (так сказано и на экране). Загрузка не прошла (`413`, `502`, `504`) — записать код и размер. `rejected` с сигнатурой `Heuristics.Limits.Exceeded.MaxScanTime` — проверка не уложилась в 120 с (сигнатура — запрос «Файлы» в разделе «Обслуживание после этапа 2»): записать размер и время, настройки без решения владельца не менять. `415 file_structure_unsupported` у XLSX из выгрузки Apache POI или 1С — ожидаемый отказ для ZIP64, причина — в журнале `api` (`File upload: ZIP structure not accepted`). Загруженный образец становится текущим для производителя и директора: записать, какой файл остался текущим.
+
+3. **Копирование карантин → рабочий бакет на RustFS стенда.** На локальном RustFS оно работает (образец дошёл до «Текущий образец»); на стенде это то же `passed` файла из шага 2: версия, у которой копирование не прошло, остаётся `pending`, задание `file-scan` повторяется, а в `output` задания — `object storage copy failed: <класс ошибки>`:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -v ON_ERROR_STOP=1 -c "
+     select state, count(*), max(output->>'message') from pgboss.job where name = 'file-scan' group by state;" </dev/null
+   ```
+
+   Ожидается только `completed`.
+
+4. **Время до `healthy` у `clamav`.** Во время выката во втором сеансе SSH: `watch -n 15 "sudo docker compose -f compose.yaml -f compose.azure.yaml ps clamav"`; в момент появления `(healthy)` в `STATUS` видно `Up <время>` — это и есть время до `healthy`; потолок — `--wait-timeout 600`, а `start_period` проверки здоровья — 300 с.
+
+5. **Localization realm.** Консоль `/kc/admin/` (IP из `ADMIN_ALLOWED_IPS`), realm `imbc`, Realm settings → Localization: интернационализация включена, поддерживаются `kk`, `ru`, `en`, язык по умолчанию — `kk` (так задано в `imbc-realm.json`; realm импортирован один раз, `sync-realm.py` эти поля не синхронизирует). У пользователей, которым Keycloak шлёт письма, должен быть атрибут `locale` (в карточке пользователя — язык): регистрация и приглашение создают пользователя с ним; у созданного иначе (например, вручную в консоли) он может быть пуст, и письму достанется язык по умолчанию. Проще всего проверить письмом: регистрация на адрес `*.local` с языком `en` — тема и текст NOT-01 в Mailpit (`/dev-mail/`) на английском.
+
+6. **Через час после выката — нет заданий `failed`** в `file-scan`, `notify` и `file-scan-sweep`:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
+     select name, state, count(*) from pgboss.job
+     where name in ('file-scan', 'file-scan-sweep', 'notify') group by name, state order by name, state;" </dev/null
+   ```
+
+   Ожидается: нет строк `failed`; `file-scan-sweep` — `completed` (раз в 15 минут), `retry` не залипает.
+
 ### Приёмка этапа 2 на стенде
 
-Только по команде владельца, после выката и проверок выше. Сценарий — план этапа 2, раздел «Приёмка», шаги 2–7: справочники (`admin@imbc.local`, `/references`), директор (`director@imbc.local`), образец оргструктуры (PDF, файл с тестовой строкой EICAR, 409 для файла на проверке), права на файл (оператор — 403 и запись `file.read` `denied`, производитель — текущий образец), уведомления (NOT-03 и NOT-02 в журнале, язык письма), NOT-01 на казахском и английском. Входы демо-ролей — код `000000`; новые адреса — `*.local`, письма — в Mailpit (`/dev-mail/`); реальные адреса не используются (квота отправителя Azure мала). Регистрации приёмки, дошедшие до установки пароля, запускают платное чтение Adata (предел на стенде — 25, шаг 7 раздела «Релиз contract (0006)»): решить, временно ли ставить `ADATA_MONTHLY_LIMIT=0`, до начала. Результат — `docs/deployment/verification-<дата>.md`.
+После выката и проверок выше (выкат этапа разрешён владельцем 13.11.2026; выкладки следующих этапов — снова по его слову). Сценарий — план этапа 2, раздел «Приёмка», шаги 2–7: справочники (`admin@imbc.local`, `/references`), директор (`director@imbc.local`), образец оргструктуры (PDF, файл с тестовой строкой EICAR, 409 для файла на проверке), права на файл (оператор — 403 и запись `file.read` `denied` с маршрутом, производитель — текущий образец), уведомления (NOT-03 и NOT-02 в журнале, язык письма), NOT-01 на казахском и английском. Входы демо-ролей — код `000000`; новые адреса — `*.local`, письма — в Mailpit (`/dev-mail/`); реальные адреса не используются (квота отправителя Azure мала). Регистрации приёмки, дошедшие до установки пароля, запускают платное чтение Adata (предел на стенде — 25, шаг 7 раздела «Релиз contract (0006)»): решить, временно ли ставить `ADATA_MONTHLY_LIMIT=0`, до начала. Результат — `docs/deployment/verification-<дата>.md`.
+
+Записи аудита образца после сценария (маршрут отказа — в `object_id`, смена текущего — `diff` с идентификаторами файловых объектов, без имени файла):
+
+```bash
+sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -v ON_ERROR_STOP=1 -c "
+  select action, outcome, object_type, object_id, diff from audit_entries
+  where action in ('org_chart_sample.uploaded', 'org_chart_sample.current_changed', 'file.scan_rejected', 'file.read')
+  order by at desc limit 12;" </dev/null
+```
+
+Ожидается: `org_chart_sample.current_changed` с `{from, to}` после каждого образца, прошедшего проверку (у первого `from` — `null`), `file.read` `denied` у оператора с `object_type = route` и `object_id = /api/v1/org-chart-sample/current` или `/api/v1/org-chart-sample/current/content`, `file.scan_rejected` у файла с тестовой строкой EICAR.
+
+Правки итогового ревью веб-части закрыты тестами, но в браузере не смотрелись; их стоит увидеть глазами (1280 и 390 px, kk, ru, en): диалог «Добавить значение» у типов сертификатов и документов — флажок «Обязательный тип» слева у подписи, пояснение под ней; диалог типа товара — первый пункт выбора «Без группы», он выбран по умолчанию, можно сохранить тип без группы; ссылки-кнопки с рамкой — «Сбросить пароль» на `/account`, «Мой аккаунт» на `/profile`; строка итога наверху `/references` после загрузки образца сама меняется с «загружен и проверяется» на «стал текущим» или «не прошёл проверку»; под отметкой «Проверяется антивирусом» — строка про минуту; на последней странице списка «Далее» бледная, но получает кольцо фокуса по Tab.
 
 ### Откат этапа 2
 
 Откатывается код, схема не откатывается и не нужна: прежняя версия не читает новые таблицы, а читаемые ею скелетные таблицы остаются. Порядок — как в разделе «Откат» после «Релиз contract (0006)» (ручной откат на версию v1.3 до contract): чистый checkout целевого коммита (этап 1 — `306b58e`, ветка стенда), `git status --short` пуст → удаление лишних файлов на VM («[Файлы, которых нет в выкатываемом коммите](#файлы-которых-нет-в-выкатываемом-коммите)», `TARGET=306b58e`: сборка этапа 1 подхватила бы оставшиеся модули этапа 2 и остановилась) → `./infrastructure/azure/deploy.sh redeploy` → `IMBC_DEPLOY_RESULT=ok`. Что остаётся после отката:
 
 - **Данные этапа 2** (справочники, значения, 17 правил, `notification`, `file_object`, `file_version`, `org_chart_sample`, байты в бакетах) лежат нетронутыми; при повторном выкате этапа 2 они используются как есть (загрузка `release` и `seed` идемпотентны).
-- **Очереди.** Прежний worker снова обслуживает `scan-file` и `send-notification`; очереди `file-scan` и `notify` остаются без обработчика, задания в них не выполняются. Перед откатом посмотреть, что в них ждёт: `select name, state, count(*) from pgboss.job where name in ('file-scan', 'notify') group by name, state;` — задание `notify` в `created`, `retry` или `active` — письмо не уйдёт.
+- **Очереди.** Прежний worker снова обслуживает `scan-file` и `send-notification`; очереди `file-scan`, `file-scan-sweep` и `notify` остаются без обработчика, задания в них не выполняются. Перед откатом посмотреть, что в них ждёт:
+
+  ```bash
+  sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
+    select name, state, count(*) from pgboss.job where name in ('file-scan', 'notify') group by name, state;" </dev/null
+  ```
+
+  Задание `notify` в `created`, `retry` или `active` — письмо не уйдёт; версия файла в `pending` останется непроверенной до повторного выката этапа 2.
+- **Расписание `file-scan-sweep` остаётся.** Worker этапа 2 записал в `pgboss.schedule` строку `file-scan-sweep` (`*/15 * * * *`, Asia/Almaty; расписания создаёт `boss.schedule` при старте worker, `worker.module.ts`). После отката она не исчезает: планировщик pg-boss каждого worker читает все строки `pgboss.schedule`, а не только созданные им, поэтому worker этапа 1 каждые 15 минут ставит задание в очередь `file-scan-sweep`, которая осталась в `pgboss.queue` (у расписания на неё внешний ключ), а обработчика у него нет. Задания копятся в состоянии `created` и вреда не делают: их удаляет обслуживание pg-boss по сроку хранения очереди (14 суток по умолчанию), а при повторном выкате этапа 2 новый worker разберёт их зачисткой, которая идемпотентна. Снять расписание сразу, когда worker этапа 1 уже работает (иначе worker этапа 2 при старте создаёт его снова), и посчитать накопленное:
+
+  ```bash
+  sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -v ON_ERROR_STOP=1 -c "
+    delete from pgboss.schedule where name = 'file-scan-sweep' and coalesce(key, '') = '' returning name, cron;" </dev/null
+  sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
+    select state, count(*) from pgboss.job where name = 'file-scan-sweep' group by state;" </dev/null
+  ```
+
+  Первая команда печатает удалённую строку (`file-scan-sweep`, `*/15 * * * *`) и `DELETE 1`; это тот же запрос, что выполняет `boss.unschedule('file-scan-sweep')` в установленном pg-boss 12.38 (`DELETE FROM <схема>.schedule WHERE name = $1 AND COALESCE(key, '') = $2`); схема очереди — `PGBOSS_SCHEMA`, по умолчанию `pgboss`. Повторный выкат этапа 2 создаёт расписание заново. На стенде это не выполнялось.
+- **Права роли приложения.** `migrate` прежней версии снова выдаёт роли приложения UPDATE и DELETE на `notification`, `notification_rule` и `dictionary` (список прав этапа 1 не знает об их отзыве — по образцу оговорки для `nda_acceptance` при откате на версию до этапа 1, раздел «Откат» после «Релиз contract (0006)»): пока работает прежняя версия, она этих таблиц не читает и не пишет. Следующий выкат этапа 2 снимает права снова (шаг 5 «Проверок после выката этапа 2» показывает результат).
 - **Письма.** Письма, отправленные новой версией, прежняя не знает (журнал `notification`, она читает и пишет `notifications_sent`): при откате возможен повтор NOT-03 по событиям последних минут (прежний worker читает события Keycloak окном пять минут).
 - **Keycloak.** Realm-настройка `emailTheme` = `imbc` остаётся; если образ Keycloak откатывается на прежний (без темы `imbc` в JAR), по исходникам Keycloak 26.4 он пишет «Failed to find … theme … using built-in themes» и берёт тему по умолчанию: письма идут, но с исходными текстами Keycloak (казахские — с буквальными `\n\n`). `sync-realm.py` прежней версии `emailTheme` не меняет; на стенде этот путь не проверялся.
 - **ClamAV.** Прежняя конфигурация Compose не монтирует `clamd.conf`: контейнер пересоздаётся с настройками образа.
@@ -749,15 +885,19 @@ WHERE lower(email) = 'spectator@spectator.local' AND state = 'invited'
 
 ### Обслуживание после этапа 2
 
-- **Письма.** Задание `notify` в состоянии `failed` — письмо не ушло после 10 повторов (около 8,5 часа): письмо этого события не досылается. Строка `error` в журнале worker «письмо не будет отправлено, без повторов» или «задание отклонено без повторов» — постоянный отказ (нет правила, шаблона или подстановки, неготовая часть получателей): задание завершено `completed` и в pg-boss выглядит успешным, причина — только в журнале (код правила и причина, без адресов):
+- **Письма.** Задание `notify` в состоянии `failed` — письмо не ушло после 10 повторов (около 8,5 часа): письмо этого события не досылается. Постоянный отказ (нет правила, шаблона или подстановки, неверное задание, неготовая часть получателей) завершает задание сразу, без повторов: в журнале worker строка `error` «письмо не будет отправлено, без повторов» или «задание отклонено без повторов», а в `pgboss.job` задание `completed`, и причина лежит в его `output` — `{ rule, refused, reason }` (`refused` — `invalid_job` или `permanent_failure`; код правила и причина, без адресов и параметров). Итог обычной отправки там же — `{ sent, duplicates, skippedObservers, invalid, skipped }`. Состояние очереди, журнал и отказы за последние сутки:
 
   ```bash
   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
     select state, count(*) from pgboss.job where name = 'notify' group by state;" </dev/null
+  sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -c "
+    select id, completed_on, output from pgboss.job
+    where name = 'notify' and state = 'completed' and output ? 'refused'
+    order by completed_on desc;" </dev/null
   sudo docker compose -f compose.yaml -f compose.azure.yaml logs --since 24h worker </dev/null | grep -E 'notification NOT-[0-9]+:'
   ```
 
-  Предупреждение «ящик IMBC не задан» — шаг 4 «До выката этапа 2».
+  Вторая команда в норме не печатает строк; схема очереди — `PGBOSS_SCHEMA` (по умолчанию `pgboss`). Предупреждение «ящик IMBC не задан» — шаг 4 «До выката этапа 2». Журнал писем `notification` только пополняется (у роли приложения нет UPDATE и DELETE), срок хранения не задан и ничто его не чистит — вопрос 56; адреса получателей в нём остаются.
 - **Файлы.** Версии в `pending` дольше 15 минут — ClamAV недоступен или `worker` не работает (зачистка `file-scan-sweep` ставит их снова раз в 15 минут); отклонённые с сигнатурами `object_missing` и `checksum_mismatch` — признак проблемы хранилища, а не вируса (объекта нет в карантине или сумма не совпала спустя 15 минут повторов):
 
   ```bash
@@ -766,9 +906,11 @@ WHERE lower(email) = 'spectator@spectator.local' AND state = 'invited'
     -c "select at, diff->>'signature' from audit_entries where action = 'file.scan_rejected' order by at desc limit 20" </dev/null
   ```
 
-  Первое число должно быть `0`. Сигнатура `Heuristics.Limits.Exceeded…` — файл превысил предел проверки `clamd.conf` (отклонён намеренно); имя файла и ключ объекта в журналах и аудите не пишутся. Отказы загрузки DOCX и XLSX (`415 file_structure_unsupported`) видны в журнале `api` строкой `File upload: ZIP structure not accepted` с причиной `reason` и без имени файла.
+  Первое число должно быть `0`. Сигнатура `Heuristics.Limits.Exceeded…` — файл превысил предел проверки `clamd.conf` (отклонён намеренно); имя файла и ключ объекта в журналах и аудите не пишутся. Отказы загрузки DOCX и XLSX (`415 file_structure_unsupported`) видны в журнале `api` строкой `File upload: ZIP structure not accepted` с причиной `reason` и без имени файла: причин 22, три из них добавлены итоговой правкой — `directory_empty` (в каталоге архива нет записей), `content_types_missing` (нет `[Content_Types].xml` в корне) и `stored_sizes_mismatch` (у записи без сжатия размеры в каталоге различаются); клиент во всех случаях видит один код.
 - **Бакет карантина.** Правило жизненного цикла для `imbc-quarantine` (удалять объекты без строк в `file_version`) не настроено: объект остаётся, если процесс упал между записью в хранилище и фиксацией транзакции. Если правило вводить, срок должен быть заметно больше возможного простоя ClamAV, иначе будет удалён объект версии, которая ещё ждёт скана. Консоль S3 — через туннель (раздел «Доступ и секреты»).
-- **Справочники.** Временные значения `provisional` на стенде остаются после появления перечней IMBC: загрузка ничего не удаляет, администратор выводит их из оборота или удаляет на `/references`.
+- **Справочники.** Временные значения `provisional` на стенде остаются после появления перечней IMBC: загрузка ничего не удаляет, администратор выводит их из оборота или удаляет на `/references`. Обратное правило: **значение, удалённое администратором, не вернёт ни один будущий файл `release`** — даже официальный перечень IMBC, в котором оно снова есть. Загрузка по аудиту (`dictionary.entry_deleted` этого справочника с этим кодом, без учёта регистра) пропускает такой код целиком и не догружает переводы к значению, созданному заново; число пропущенных значений — `пропущено удалённых: K` в журнале `migrate` и `seed`. Вернуть такое значение можно только вручную: создать его через форму администратора на `/references`. Поэтому после выката перечня IMBC `K` больше нуля — не ошибка, но каждое пропущенное значение стоит сверить с администратором.
+- **Хранилище файлов: сроки.** Клиент S3 ограничивает соединение 5 с, простой сокета 30 с и путь до заголовков ответа 120 с, временный сбой повторяет сам (всего три попытки), поэтому зависшее хранилище даёт не вечное ожидание, а ошибку — у зависшего сервера через три попытки по 30 с плюс паузы (около полутора минут), при медленной отправке тела на загрузке — до трёх раз по 120 с: загрузка — `503 storage_unavailable` (журнал `api`: `File upload: quarantine storage unavailable`), скачивание — `503` (`File download: storage unavailable`) или обрыв ответа (`File download stream failed` / `Sample download stream failed` со сводкой `{ error: 'ObjectStorageError', operation: 'get', reason: 'TimeoutError' }`), проверка файла — ошибка задания `file-scan` (`output`: `object storage <операция> failed: TimeoutError`), версия остаётся `pending` и повторяется. Ключа объекта, бакета и имени файла в этих сообщениях нет. Причина — RustFS: `ps rustfs`, `logs --tail 50 rustfs`.
+- **Скачивание.** Файл идёт потоком из хранилища, и простой сокета хранилища — те же 30 с. На Azure Caddy отдаёт ответ потоком без буфера, поэтому если клиент перестал читать скачиваемый файл дольше чем на 30 с (сон ноутбука, обрыв мобильной сети), чтение из хранилища останавливается, срабатывает таймаут, и сервер обрывает скачивание — в журнале `api` строка `File download stream failed`; пользователь повторяет скачивание. Локально через nginx (буферизация включена) этого нет. Это принятое поведение, а не дефект: срок не меняют без решения.
 
 ### Contract этапа 2 (следующим релизом)
 
