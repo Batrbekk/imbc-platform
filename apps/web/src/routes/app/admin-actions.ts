@@ -1,6 +1,6 @@
 import { ADMIN_PROBLEM_CODES, type AdminProblemCode } from "@imbc/contracts";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { createContext, useContext, useRef } from "react";
+import { type QueryKey, useMutation, useQueryClient } from "@tanstack/react-query";
+import { createContext, useCallback, useContext, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 
 import type { Messages } from "@/i18n/messages";
@@ -62,6 +62,20 @@ export type RunOptions = { onSuccess?: () => void; onError?: (error: unknown) =>
 /** Итог последнего действия для строки состояния страницы. */
 export type ActionResult = { tone: "success" | "error"; text: string };
 
+/** Итог последнего действия с номером объявления: тот же итог дважды подряд — новое объявление. */
+export type Status = ActionResult & { id: number };
+
+/** Итог действия страницы: `announce` кладёт новый итог, `dismiss` убирает (кнопка «Скрыть»). */
+export function useActionStatus() {
+  const [status, setStatus] = useState<Status | null>(null);
+  const announce = useCallback(
+    (result: ActionResult) => setStatus((current) => ({ ...result, id: (current?.id ?? 0) + 1 })),
+    [],
+  );
+  const dismiss = useCallback(() => setStatus(null), []);
+  return { status, announce, dismiss };
+}
+
 /** Страница показывает итог действия в строке состояния (aria-live polite) над списком. */
 export const AnnounceContext = createContext<(result: ActionResult) => void>(() => {});
 export const useAnnounce = () => useContext(AnnounceContext);
@@ -72,14 +86,17 @@ const SESSION_CODES = new Set<string>(["unauthenticated", "mfa_required", "respo
 /**
  * Действие администратора. Пока запрос в пути, второй вызов `run` ничего не шлёт (двойной щелчок —
  * один запрос). Успех перечитывает список и объявляет итог в строке состояния страницы; 404 и 409 тоже
- * перечитывают список: он мог устареть.
+ * перечитывают список: он мог устареть. `invalidate` — какие запросы перечитать (по умолчанию список
+ * организаций и аккаунтов; страница справочников называет свои).
  */
 export function useAdminAction<TVariables, TResult>({
   request,
   done,
+  invalidate = [ADMIN_ACCOUNTS_KEY],
 }: {
   request: (variables: TVariables) => Promise<TResult>;
   done: (result: TResult, variables: TVariables) => string;
+  invalidate?: readonly QueryKey[];
 }) {
   const client = useQueryClient();
   const announce = useAnnounce();
@@ -87,13 +104,14 @@ export function useAdminAction<TVariables, TResult>({
   const mutation = useMutation({
     mutationFn: request,
     onSuccess: (result, variables) => {
-      void client.invalidateQueries({ queryKey: ADMIN_ACCOUNTS_KEY });
+      for (const queryKey of invalidate) void client.invalidateQueries({ queryKey });
       announce({ tone: "success", text: done(result, variables) });
     },
     onError: (error) => {
       if (!(error instanceof ApiError)) return;
       if (error.status === 401 || SESSION_CODES.has(error.code)) void client.invalidateQueries({ queryKey: meKey });
-      if (error.status === 404 || error.status === 409) void client.invalidateQueries({ queryKey: ADMIN_ACCOUNTS_KEY });
+      if (error.status === 404 || error.status === 409)
+        for (const queryKey of invalidate) void client.invalidateQueries({ queryKey });
     },
     onSettled: () => {
       inFlight.current = false;
@@ -116,5 +134,7 @@ export interface Action<TVariables> {
   isPending: boolean;
   isError: boolean;
   error: unknown;
+  /** Время последней отправки: растёт с каждым запросом, по нему форма находит новый ответ сервера. */
+  submittedAt: number;
   reset: () => void;
 }

@@ -1,11 +1,10 @@
 import type { AccountState, AdminAccount, AdminAccounts, AdminOrganization, OrganizationType } from "@imbc/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { CircleAlertIcon, CircleCheckIcon, XIcon } from "lucide-react";
-import { useCallback, useId, useRef, useState } from "react";
+import { useId, useRef } from "react";
 import { useTranslations } from "use-intl";
 
 import { PageTitle } from "@/components/app/page-title";
-import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,7 +24,8 @@ import { api } from "@/lib/api";
 import { useMe } from "@/lib/session";
 
 import { AccountActions, MajorOperatorToggle } from "./admin-account-actions";
-import { type ActionResult, ADMIN_ACCOUNTS_KEY, AnnounceContext } from "./admin-actions";
+import { ActionStatus } from "./action-status";
+import { ADMIN_ACCOUNTS_KEY, AnnounceContext, useActionStatus } from "./admin-actions";
 import { CreateOrganizationDialog, ImbcMailboxDialog, InviteDialog } from "./admin-dialogs";
 
 /**
@@ -55,9 +55,6 @@ function groupOrganizations(organizations: readonly AdminOrganization[]) {
   }).filter((group) => group.shown.length > 0 || group.hidden > 0);
 }
 
-/** Итог последнего действия с номером объявления: тот же итог дважды подряд — новое объявление. */
-type Status = ActionResult & { id: number };
-
 /**
  * Кабинет администратора IMBC: организации и аккаунты (ADM-01, ADM-02, ADM-03, ADM-05, GEN-05).
  * Профиля производителя, БИН и документов нет ни в ответе, ни на странице (ADM-06). Ответ читается без
@@ -67,11 +64,7 @@ type Status = ActionResult & { id: number };
 export function AdminAccountsPage() {
   const t = useTranslations("adminAccounts");
   const common = useTranslations("common");
-  const [status, setStatus] = useState<Status | null>(null);
-  const announce = useCallback(
-    (result: ActionResult) => setStatus((current) => ({ ...result, id: (current?.id ?? 0) + 1 })),
-    [],
-  );
+  const { status, announce, dismiss } = useActionStatus();
 
   const result = useQuery({
     queryKey: ADMIN_ACCOUNTS_KEY,
@@ -95,32 +88,7 @@ export function AdminAccountsPage() {
           )}
         </div>
 
-        {/* Итог последнего действия: виден и после прокрутки к нужной карточке (липкий), читается программой
-            чтения с экрана (aria-live polite) и остаётся до следующего действия или до «Скрыть». Alert —
-            с ключом объявления: тот же текст дважды подряд — новый элемент, его читают заново; он же коротко
-            проявляется, и видно, что действие выполнено ещё раз. */}
-        <div aria-live="polite" aria-atomic="true" className="sticky top-2 z-20 empty:-mt-4">
-          {status && (
-            <Alert
-              key={status.id}
-              role={undefined}
-              variant={status.tone === "error" ? "destructive" : "default"}
-              className="shadow-md animate-in fade-in-0 duration-200"
-            >
-              {status.tone === "error" ? (
-                <CircleAlertIcon aria-hidden="true" />
-              ) : (
-                <CircleCheckIcon aria-hidden="true" />
-              )}
-              <AlertDescription className="wrap-anywhere">{status.text}</AlertDescription>
-              <AlertAction>
-                <Button variant="ghost" size="icon-xs" aria-label={t("dismiss")} onClick={() => setStatus(null)}>
-                  <XIcon aria-hidden="true" />
-                </Button>
-              </AlertAction>
-            </Alert>
-          )}
-        </div>
+        <ActionStatus status={status} onDismiss={dismiss} dismissLabel={t("dismiss")} />
 
         {result.isError ? (
           // Кнопка — под текстом, а не в AlertAction: у Alert для неё отведено 4,5rem справа, а «Повторить»

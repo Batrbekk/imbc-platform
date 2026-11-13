@@ -53,6 +53,7 @@ const GUARDED_PAGES = new Map<string, Action>([
   ['/profile', 'profile.edit'],
   ['/reviews', 'review.take'],
   ['/admin/accounts', 'accounts.manage'],
+  ['/references', 'reference.read'],
 ]);
 
 /**

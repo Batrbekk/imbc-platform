@@ -54,9 +54,9 @@ type FinalFocus = ComponentProps<typeof DialogContent>["finalFocus"];
  * Диалог действия: своя переведённая кнопка «Отмена» (у встроенной подпись «Close» не переводится),
  * закрытие возвращает фокус на кнопку-триггер или на `finalFocus` (кнопку меню строки). Пока `locked`
  * (запрос в пути), диалог не закрывается ни Escape, ни щелчком по подложке: итог действия не придёт
- * на уже закрытый диалог.
+ * на уже закрытый диалог. Общий каркас: им пользуются и диалоги справочников.
  */
-function AdminDialog({
+export function AdminDialog({
   open,
   onOpenChange,
   trigger,
@@ -96,10 +96,11 @@ function AdminDialog({
  * проверки (`focusRequest` растёт) фокус уходит на первое поле с ошибкой. Пока запрос в пути, «Отмена»
  * недоступна (диалог не закрывается); `submitDisabled` — «Сохранить» недоступна, пока значение не изменено.
  */
-function DialogForm({
+export function DialogForm({
   title,
   description,
   submitLabel,
+  cancelLabel,
   pending,
   submitDisabled = false,
   error,
@@ -110,6 +111,8 @@ function DialogForm({
   title: string;
   description?: string;
   submitLabel: string;
+  /** Подпись «Отмена»; по умолчанию — из текстов аккаунтов, страницы с другими текстами передают свою. */
+  cancelLabel?: string;
   pending: boolean;
   submitDisabled?: boolean;
   error?: string;
@@ -141,7 +144,7 @@ function DialogForm({
       )}
       <DialogFooter>
         <DialogClose disabled={pending} render={<Button type="button" variant="outline" />}>
-          {t("cancel")}
+          {cancelLabel ?? t("cancel")}
         </DialogClose>
         <Button type="submit" disabled={pending || submitDisabled}>
           {pending && <Spinner aria-hidden="true" />}
@@ -153,7 +156,7 @@ function DialogForm({
 }
 
 /** Текстовое поле с подсказкой и ошибкой, связанными через aria-describedby. */
-function TextField({
+export function TextField({
   id,
   label,
   value,
@@ -161,6 +164,7 @@ function TextField({
   error,
   hint,
   type = "text",
+  inputMode,
   autoComplete,
   maxLength,
 }: {
@@ -171,6 +175,8 @@ function TextField({
   error?: string;
   hint?: ReactNode;
   type?: "text" | "email";
+  /** Клавиатура на телефоне; поле остаётся текстовым, число из него не получается. */
+  inputMode?: "numeric" | "text";
   autoComplete?: string;
   maxLength?: number;
 }) {
@@ -181,6 +187,7 @@ function TextField({
       <Input
         id={id}
         type={type}
+        inputMode={inputMode}
         autoComplete={autoComplete}
         maxLength={maxLength}
         value={value}
@@ -195,7 +202,7 @@ function TextField({
 }
 
 /** Выпадающий список с подписью над ним; `items` с вариантом `null` — подпись пустого выбора (Base UI). */
-function SelectField<T extends string>({
+export function SelectField<T extends string>({
   id,
   label,
   value,

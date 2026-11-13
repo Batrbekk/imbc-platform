@@ -1,5 +1,6 @@
 import { can } from "@imbc/contracts";
 import {
+  BookOpenIcon,
   BuildingIcon,
   ClipboardListIcon,
   LayoutDashboardIcon,
@@ -94,7 +95,8 @@ export function AppShell() {
   const role = me.data.user.role;
   // Дашборд — первым: это стартовая страница оператора, наблюдателя и директора (OPR-31).
   // Очередь проверки — перед каталогом: у SME она первая, это его стартовая страница.
-  // Аккаунты — перед «Моим аккаунтом»: у администратора это первый пункт и стартовая страница.
+  // Аккаунты — перед «Моим аккаунтом»: у администратора это первый пункт и стартовая страница; справочники —
+  // сразу после них (у директора — после каталога).
   // Адрес не `/accounts`: `/account` подсвечивался бы и на нём (startsWith).
   // `active` — начала адресов, на которых пункт подсвечен; по умолчанию — его href.
   const items: { href: string; label: string; icon: typeof SearchIcon; show: boolean; active?: string[] }[] = [
@@ -115,6 +117,7 @@ export function AppShell() {
       icon: UsersIcon,
       show: !!can(role, "accounts.manage"),
     },
+    { href: "/references", label: t("nav.references"), icon: BookOpenIcon, show: !!can(role, "reference.read") },
     { href: "/account", label: t("nav.account"), icon: UserRoundIcon, show: true },
   ].filter((i) => i.show);
 

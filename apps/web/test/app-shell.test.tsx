@@ -243,21 +243,50 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     expect(screen.queryByRole("link", { name: kk.nav.adminAccounts })).toBeNull();
   });
 
-  it("меню администратора: аккаунты и мой аккаунт; на /admin/accounts активен только пункт «Аккаунты»", async () => {
+  it("меню администратора: аккаунты, справочники и мой аккаунт; на /admin/accounts активен только пункт «Аккаунты»", async () => {
     stubWorkspace(me("administrator"));
     const { router, user } = renderRoute("/admin/accounts", { locale: "en" });
 
     await screen.findByRole("heading", { level: 1, name: en.adminAccounts.title });
     const menu = () => screen.getAllByRole("link").filter((link) => link.dataset.sidebar === "menu-button");
-    expect(menu().map((link) => link.textContent)).toEqual([en.nav.adminAccounts, en.nav.account]);
-    expect(menu().map((link) => link.getAttribute("href"))).toEqual(["/admin/accounts", "/account"]);
-    expect(menu().map((link) => link.hasAttribute("data-active"))).toEqual([true, false]);
+    expect(menu().map((link) => link.textContent)).toEqual([en.nav.adminAccounts, en.nav.references, en.nav.account]);
+    expect(menu().map((link) => link.getAttribute("href"))).toEqual(["/admin/accounts", "/references", "/account"]);
+    expect(menu().map((link) => link.hasAttribute("data-active"))).toEqual([true, false, false]);
 
     // «Мой аккаунт» по-прежнему открыт администратору; подсвечен только он.
-    await user.click(menu()[1]!);
+    await user.click(menu()[2]!);
     await waitFor(() => expect(router.state.location.pathname).toBe("/account"));
     expect(await screen.findByRole("heading", { name: en.account.title })).toBeTruthy();
-    expect(menu().map((link) => link.hasAttribute("data-active"))).toEqual([false, true]);
+    expect(menu().map((link) => link.hasAttribute("data-active"))).toEqual([false, false, true]);
+  });
+
+  it("пункт «Справочники» — у администратора и директора (reference.read), у остальных ролей его нет; страница закрыта им шлюзом (ADM-08, GEN-08)", async () => {
+    for (const role of ROLES) {
+      stubWorkspace(me(role));
+      const { router } = renderRoute("/references", { locale: "ru" });
+      const allowed = can(role, "reference.read") !== null;
+      expect(allowed, role).toBe(role === "administrator" || role === "director");
+
+      if (allowed) {
+        expect(await screen.findByRole("heading", { level: 1, name: ru.references.title }), role).toBeTruthy();
+        expect(router.state.location.pathname, role).toBe("/references");
+        const link = screen.getByRole("link", { name: ru.nav.references });
+        expect(link.getAttribute("href"), role).toBe("/references");
+        // На странице справочников подсвечен только её пункт.
+        const active = screen
+          .getAllByRole("link")
+          .filter((item) => item.dataset.sidebar === "menu-button" && item.hasAttribute("data-active"));
+        expect(
+          active.map((item) => item.getAttribute("href")),
+          role,
+        ).toEqual(["/references"]);
+      } else {
+        await waitFor(() => expect(router.state.location.pathname, role).toBe(HOME[role]));
+        await screen.findAllByText(`${role}@${role}.local`);
+        expect(screen.queryByRole("link", { name: ru.nav.references }), role).toBeNull();
+      }
+      cleanup();
+    }
   });
 
   it("директор на /reviews уходит на /dashboard", async () => {
@@ -402,10 +431,10 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     const expected: [Me["user"]["role"], string[]][] = [
       ["operator", ["/dashboard", "/catalog", "/account"]],
       ["observer", ["/dashboard", "/catalog", "/account"]],
-      ["director", ["/dashboard", "/catalog", "/account"]],
+      ["director", ["/dashboard", "/catalog", "/references", "/account"]],
       ["expert", ["/reviews", "/catalog", "/account"]],
       ["manufacturer", ["/profile", "/account"]],
-      ["administrator", ["/admin/accounts", "/account"]],
+      ["administrator", ["/admin/accounts", "/references", "/account"]],
     ];
     expect(expected.map(([role]) => role).sort()).toEqual([...ROLES].sort());
     for (const [role, hrefs] of expected) {
@@ -415,6 +444,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
         can(role, "catalog.search") && "/catalog",
         can(role, "profile.edit") && "/profile",
         can(role, "accounts.manage") && "/admin/accounts",
+        can(role, "reference.read") && "/references",
         "/account",
       ].filter(Boolean);
       expect(fromPolicy, role).toEqual(hrefs);

@@ -63,6 +63,7 @@ describe('страница после входа: destinationFor', () => {
     ['/profile', 'profile.edit'],
     ['/reviews', 'review.take'],
     ['/admin/accounts', 'accounts.manage'],
+    ['/references', 'reference.read'],
   ];
 
   it.each(ROLES)('без сохранённого адреса %s попадает на стартовую страницу', (role) => {
@@ -70,7 +71,7 @@ describe('страница после входа: destinationFor', () => {
       expect(destinationFor(role, saved), String(saved)).toBe(roleHome(role));
   });
 
-  it.each(ROLES)('страница по праву матрицы: %s на /catalog, /dashboard, /profile, /reviews, /admin/accounts', (role) => {
+  it.each(ROLES)('страница по праву матрицы: %s на /catalog, /dashboard, /profile, /reviews, /admin/accounts, /references', (role) => {
     for (const [path, action] of guarded) {
       const allowed = can(role, action) !== null;
       for (const saved of [path, `${path}?q=steel&page=2#results`, `${path}/`, `${path}//`, `${path}/123?tab=docs`])
@@ -105,6 +106,21 @@ describe('страница после входа: destinationFor', () => {
     expect(destinationFor('operator', '/admin/%61ccounts')).toBe('/dashboard');
     // Свою учётную запись администратор по-прежнему открывает.
     expect(destinationFor('administrator', '/account')).toBe('/account');
+  });
+
+  it('/references — директор и администратор (reference.read), остальные на стартовую (ADM-08, GEN-08)', () => {
+    for (const role of ROLES)
+      for (const saved of ['/references', '/references/', '/references?list=tn_ved&q=0101&page=2', '/references/x'])
+        expect(destinationFor(role, saved), `${role} ${saved}`).toBe(
+          role === 'administrator' || role === 'director' ? saved : roleHome(role),
+        );
+    expect(destinationFor('operator', '/references')).toBe('/dashboard');
+    expect(destinationFor('observer', '/references')).toBe('/dashboard');
+    expect(destinationFor('expert', '/references')).toBe('/reviews');
+    expect(destinationFor('manufacturer', '/references')).toBe('/profile');
+    // Путь сравнивается декодированным, как у роутера.
+    expect(destinationFor('operator', '/%72eferences')).toBe('/dashboard');
+    expect(destinationFor('administrator', '/%72eferences')).toBe('/%72eferences');
   });
 
   it('/companies/<id>: открыт ролям с catalog.search, производитель и администратор уходят на стартовую (GEN-08)', () => {
