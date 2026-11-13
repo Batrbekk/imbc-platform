@@ -208,7 +208,6 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     return new JobHandlers(
       db,
       {} as never,
-      {} as never,
       env,
       audit,
       {
@@ -224,6 +223,7 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
       } as never,
       sessions,
       service as ManufacturerOnboardingService,
+      {} as never,
     );
   }
 
@@ -391,10 +391,15 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
       }),
     };
     const now = Date.now();
+    const notifications = {
+      dispatch: vi.fn(async () => {
+        order.push('mail');
+        return { sent: 1, duplicates: 0, skippedObservers: 0, invalid: 0, skipped: null };
+      }),
+    };
     const worker = new JobHandlers(
       db,
       {} as never,
-      { sendRaw: vi.fn(async () => void order.push('mail')) } as never,
       env,
       audit,
       {
@@ -417,6 +422,7 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
       } as never,
       sessions,
       adata as never,
+      notifications as never,
     );
     try {
       await worker.keycloakEvents();

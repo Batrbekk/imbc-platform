@@ -77,12 +77,12 @@ describe.skipIf(!databaseUrl)(
       new JobHandlers(
         db,
         {} as never,
-        { sendRaw: vi.fn() } as never,
         env,
         new AuditService(db),
         keycloak as never,
         service,
         { onPasswordSet: vi.fn().mockResolvedValue({ profile: 'skipped', adata: 'skipped' }) } as never,
+        { dispatch: vi.fn() } as never,
       );
 
     const row = async (id: string) =>

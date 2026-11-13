@@ -89,7 +89,6 @@ const envSchema = z
 
     SMTP_URL: z.string().default('smtp://mailpit:1025'),
     MAIL_FROM: z.string().default('IMBC Platform <no-reply@imbc.local>'),
-    IMBC_MAILBOX: z.string().default('platform@imbc.local'),
 
     /**
      * Токен Adata из менеджера секретов (EXT-02, NFR-10). Нет значения или одни пробелы — коннектор выключен:

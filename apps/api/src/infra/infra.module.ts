@@ -5,7 +5,7 @@ import nodemailer, { type Transporter } from 'nodemailer';
 import { PgBoss } from 'pg-boss';
 import { ENV, type Env } from '../config/env.js';
 import { databaseErrorSummary } from '../database/pg-errors.js';
-import { ADATA_QUEUE_OPTIONS, FILE_SCAN_QUEUE_OPTIONS, QUEUES } from '../jobs/queues.js';
+import { ADATA_QUEUE_OPTIONS, FILE_SCAN_QUEUE_OPTIONS, NOTIFY_QUEUE_OPTIONS, QUEUES } from '../jobs/queues.js';
 import { OBJECT_STORAGE, S3ObjectStorage } from '../modules/files/object-storage.js';
 
 export const VALKEY = Symbol('VALKEY');
@@ -53,7 +53,14 @@ export function logQueueError(logger: Pick<Logger, 'error'>, error: unknown): vo
     {
       provide: MAILER,
       inject: [ENV],
-      useFactory: (env: Env): Transporter => nodemailer.createTransport(env.SMTP_URL),
+      // Зависший SMTP не держит транзакцию журнала письма и соединение БД дольше этих сроков (NOT-18).
+      useFactory: (env: Env): Transporter =>
+        nodemailer.createTransport({
+          url: env.SMTP_URL,
+          connectionTimeout: 10_000,
+          greetingTimeout: 10_000,
+          socketTimeout: 30_000,
+        }),
     },
     {
       provide: QUEUE,
@@ -99,6 +106,8 @@ export class InfraModule implements OnModuleInit, OnApplicationShutdown {
     await this.queue.createQueue(QUEUES.identitySync, { retryLimit: 5, retryDelay: 30, retryBackoff: true });
     // Загрузка ставит проверку файла в своей транзакции (DATA-07) — до старта worker.
     await this.queue.createQueue(QUEUES.fileScan, FILE_SCAN_QUEUE_OPTIONS);
+    // Письма событий ставятся в транзакции события (раздел 8.2) — до старта worker.
+    await this.queue.createQueue(QUEUES.notify, NOTIFY_QUEUE_OPTIONS);
     await this.valkey.connect().catch((error: unknown) => this.logger.warn(`Valkey недоступен: ${String(error)}`));
   }
 

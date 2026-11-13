@@ -1,13 +1,28 @@
+import type { Locale } from '@imbc/contracts';
 import { Inject, Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import type { Transporter } from 'nodemailer';
 import { ENV, type Env } from '../config/env.js';
+import { DB, type Database } from '../database/database.module.js';
+import { notification } from '../database/schema/index.js';
 import { MAILER } from '../infra/infra.module.js';
-import { type MailCode, type MailVars, renderMail } from './templates.js';
+import { notificationDedupKey, type NotificationRuleCode } from '../notifications/rules.js';
+import type { RenderedMail } from './templates.js';
+
+/** Запись журнала для одного письма: правило, событие, адрес, аккаунт, язык и объект события. */
+export interface NotificationEntry {
+  ruleCode: NotificationRuleCode;
+  eventKey: string;
+  to: string;
+  accountId: string | null;
+  language: Locale;
+  related?: { type: string; id: string };
+}
 
 /**
  * Отправка писем платформы через SMTP. На dev-стенде SMTP — Mailpit (письма видны в веб-интерфейсе),
  * на test/prod — почтовый релей IMBC (SMTP_URL с логином и TLS).
- * Срочные письма (код входа) отправляются сразу; остальные — через очередь send-notification с дедупликацией.
+ * Каждое письмо — строка журнала `notification` (NOT-18): код входа (NOT-02) отправляет API сразу,
+ * остальные — worker через очередь `notify` и диспетчер.
  */
 @Injectable()
 export class MailService implements OnApplicationBootstrap {
@@ -16,6 +31,7 @@ export class MailService implements OnApplicationBootstrap {
   constructor(
     @Inject(MAILER) private readonly mailer: Transporter,
     @Inject(ENV) private readonly env: Env,
+    @Inject(DB) private readonly db: Database,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -26,20 +42,38 @@ export class MailService implements OnApplicationBootstrap {
       .catch((error: unknown) => this.logger.warn(`SMTP недоступен: ${String(error)}`));
   }
 
-  async send<C extends MailCode>(code: C, to: string, locale: string, vars: MailVars[C]): Promise<void> {
-    const { subject, text, html } = renderMail(code, locale, vars);
-    await this.mailer.sendMail({
-      from: this.env.MAIL_FROM,
-      to,
-      subject,
-      text,
-      html,
-      headers: { 'X-IMBC-Notification': code },
+  /**
+   * Одно письмо на событие и адрес (NOT-18): строка журнала и отправка — одна транзакция. Ключ уже в
+   * журнале — `duplicate`, письма нет; параллельная отправка того же ключа ждёт эту транзакцию и получает
+   * `duplicate`. Сбой SMTP — откат строки и исключение: повтор задания отправит письмо. Дубль возможен
+   * только при обрыве между приёмом письма SMTP и COMMIT (расхождение 14 плана этапа 2).
+   */
+  async sendOnce(entry: NotificationEntry, mail: RenderedMail): Promise<'sent' | 'duplicate'> {
+    const to = entry.to.trim();
+    return this.db.transaction(async (tx) => {
+      const [claimed] = await tx
+        .insert(notification)
+        .values({
+          ruleCode: entry.ruleCode,
+          recipientEmail: to,
+          userAccountId: entry.accountId,
+          language: entry.language,
+          dedupKey: notificationDedupKey(entry.ruleCode, entry.eventKey, to),
+          relatedObjectType: entry.related?.type ?? null,
+          relatedObjectId: entry.related?.id ?? null,
+        })
+        .onConflictDoNothing({ target: notification.dedupKey })
+        .returning({ id: notification.id });
+      if (!claimed) return 'duplicate';
+      await this.mailer.sendMail({
+        from: this.env.MAIL_FROM,
+        to,
+        subject: mail.subject,
+        text: mail.text,
+        html: mail.html,
+        headers: { 'X-IMBC-Notification': entry.ruleCode },
+      });
+      return 'sent';
     });
-  }
-
-  /** Готовое письмо из очереди (тема и текст собраны при постановке задания). */
-  async sendRaw(to: string, subject: string, text: string, html?: string): Promise<void> {
-    await this.mailer.sendMail({ from: this.env.MAIL_FROM, to, subject, text, html });
   }
 }

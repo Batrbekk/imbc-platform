@@ -130,21 +130,21 @@ describe.skipIf(!databaseUrl)('регистрация v1.3 и профиль п�
 
   type SecurityEvent = { id: string; type: string; userId: string; time: number; details?: Record<string, string> };
 
-  /** Опрос событий Keycloak worker с заданным пакетом; почта и Keycloak — шпионы. */
+  /** Опрос событий Keycloak worker с заданным пакетом; уведомления и Keycloak — шпионы. */
   function poll(events: SecurityEvent[], service: Pick<ManufacturerOnboardingService, 'onPasswordSet'> = onboarding) {
     const keycloak = { securityEvents: vi.fn(async () => events), sendPasswordEmail: vi.fn() };
-    const mail = { sendRaw: vi.fn() };
+    const notifications = { dispatch: vi.fn() };
     const worker = new JobHandlers(
       db,
       {} as never,
-      mail as never,
       env,
       audit,
       keycloak as never,
       sessions,
       service as ManufacturerOnboardingService,
+      notifications as never,
     );
-    return { run: () => worker.keycloakEvents(), keycloak, mail };
+    return { run: () => worker.keycloakEvents(), keycloak, notifications };
   }
 
   const passwordEvent = (subject: string, at: Date, type = 'UPDATE_PASSWORD'): SecurityEvent => ({
@@ -417,15 +417,18 @@ describe.skipIf(!databaseUrl)('регистрация v1.3 и профиль п�
     const { account, keycloak } = await register();
     const before = await jobs(QUEUES.sendPasswordEmail, `data->>'subject' = $2`, [account.idpSubject]);
     expect(before).toHaveLength(1);
-    const notificationsBefore = (await jobs(QUEUES.sendNotification)).length;
+    const notificationsBefore = (await jobs(QUEUES.notify)).length;
+    const journal = async () =>
+      (await pool.query('select 1 from notification where user_account_id = $1', [account.id])).rowCount;
     const worker = poll([passwordEvent(account.idpSubject!, new Date())]);
     await worker.run();
     expect(await profilesOf(account.organizationId)).toHaveLength(1);
-    expect(await jobs(QUEUES.sendNotification)).toHaveLength(notificationsBefore);
+    expect(await jobs(QUEUES.notify)).toHaveLength(notificationsBefore);
+    expect(await journal()).toBe(0);
     expect(await jobs(QUEUES.sendPasswordEmail, `data->>'subject' = $2`, [account.idpSubject])).toHaveLength(1);
     expect(worker.keycloak.sendPasswordEmail).not.toHaveBeenCalled();
     expect(keycloak.sendPasswordEmail).not.toHaveBeenCalled();
-    expect(worker.mail.sendRaw).not.toHaveBeenCalled();
+    expect(worker.notifications.dispatch).not.toHaveBeenCalled();
     await boss.deleteAllJobs(QUEUES.sendPasswordEmail);
   });
 

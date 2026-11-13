@@ -1,0 +1,176 @@
+import { DEFAULT_LOCALE, type Locale } from '@imbc/contracts';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { and, eq, inArray, or, sql } from 'drizzle-orm';
+import { z } from 'zod';
+import { DB, type Database } from '../database/database.module.js';
+import { databaseErrorSummary } from '../database/pg-errors.js';
+import { notificationRule, userAccounts } from '../database/schema/index.js';
+import { MailService } from '../mail/mail.service.js';
+import { isMailTemplateCode, type RenderedMail, renderNotification } from '../mail/templates.js';
+import type { NotifyJob } from './enqueue.js';
+import { type Recipient, RECIPIENT_RESOLVERS, type RecipientResolver } from './recipients.js';
+import { ACCOUNT_SECURITY_RULES, type NotificationRuleCode, parseRecipientRule, type RecipientPart } from './rules.js';
+
+export const NOTIFICATION_RENDERER = Symbol('NOTIFICATION_RENDERER');
+export type NotificationRenderer = (
+  rule: NotificationRuleCode,
+  language: Locale,
+  params: Record<string, string>,
+) => RenderedMail;
+
+/**
+ * Тексты из языковых файлов (`mail/messages`, LANG-02). Письма без текста ещё нет — ошибка: тексты
+ * NOT-04…NOT-17 приходят со своими этапами.
+ */
+export const defaultNotificationRenderer: NotificationRenderer = (rule, language, params) => {
+  if (!isMailTemplateCode(rule)) throw new Error(`notification ${rule}: нет текста письма`);
+  return renderNotification(rule, language, params);
+};
+
+export interface DispatchResult {
+  sent: number;
+  duplicates: number;
+  skippedObservers: number;
+  invalid: number;
+  skipped: 'disabled' | 'no_recipients' | null;
+}
+
+const EMAIL = z.email();
+/** При совпадении адреса остаётся получатель с меньшим номером: аккаунт, затем контакт, затем ящик (NOT-18). */
+const SOURCE_RANK: Record<Recipient['source'], number> = { account: 0, contact: 1, imbc_mailbox: 2 };
+
+/** Сводка сбоя отправки для журнала: код ошибки SMTP или SQLSTATE, без текста (в нём бывает адрес). */
+function failureSummary(error: unknown): object {
+  const database = databaseErrorSummary(error);
+  if (database) return database;
+  const { name, code, responseCode } = (error ?? {}) as { name?: unknown; code?: unknown; responseCode?: unknown };
+  return {
+    error: typeof name === 'string' ? name : 'Error',
+    code: typeof code === 'string' ? code : null,
+    responseCode: typeof responseCode === 'number' ? responseCode : null,
+  };
+}
+
+/**
+ * Диспетчер письма события (раздел 8.2): правило из `notification_rule` → части получателей → проверка
+ * адреса → без наблюдателей (NOT-21) → один получатель на адрес без учёта регистра (NOT-18) → язык
+ * получателя (NOT-19) → текст → `MailService.sendOnce`. Повтор и параллельное задание того же события
+ * писем не удваивают: ключ журнала один на событие и адрес. Адреса не попадают ни в журнал процесса,
+ * ни в текст ошибки.
+ */
+@Injectable()
+export class NotificationDispatcher {
+  private readonly logger = new Logger(NotificationDispatcher.name);
+
+  constructor(
+    @Inject(DB) private readonly db: Database,
+    private readonly mail: MailService,
+    @Inject(RECIPIENT_RESOLVERS) private readonly resolvers: Record<RecipientPart, RecipientResolver>,
+    @Inject(NOTIFICATION_RENDERER) private readonly render: NotificationRenderer,
+  ) {}
+
+  async dispatch(job: NotifyJob): Promise<DispatchResult> {
+    const result: DispatchResult = { sent: 0, duplicates: 0, skippedObservers: 0, invalid: 0, skipped: null };
+    const [rule] = await this.db
+      .select({ recipientRule: notificationRule.recipientRule, enabled: notificationRule.enabled })
+      .from(notificationRule)
+      .where(eq(notificationRule.code, job.rule));
+    if (!rule) throw new Error(`notification ${job.rule}: правила нет в notification_rule`);
+    if (!rule.enabled) {
+      this.logger.log(`notification ${job.rule}: правило выключено`);
+      return { ...result, skipped: 'disabled' };
+    }
+
+    const found: Recipient[] = [];
+    for (const part of parseRecipientRule(rule.recipientRule)) {
+      const recipients = await this.resolvers[part](this.db, job);
+      if (part === 'imbc_mailbox' && recipients.length === 0)
+        this.logger.warn(`notification ${job.rule}: ящик IMBC не задан`);
+      found.push(...recipients);
+    }
+
+    const valid: Recipient[] = [];
+    for (const recipient of found) {
+      const email = recipient.email.trim();
+      if (EMAIL.safeParse(email).success) valid.push({ ...recipient, email });
+      else result.invalid += 1;
+    }
+
+    const accounts = await this.accountsOf(valid);
+    const observers = new Set(accounts.filter((a) => a.role === 'observer').map((a) => a.login));
+    const roleOf = new Map(accounts.map((a) => [a.id, a.role]));
+    const kept = ACCOUNT_SECURITY_RULES.includes(job.rule)
+      ? valid
+      : valid.filter((recipient) => {
+          const observer =
+            (recipient.accountId !== null && roleOf.get(recipient.accountId) === 'observer') ||
+            observers.has(recipient.email.toLowerCase());
+          if (observer) result.skippedObservers += 1;
+          return !observer;
+        });
+
+    const byAddress = new Map<string, Recipient>();
+    for (const recipient of kept) {
+      const key = recipient.email.toLowerCase();
+      const current = byAddress.get(key);
+      if (!current || SOURCE_RANK[recipient.source] < SOURCE_RANK[current.source]) byAddress.set(key, recipient);
+    }
+    if (byAddress.size === 0) result.skipped = 'no_recipients';
+
+    const languageOf = new Map(accounts.map((a) => [a.id, a.locale]));
+    let failed = 0;
+    for (const recipient of byAddress.values()) {
+      const language =
+        (recipient.languageAccountId !== null ? languageOf.get(recipient.languageAccountId) : undefined) ??
+        DEFAULT_LOCALE;
+      try {
+        const outcome = await this.mail.sendOnce(
+          {
+            ruleCode: job.rule,
+            eventKey: job.eventKey,
+            to: recipient.email,
+            accountId: recipient.accountId,
+            language,
+            related: job.related,
+          },
+          this.render(job.rule, language, job.params),
+        );
+        if (outcome === 'sent') result.sent += 1;
+        else result.duplicates += 1;
+      } catch (error) {
+        // Остальные адреса пробуются; этот уйдёт при повторе задания (строки журнала у него нет).
+        failed += 1;
+        this.logger.warn(failureSummary(error), `notification ${job.rule}: письмо не отправлено`);
+      }
+    }
+    this.logger.log(
+      `notification ${job.rule}: sent ${result.sent}, duplicates ${result.duplicates}, observers ${result.skippedObservers}, invalid ${result.invalid}`,
+    );
+    if (failed > 0) throw new Error(`notification ${job.rule}: ${failed} не отправлено`);
+    return result;
+  }
+
+  /**
+   * Аккаунты получателей и языковые аккаунты по id, а также аккаунты-наблюдатели, чей логин совпадает с
+   * адресом получателя без учёта регистра (NOT-21).
+   */
+  private async accountsOf(recipients: Recipient[]) {
+    if (recipients.length === 0) return [];
+    const ids = [
+      ...new Set(
+        recipients.flatMap((r) => [r.accountId, r.languageAccountId]).filter((id): id is string => id !== null),
+      ),
+    ];
+    const logins = [...new Set(recipients.map((r) => r.email.toLowerCase()))];
+    const login = sql<string>`lower(${userAccounts.email})`;
+    return this.db
+      .select({ id: userAccounts.id, login, role: userAccounts.role, locale: userAccounts.locale })
+      .from(userAccounts)
+      .where(
+        or(
+          ids.length ? inArray(userAccounts.id, ids) : undefined,
+          and(eq(userAccounts.role, 'observer'), inArray(login, logins)),
+        ),
+      );
+  }
+}

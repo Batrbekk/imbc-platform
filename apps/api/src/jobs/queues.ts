@@ -7,7 +7,7 @@ import type { Queue, QueueOptions } from 'pg-boss';
 export const QUEUES = {
   fileScan: 'file-scan',
   fileScanSweep: 'file-scan-sweep',
-  sendNotification: 'send-notification',
+  notify: 'notify',
   sendPasswordEmail: 'send-password-email',
   cleanupIdentity: 'cleanup-identity',
   refreshCatalog: 'refresh-catalog',
@@ -75,17 +75,16 @@ export const FILE_SCAN_QUEUE_OPTIONS = {
   retryBackoff: true,
 } satisfies Omit<Queue, 'name'>;
 
-export interface SendNotificationJob {
-  /** Код события из каталога уведомлений (раздел 9), например NOT-11. */
-  code: string;
-  /** Ключ идемпотентности: одно письмо на событие и адрес (NOT-20). */
-  dedupeKey: string;
-  to: string;
-  locale: string;
-  subject: string;
-  text: string;
-  html?: string;
-}
+/**
+ * Письма событий (раздел 8.2): задание — `NotifyJob` (`notifications/enqueue.ts`), без адресов. Очередь
+ * создают API (ставит задание в транзакции события) и worker — с одними параметрами. Повтор после сбоя SMTP
+ * отправляет только неотправленное: журнал `notification` держит одно письмо на событие и адрес (NOT-18).
+ */
+export const NOTIFY_QUEUE_OPTIONS = {
+  retryLimit: 10,
+  retryDelay: 30,
+  retryBackoff: true,
+} satisfies Omit<Queue, 'name'>;
 
 export interface IdentityJob {
   subject: string;

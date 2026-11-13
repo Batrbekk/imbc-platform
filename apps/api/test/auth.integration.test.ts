@@ -128,7 +128,7 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
     const entry = await session(user);
     const configured = listedDevelopmentEnv(user.id, role);
     const service = new SessionService(db, configured);
-    const mail = { send: vi.fn() };
+    const mail = { sendOnce: vi.fn() };
     const controller = new AuthController(
       {} as never,
       service,
@@ -147,7 +147,7 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
       reason: 'development_code',
       retryAfter: 60,
     });
-    expect(mail.send).not.toHaveBeenCalled();
+    expect(mail.sendOnce).not.toHaveBeenCalled();
     expect(await service.issueOtp(entry.id, user.id)).toMatchObject({ issued: false, reason: 'too_soon' });
     expect(await service.verifyOtp(entry.id, user.id, '000000')).toBe('ok');
     expect(await service.verifyOtp(entry.id, user.id, '000000')).toBe('expired');
@@ -202,7 +202,7 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
     const entry = await session(user);
     const configured = developmentEnv(user.id);
     const service = new SessionService(db, configured);
-    const mail = { send: vi.fn() };
+    const mail = { sendOnce: vi.fn() };
     const controller = new AuthController(
       {} as never,
       service,
@@ -222,7 +222,7 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
       retryAfter: 60,
       expiresAt: expect.any(String),
     });
-    expect(mail.send).not.toHaveBeenCalled();
+    expect(mail.sendOnce).not.toHaveBeenCalled();
     const code = (await db.query.otpCodes.findFirst({ where: eq(schema.otpCodes.sessionId, entry.id) }))!;
     expect(code.codeHash).toBe(DEVELOPMENT_OTP_HASH_PREFIX + sha256(`${entry.id}:000000`));
     expect(await service.issueOtp(entry.id, user.id)).toMatchObject({ issued: false, reason: 'too_soon' });
@@ -353,7 +353,7 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
       {} as never,
       sessions,
       new AuditService(db),
-      { send: vi.fn().mockRejectedValue(new Error('SMTP unavailable')) } as never,
+      { sendOnce: vi.fn().mockRejectedValue(new Error('SMTP unavailable')) } as never,
       rates,
       env,
       {} as never,
@@ -485,10 +485,10 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
   it('processes password revocation before a failing older lockout email', async () => {
     const user = await account();
     const old = await session(user, new Date(Date.now() - 3600000));
+    const notifications = { dispatch: vi.fn().mockRejectedValue(new Error('notification NOT-03: 1 не отправлено')) };
     const worker = new JobHandlers(
       db,
       {} as never,
-      { sendRaw: vi.fn().mockRejectedValue(new Error('SMTP unavailable')) } as never,
       env,
       new AuditService(db),
       {
@@ -504,8 +504,11 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
       } as never,
       sessions,
       { onPasswordSet: vi.fn().mockResolvedValue({ profile: 'skipped', adata: 'skipped' }) } as never,
+      notifications as never,
     );
-    await expect(worker.keycloakEvents()).rejects.toThrow('SMTP unavailable');
+    // Письмо не ушло — опрос падает (курсор не сдвигается, блокировка не теряется), но отзыв уже сделан.
+    await expect(worker.keycloakEvents()).rejects.toThrow('keycloak-events: NOT-03 не отправлено: 1');
+    expect(notifications.dispatch).toHaveBeenCalledOnce();
     expect(await sessions.resolve(old.token)).toBeNull();
   });
 
@@ -596,11 +599,11 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
     const worker = new JobHandlers(
       db,
       {} as never,
-      {} as never,
       env,
       new AuditService(db),
       keycloak as never,
       sessions,
+      {} as never,
       {} as never,
     );
     const reader = new PgBoss({

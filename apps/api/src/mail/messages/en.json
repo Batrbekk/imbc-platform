@@ -1,0 +1,19 @@
+{
+  "footer": "This email was sent automatically, please do not reply.",
+  "templates": {
+    "NOT-02": {
+      "subject": "IMBC Platform sign-in code: {code}",
+      "lines": [
+        "Sign-in code: {code}",
+        "The code is valid for {minutes} minutes. If this wasn't you, ignore this email and change your password."
+      ]
+    },
+    "NOT-03": {
+      "subject": "Your IMBC Platform account is temporarily locked",
+      "lines": [
+        "The password was entered incorrectly several times, so sign-in is locked for {minutes} minutes.",
+        "If this wasn't you, change your password: {link}"
+      ]
+    }
+  }
+}

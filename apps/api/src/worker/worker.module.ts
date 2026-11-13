@@ -20,11 +20,19 @@ import { orgChartSamplePassed } from '../modules/files/org-chart-sample.rules.js
 import {
   ADATA_QUEUE_OPTIONS,
   FILE_SCAN_QUEUE_OPTIONS,
+  NOTIFY_QUEUE_OPTIONS,
   PLATFORM_TZ,
   QUEUES,
   type QueueName,
   SCHEDULES,
 } from '../jobs/queues.js';
+import {
+  defaultNotificationRenderer,
+  NOTIFICATION_RENDERER,
+  NotificationDispatcher,
+} from '../notifications/dispatcher.js';
+import { notifyJobSchema } from '../notifications/enqueue.js';
+import { DEFAULT_RECIPIENT_RESOLVERS, RECIPIENT_RESOLVERS } from '../notifications/recipients.js';
 import { AccountInactivityJob } from './account-inactivity.job.js';
 import { ADATA_CLIENT_FACTORY, ADATA_TIMING, AdataPrefillJob, defaultAdataClientFactory } from './adata-prefill.job.js';
 import { FileScanJob, SCAN_PASSED_HOOKS, type ScanPassedHook } from './file-scan.job.js';
@@ -57,6 +65,10 @@ import { JobHandlers } from './handlers.service.js';
     AdataPrefillJob,
     AccountInactivityJob,
     FileScanJob,
+    // Письма событий (раздел 8.2): получатели по правилам-данным, тексты из языковых файлов.
+    NotificationDispatcher,
+    { provide: RECIPIENT_RESOLVERS, useValue: DEFAULT_RECIPIENT_RESOLVERS },
+    { provide: NOTIFICATION_RENDERER, useValue: defaultNotificationRenderer },
     { provide: ADATA_CLIENT_FACTORY, useValue: defaultAdataClientFactory },
     { provide: ADATA_TIMING, useValue: ADATA_DEFAULT_TIMING },
     // ClamAV вызывает только worker (DATA-07).
@@ -79,6 +91,7 @@ export class WorkerModule implements OnApplicationBootstrap {
     private readonly adataPrefill: AdataPrefillJob,
     private readonly inactivity: AccountInactivityJob,
     private readonly fileScan: FileScanJob,
+    private readonly notifications: NotificationDispatcher,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -91,7 +104,10 @@ export class WorkerModule implements OnApplicationBootstrap {
       [QUEUES.fileScanSweep]: async () => {
         await this.fileScan.sweep();
       },
-      [QUEUES.sendNotification]: (d) => h.sendNotification(d),
+      // Задание проверяется схемой: в нём только id, код правила и параметры, без адресов.
+      [QUEUES.notify]: async (d) => {
+        await this.notifications.dispatch(notifyJobSchema.parse(d));
+      },
       [QUEUES.sendPasswordEmail]: (d) => h.sendPasswordEmail(d),
       [QUEUES.cleanupIdentity]: (d) => h.cleanupIdentity(d),
       // Очередь письма сброса создаётся раньше задания неактивности, которое её наполняет (AUTH-07).
@@ -121,16 +137,18 @@ export class WorkerModule implements OnApplicationBootstrap {
           ? ADATA_QUEUE_OPTIONS
           : queue === QUEUES.fileScan
             ? FILE_SCAN_QUEUE_OPTIONS
-            : {
-                retryLimit:
-                  queue === QUEUES.sendPasswordEmail ||
-                  queue === QUEUES.cleanupIdentity ||
-                  queue === QUEUES.inactivityReset
-                    ? 10
-                    : 5,
-                retryBackoff: true,
-                retryDelay: 30,
-              },
+            : queue === QUEUES.notify
+              ? NOTIFY_QUEUE_OPTIONS
+              : {
+                  retryLimit:
+                    queue === QUEUES.sendPasswordEmail ||
+                    queue === QUEUES.cleanupIdentity ||
+                    queue === QUEUES.inactivityReset
+                      ? 10
+                      : 5,
+                  retryBackoff: true,
+                  retryDelay: 30,
+                },
       );
       await this.boss.work(queue, async (jobs) => {
         try {

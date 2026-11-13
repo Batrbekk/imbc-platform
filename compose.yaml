@@ -30,7 +30,6 @@ x-backend-env: &backend-env
   COOKIE_SECURE: ${COOKIE_SECURE:-false}
   SMTP_URL: ${SMTP_URL:-smtp://mailpit:1025}
   MAIL_FROM: ${MAIL_FROM:-IMBC Platform <no-reply@imbc.local>}
-  IMBC_MAILBOX: ${IMBC_MAILBOX:-platform@imbc.local}
   CLAMAV_HOST: clamav
   CLAMAV_PORT: 3310
 
