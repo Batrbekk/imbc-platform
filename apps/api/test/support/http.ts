@@ -27,7 +27,7 @@ export interface HttpStand {
    * Изменяющий запрос со своего origin (`origin: https://imbc.example.kz`) и телом JSON; cookie — как у `get`.
    * Запрос с чужим Origin тест делает сам через `fetch(\`${base}${path}\`, …)`.
    */
-  send(method: 'POST' | 'PUT', path: string, role?: Role, body?: unknown): Promise<Response>;
+  send(method: 'POST' | 'PUT' | 'DELETE', path: string, role?: Role, body?: unknown): Promise<Response>;
   close(): Promise<void>;
 }
 

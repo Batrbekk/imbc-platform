@@ -15,13 +15,18 @@ import {
   companyPageSchema,
   computeBinCheckDigit,
   CONTACT_ROLES,
+  createDictionaryEntrySchema,
   createOrganizationSchema,
   DATA_CLASSES,
   dashboardSchema,
   DICTIONARY_CODE_PATTERNS,
   DICTIONARY_CODES,
+  DICTIONARY_ENTRY_STATUSES,
   DICTIONARY_PARENT,
+  dictionaryChoicesQuerySchema,
+  dictionaryEntriesQuerySchema,
   entryDisplayName,
+  entryMandatorySchema,
   FILE_PURPOSES,
   FILE_SCAN_STATES,
   MANDATORY_DICTIONARIES,
@@ -43,9 +48,11 @@ import {
   PREFILL_FIELDS,
   PROFILE_TIERS,
   REFERENCE_DATA_STATUSES,
+  REFERENCE_PROBLEM_CODES,
   referenceFileSchema,
   ROLES,
   UPDATE_STATUSES,
+  updateDictionaryEntrySchema,
 } from '../src/index.js';
 
 describe('перечисления v1.3 (раздел 3.1, UPD-06)', () => {
@@ -233,6 +240,72 @@ describe('файлы справочников: схема, шаблоны код
         expect(pattern.test(code), `${dictionary}: ${JSON.stringify(code)}`).toBe(false);
     }
     expect(DICTIONARY_CODE_PATTERNS.region.test('x'.repeat(64))).toBe(true);
+  });
+});
+
+describe('API справочников: формы, страницы, коды ошибок (ADM-08, ADM-09, DATA-03, DATA-04)', () => {
+  const names = { kk: 'Атауы', ru: 'Название', en: 'Name' };
+
+  it('createDictionaryEntrySchema: без любого из трёх названий — отклоняется; код — строка', () => {
+    expect(createDictionaryEntrySchema.parse({ code: ' 0101210000 ', names })).toEqual({
+      code: '0101210000',
+      parentCode: null,
+      names,
+    });
+    // Форма администратора требует все три языка (расхождение 6 плана этапа 2).
+    for (const locale of ['kk', 'ru', 'en'] as const) {
+      const { [locale]: _, ...rest } = names;
+      expect(createDictionaryEntrySchema.safeParse({ code: 'X', names: rest }).success, locale).toBe(false);
+      expect(
+        createDictionaryEntrySchema.safeParse({ code: 'X', names: { ...names, [locale]: '  ' } }).success,
+        locale,
+      ).toBe(false);
+    }
+    // Код — только строка: число теряет ведущие нули (DATA-03).
+    expect(createDictionaryEntrySchema.safeParse({ code: 101210000, names }).success).toBe(false);
+    expect(createDictionaryEntrySchema.safeParse({ code: '   ', names }).success).toBe(false);
+    expect(createDictionaryEntrySchema.safeParse({ code: 'x'.repeat(65), names }).success).toBe(false);
+    // Порядка в форме создания нет: значение встаёт в конец списка; лишний ключ — отказ.
+    expect(createDictionaryEntrySchema.safeParse({ code: 'X', names, sortOrder: 0 }).success).toBe(false);
+    expect(createDictionaryEntrySchema.parse({ code: 'X', names, mandatory: true, parentCode: ' A ' })).toEqual({
+      code: 'X',
+      names,
+      mandatory: true,
+      parentCode: 'A',
+    });
+  });
+
+  it('правка, обязательность и запросы страниц: границы и значения по умолчанию', () => {
+    expect(updateDictionaryEntrySchema.parse({ names, sortOrder: 3 })).toEqual({
+      names,
+      sortOrder: 3,
+      parentCode: null,
+    });
+    for (const sortOrder of [-1, 1.5, 100001, '3'])
+      expect(updateDictionaryEntrySchema.safeParse({ names, sortOrder }).success, String(sortOrder)).toBe(false);
+    // Код не меняется: его нет в форме правки.
+    expect(updateDictionaryEntrySchema.safeParse({ names, sortOrder: 0, code: 'Y' }).success).toBe(false);
+    expect(entryMandatorySchema.safeParse({ mandatory: 'yes' }).success).toBe(false);
+
+    expect(DICTIONARY_ENTRY_STATUSES).toEqual(['active', 'retired', 'all']);
+    expect(dictionaryEntriesQuerySchema.parse({})).toEqual({ q: '', status: 'active', page: 1, pageSize: 50 });
+    // Query приходит строками.
+    expect(dictionaryEntriesQuerySchema.parse({ q: ' 0101 ', status: 'all', page: '3', pageSize: '100' })).toEqual({
+      q: '0101',
+      status: 'all',
+      page: 3,
+      pageSize: 100,
+    });
+    for (const bad of [{ page: '0' }, { pageSize: '9' }, { pageSize: '101' }, { status: 'deleted' }, { sort: 'code' }])
+      expect(dictionaryEntriesQuerySchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    expect(dictionaryChoicesQuerySchema.parse({})).toEqual({ q: '', lang: 'kk', page: 1, pageSize: 50 });
+    expect(dictionaryChoicesQuerySchema.safeParse({ lang: 'de' }).success).toBe(false);
+    expect(dictionaryChoicesQuerySchema.safeParse({ q: 'x'.repeat(101) }).success).toBe(false);
+  });
+
+  it('REFERENCE_PROBLEM_CODES без повторов', () => {
+    expect(new Set(REFERENCE_PROBLEM_CODES).size).toBe(REFERENCE_PROBLEM_CODES.length);
+    for (const code of REFERENCE_PROBLEM_CODES) expect(code).toMatch(/^[a-z]+(_[a-z]+)*$/);
   });
 });
 

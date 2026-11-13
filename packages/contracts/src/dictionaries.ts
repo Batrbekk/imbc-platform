@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { Locale } from './enums.js';
+import { LOCALES, type Locale } from './enums.js';
 
 /**
  * Справочники, которые ведёт администратор IMBC (ADM-08), в порядке требования. Коды — DBML
@@ -119,3 +119,163 @@ export function entryDisplayName(names: Partial<Record<Locale, string | null>>, 
   }
   return code;
 }
+
+/*
+ * API справочников (ADM-08, ADM-09, DATA-03, DATA-04). Список с выведенными значениями и обязательностью —
+ * `reference.read`, изменения — `reference.manage`; выбор действующих значений — любой вошедший пользователь
+ * (расхождение 3 плана этапа 2). Поиск и страницы — на сервере.
+ */
+
+/** Наибольший порядок значения, который принимает форма администратора. */
+export const DICTIONARY_SORT_ORDER_MAX = 100000;
+
+/** Названия значения: форма администратора требует все три языка (расхождение 6 плана этапа 2). */
+const names = z.object({ kk: entryName, ru: entryName, en: entryName }).strict();
+
+/**
+ * Новое значение. Код — строка (DATA-03), неизменяем после создания; порядка в форме нет: значение встаёт
+ * в конец списка. `mandatory` — только у типов сертификатов и документов (ADM-09).
+ */
+export const createDictionaryEntrySchema = z
+  .object({
+    code: z.string().trim().min(1).max(64),
+    parentCode: z.string().trim().min(1).max(64).nullable().default(null),
+    names,
+    mandatory: z.boolean().optional(),
+  })
+  .strict();
+export type CreateDictionaryEntryInput = z.infer<typeof createDictionaryEntrySchema>;
+
+/** Правка значения: названия, порядок и родитель; код не меняется. */
+export const updateDictionaryEntrySchema = z
+  .object({
+    names,
+    sortOrder: z.number().int().min(0).max(DICTIONARY_SORT_ORDER_MAX),
+    parentCode: z.string().trim().min(1).max(64).nullable().default(null),
+  })
+  .strict();
+export type UpdateDictionaryEntryInput = z.infer<typeof updateDictionaryEntrySchema>;
+
+/** Обязательность типа сертификата или документа (ADM-09). */
+export const entryMandatorySchema = z.object({ mandatory: z.boolean() }).strict();
+export type EntryMandatoryInput = z.infer<typeof entryMandatorySchema>;
+
+/** Какие значения показывает список администратора: действующие, выведенные из оборота (DATA-04) или все. */
+export const DICTIONARY_ENTRY_STATUSES = ['active', 'retired', 'all'] as const;
+export type DictionaryEntryStatus = (typeof DICTIONARY_ENTRY_STATUSES)[number];
+
+const page = z.coerce.number().int().min(1).default(1);
+const pageSize = z.coerce.number().int().min(10).max(100).default(50);
+
+/** Список администратора: `q` — начало кода или часть названия на любом языке, без учёта регистра. */
+export const dictionaryEntriesQuerySchema = z
+  .object({
+    q: z.string().trim().max(100).default(''),
+    status: z.enum(DICTIONARY_ENTRY_STATUSES).default('active'),
+    page,
+    pageSize,
+  })
+  .strict();
+export type DictionaryEntriesQuery = z.infer<typeof dictionaryEntriesQuerySchema>;
+
+/** Выбор значения в формах и фильтрах: только действующие, одно название на языке `lang`. */
+export const dictionaryChoicesQuerySchema = z
+  .object({
+    q: z.string().trim().max(100).default(''),
+    lang: z.enum(LOCALES).default('kk'),
+    page,
+    pageSize,
+  })
+  .strict();
+export type DictionaryChoicesQuery = z.infer<typeof dictionaryChoicesQuerySchema>;
+
+/**
+ * Значение в списке администратора. Названия — по языкам, null — перевода нет (загруженные классификаторы
+ * приходят без части языков). `mandatory` — null вне типов сертификатов и документов; `retiredAt` — ISO.
+ */
+export const dictionaryEntrySchema = z
+  .object({
+    id: z.uuid(),
+    code: z.string(),
+    parentCode: z.string().nullable(),
+    names: z.object({ kk: z.string().nullable(), ru: z.string().nullable(), en: z.string().nullable() }).strict(),
+    mandatory: z.boolean().nullable(),
+    customNameAllowed: z.boolean(),
+    sortOrder: z.number().int(),
+    retiredAt: z.string().nullable(),
+  })
+  .strict();
+export type DictionaryEntry = z.infer<typeof dictionaryEntrySchema>;
+
+/** Справочник в списке: закрыт ли он, есть ли обязательность, родительский справочник и число значений. */
+export const dictionarySummarySchema = z
+  .object({
+    code: z.enum(DICTIONARY_CODES),
+    closed: z.boolean(),
+    mandatoryApplicable: z.boolean(),
+    parentDictionary: z.enum(DICTIONARY_CODES).nullable(),
+    active: z.number().int(),
+    retired: z.number().int(),
+  })
+  .strict();
+export type DictionarySummary = z.infer<typeof dictionarySummarySchema>;
+
+/** Двенадцать справочников в порядке `DICTIONARY_CODES` (ADM-08). */
+export const dictionaryListSchema = z.object({ dictionaries: z.array(dictionarySummarySchema) }).strict();
+export type DictionaryList = z.infer<typeof dictionaryListSchema>;
+
+/** Страница значений; страница за последней — пустые `items` с прежним `total`. */
+export const dictionaryEntriesPageSchema = z
+  .object({
+    dictionary: dictionarySummarySchema,
+    items: z.array(dictionaryEntrySchema),
+    total: z.number().int(),
+    page: z.number().int(),
+    pageSize: z.number().int(),
+  })
+  .strict();
+export type DictionaryEntriesPage = z.infer<typeof dictionaryEntriesPageSchema>;
+
+export const dictionaryEntryResultSchema = z.object({ entry: dictionaryEntrySchema }).strict();
+export type DictionaryEntryResult = z.infer<typeof dictionaryEntryResultSchema>;
+
+/** Значение для выбора: название — `entryDisplayName` на языке запроса. */
+export const dictionaryChoiceSchema = z
+  .object({ id: z.uuid(), code: z.string(), name: z.string(), parentCode: z.string().nullable() })
+  .strict();
+export type DictionaryChoice = z.infer<typeof dictionaryChoiceSchema>;
+
+export const dictionaryChoicesPageSchema = z
+  .object({
+    items: z.array(dictionaryChoiceSchema),
+    total: z.number().int(),
+    page: z.number().int(),
+    pageSize: z.number().int(),
+  })
+  .strict();
+export type DictionaryChoicesPage = z.infer<typeof dictionaryChoicesPageSchema>;
+
+/**
+ * Коды problem+json маршрутов справочников (их сервис, `actorTransaction` и SessionGuard): по ним экран
+ * выбирает сообщение. `validation` — ошибка схемы тела или query, `internal` — сбой 500.
+ */
+export const REFERENCE_PROBLEM_CODES = [
+  'validation',
+  'unauthenticated',
+  'mfa_required',
+  'responsibility_required',
+  'forbidden',
+  'bad_origin',
+  'not_found',
+  'entry_exists',
+  'code_format',
+  'parent_invalid',
+  'dictionary_closed',
+  'mandatory_not_applicable',
+  'entry_mandatory',
+  'entry_retired',
+  'entry_in_use',
+  'busy',
+  'internal',
+] as const;
+export type ReferenceProblemCode = (typeof REFERENCE_PROBLEM_CODES)[number];

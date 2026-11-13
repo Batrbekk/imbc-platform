@@ -6,16 +6,16 @@ import {
   type ImbcMailboxResult,
   imbcMailboxResultSchema,
 } from '@imbc/contracts';
-import { Inject, Injectable, Logger } from '@nestjs/common';
-import { asc, eq, inArray } from 'drizzle-orm';
-import { z } from 'zod';
+import { Inject, Injectable } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
+import { auditActorDenial, busy, isUuid, lockActor, notFound } from '../../common/actor-transaction.js';
 import { AuditService } from '../../common/audit.service.js';
 import { parseOrThrow, ProblemException } from '../../common/problem.js';
 import { parseResponse } from '../../common/response.js';
 import { DB, type Database } from '../../database/database.module.js';
 import { boundLockWaits, lockWaitExceeded } from '../../database/lock-waits.js';
-import { databaseErrorSummary, uniqueViolation } from '../../database/pg-errors.js';
-import { organizations, userAccounts } from '../../database/schema/index.js';
+import { uniqueViolation } from '../../database/pg-errors.js';
+import { organizations } from '../../database/schema/index.js';
 import type { AuthUser } from '../auth/auth.types.js';
 
 /** Колонки организации в ответе: без БИН и ящика (ADM-06). */
@@ -26,10 +26,8 @@ const ORGANIZATION_COLUMNS = {
   isMajorOperator: organizations.isMajorOperator,
 };
 
-export const notFound = () => new ProblemException(404, 'not_found', 'Не найдено');
-/** Строка занята другим действием дольше `boundLockWaits`: повтор безопасен. */
-export const busy = () => new ProblemException(503, 'busy', 'Запись занята другим действием. Попробуйте снова.');
-export const isUuid = (value: string) => z.uuid().safeParse(value).success;
+// Перенесены в common/actor-transaction.ts (этап 2): прежние имена остаются для модулей и тестов этапа 1.
+export { auditActorDenial, busy, isUuid, lockActor, notFound } from '../../common/actor-transaction.js';
 
 /** Маршруты администратора, как их пишет в аудит отказ SessionGuard (`req.route.path`). */
 export const ADMIN_ROUTES = {
@@ -43,73 +41,6 @@ export const ADMIN_ROUTES = {
   role: '/api/v1/admin/accounts/:id/role',
   email: '/api/v1/admin/accounts/:id/email',
 } as const;
-
-const logger = new Logger('AdminActions');
-
-/** Исполнитель перестал быть active administrator между guard и транзакцией действия. */
-class ActorDenied extends ProblemException {
-  constructor() {
-    super(403, 'forbidden', 'Нет прав на это действие');
-  }
-}
-
-/**
- * Транзакция действия администратора (план, расхождение 18): строки исполнителя и цели блокируются
- * `for no key update` в порядке id, исполнитель всё ещё active administrator — иначе 403, как у
- * SessionGuard (GEN-08). Взаимные действия двух администраторов идут по очереди: второй ждёт первого
- * и перечитывает свою строку, повышения блокировки (и взаимной блокировки 40P01) нет. Внешние ключи
- * `sessions`, `otp_codes` берут KEY SHARE и с этим режимом не конфликтуют. Возвращает строку цели.
- */
-export async function lockActor(tx: Database, actorId: string, targetId?: string) {
-  const ids = targetId && targetId !== actorId ? [actorId, targetId] : [actorId];
-  const rows = await tx
-    .select({
-      id: userAccounts.id,
-      role: userAccounts.role,
-      state: userAccounts.state,
-      idpSubject: userAccounts.idpSubject,
-    })
-    .from(userAccounts)
-    .where(inArray(userAccounts.id, ids))
-    .orderBy(asc(userAccounts.id))
-    .for('no key update');
-  const actor = rows.find((r) => r.id === actorId);
-  if (actor?.role !== 'administrator' || actor.state !== 'active') throw new ActorDenied();
-  return targetId ? rows.find((r) => r.id === targetId) : undefined;
-}
-
-/**
- * Отказ `lockActor` откатывается вместе с транзакцией действия; запрос без права пишется в аудит
- * (GEN-08, AUD-01) — здесь, после отката, той же записью, что у SessionGuard. Сбой самой записи
- * не подменяет 403 ошибкой 500: в журнал — сводка, наружу — исходный отказ.
- */
-export async function auditActorDenial<T>(
-  audit: AuditService,
-  actor: AuthUser,
-  route: string,
-  ip: string | null,
-  run: () => Promise<T>,
-): Promise<T> {
-  try {
-    return await run();
-  } catch (error) {
-    if (error instanceof ActorDenied)
-      try {
-        await audit.record({
-          userId: actor.id,
-          organizationId: actor.organizationId,
-          action: 'accounts.manage',
-          objectType: 'route',
-          objectId: route,
-          outcome: 'denied',
-          ip,
-        });
-      } catch (auditError) {
-        logger.error(databaseErrorSummary(auditError) ?? auditError, 'Denied action audit failed');
-      }
-    throw error;
-  }
-}
 
 /**
  * Организации операторов и наблюдателей, отметка major operator и ящик IMBC (ADM-03, GEN-05, раздел 8.2).
