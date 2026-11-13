@@ -10,10 +10,20 @@ const nginxConf = read('nginx/nginx.conf');
 
 const CADDY_MATCHER = '@accountConsole path_regexp accountConsole (?i)^/kc/realms/[^/]+/account(?:/|;|$)';
 const CADDY_RESPOND = 'respond @accountConsole 404';
-const NGINX_LOCATION = 'location ~* ^/kc/realms/[^/]+/account(/|;|$) { return 404; }';
+const NGINX_LOCATION = 'location ~* "^/kc/realms/[^/]+/account(/|;|$)" { return 404; }';
 
 /** Шаблон пути из конфигурации как регулярное выражение JS: `(?i)` Caddy и `~*` nginx — флаг i. */
 const pattern = (source: string) => new RegExp(source.replace(/^\(\?i\)/, ''), 'i');
+
+/**
+ * Директивы `location ~` и `location ~*` из nginx.conf (комментарии отброшены): шаблон как записан и признак кавычек.
+ * Без кавычек nginx читает `;`, `{` и `}` как конец директивы или блока — `nginx -t` падает, контейнер перезапускается.
+ */
+const regexLocations = (conf: string) =>
+  [...conf.replace(/^\s*#.*$/gm, '').matchAll(/^\s*location\s+~\*?\s+(?:"([^"]*)"|'([^']*)'|(\S+))/gm)].map((match) => ({
+    quoted: match[3] === undefined,
+    source: match[1] ?? match[2] ?? match[3]!,
+  }));
 
 const CLOSED = [
   '/kc/realms/imbc/account',
@@ -60,10 +70,24 @@ describe('edge: консоль аккаунта Keycloak закрыта (MAN-05,
 
   it('шаблон закрывает консоль и её пути в любом регистре; OIDC, действия входа и ресурсы темы открыты', () => {
     const caddy = pattern(CADDY_MATCHER.split(' ').at(-1)!);
-    const nginx = pattern(NGINX_LOCATION.split(' ')[2]!);
+    const nginx = pattern(/"([^"]+)"/.exec(NGINX_LOCATION)![1]!);
     for (const regex of [caddy, nginx]) {
       for (const path of CLOSED) expect(regex.test(path), `${regex} ${path}`).toBe(true);
       for (const path of OPEN) expect(regex.test(path), `${regex} ${path}`).toBe(false);
     }
+  });
+
+  it('nginx.conf: шаблон location ~ / ~* с «;», «{» или «}» заключён в кавычки, иначе nginx не стартует', () => {
+    const locations = regexLocations(nginxConf);
+    expect(locations.length).toBeGreaterThan(0);
+    for (const { quoted, source } of locations) {
+      if (/[;{}]/.test(source)) expect(quoted, `шаблон ${source} без кавычек`).toBe(true);
+    }
+  });
+
+  it('проверка кавычек видит шаблон без кавычек (прежняя запись закрытия консоли)', () => {
+    const before = 'location ~* ^/kc/realms/[^/]+/account(/|;|$) { return 404; }';
+    expect(regexLocations(before)).toEqual([{ quoted: false, source: '^/kc/realms/[^/]+/account(/|;|$)' }]);
+    expect(regexLocations(NGINX_LOCATION)).toEqual([{ quoted: true, source: '^/kc/realms/[^/]+/account(/|;|$)' }]);
   });
 });

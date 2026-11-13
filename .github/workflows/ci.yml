@@ -59,6 +59,13 @@ jobs:
         run: |
           image="$(sed -n 's/^ARG NGINX_IMAGE=//p' infrastructure/docker/web.Dockerfile)"
           docker run --rm --entrypoint nginx -v "$PWD/infrastructure/nginx/web.conf:/etc/nginx/conf.d/default.conf:ro" "$image" -t
+      # Синтаксис nginx.conf локального прокси — образ тот же, что у сервиса nginx в compose.yaml. Ошибка
+      # в файле (например, `;` в шаблоне location без кавычек) иначе роняет контейнер в перезапуск уже на стенде.
+      # Имена upstream (web, api, keycloak) в сети compose разрешаются Docker, здесь им нужны адреса.
+      - name: nginx -t for nginx.conf
+        run: |
+          image="$(awk '/^  nginx:/ { in_service = 1 } in_service && $1 == "image:" { print $2; exit }' compose.yaml)"
+          docker run --rm --add-host web:127.0.0.1 --add-host api:127.0.0.1 --add-host keycloak:127.0.0.1 -v "$PWD/infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" "$image" nginx -t
 
   integration:
     name: API integration tests (PostgreSQL 18)
