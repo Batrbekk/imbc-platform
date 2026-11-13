@@ -6,7 +6,6 @@ import { type Dictionary, defineDictionary, translate } from "@/prototype/i18n";
 export const texts = defineDictionary({
   en: {
     "menu.assignments": "Assign reviews",
-    "menu.references": "Reference lists",
     "menu.nda": "NDA versions",
     "menu.forecast": "Demand forecast",
     "menu.techFiles": "STR and KTRE files",
@@ -33,7 +32,6 @@ export const texts = defineDictionary({
   },
   ru: {
     "menu.assignments": "Назначение проверок",
-    "menu.references": "Справочники",
     "menu.nda": "Версии NDA",
     "menu.forecast": "Прогноз спроса",
     "menu.techFiles": "Файлы STR и KTRE",
@@ -60,7 +58,6 @@ export const texts = defineDictionary({
   },
   kk: {
     "menu.assignments": "Тексеруді тағайындау",
-    "menu.references": "Анықтамалықтар",
     "menu.nda": "NDA нұсқалары",
     "menu.forecast": "Сұраныс болжамы",
     "menu.techFiles": "STR және KTRE файлдары",

@@ -64,18 +64,26 @@ const PROFILE_VALUES = [
 ];
 
 describe("кабинет администратора", () => {
-  it("восемь пунктов меню; индекс ведёт на первый из них; прогноз и STR/KTRE с бейджем Release 2", async () => {
+  it("семь пунктов меню; индекс ведёт на первый из них; прогноз и STR/KTRE с бейджем Release 2", async () => {
     renderCabinet("/proto/administrator", { role: "administrator" });
     // Индексный маршрут кабинета открывает первый пункт меню — «Assign reviews».
     expect(await screen.findByRole("heading", { level: 1, name: "Assign reviews" })).toBeTruthy();
     expect(screen.getByRole("link", { name: /Assign reviews/ }).getAttribute("href")).toBe(
       "/proto/administrator/assignments",
     );
-    // Макет «Организации и аккаунты» из меню убран: настоящая страница — /admin/accounts (ADM-02).
+    // Макеты «Организации и аккаунты» и «Справочники» из меню прототипа убраны: настоящие страницы —
+    // /admin/accounts (ADM-02) и /references (ADM-08), пункты основного меню. Ссылку «Reference lists» основного
+    // меню (href /references) это не затрагивает, поэтому отсутствие проверяется по адресу макета.
     expect(screen.queryByRole("link", { name: /Organisations and accounts/ })).toBeNull();
+    const menuHrefs = screen
+      .getAllByRole("link")
+      .map((link) => link.getAttribute("href") ?? "")
+      .filter((href) => href.startsWith("/proto/administrator/"));
+    expect(menuHrefs).toHaveLength(7);
+    expect(menuHrefs).not.toContain("/proto/administrator/references");
+    expect(menuHrefs).not.toContain("/proto/administrator/organizations");
     for (const name of [
       "Assign reviews",
-      "Reference lists",
       "NDA versions",
       "Demand forecast",
       "STR and KTRE files",
