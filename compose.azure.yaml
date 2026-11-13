@@ -8,6 +8,7 @@ services:
       dockerfile: Dockerfile
     environment:
       KEYCLOAK_LOGIN_THEME: imbc
+      KEYCLOAK_EMAIL_THEME: imbc
 
   caddy:
     image: caddy:2.10.2-alpine

@@ -150,6 +150,8 @@ services:
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET}
       KEYCLOAK_DEV_USER_PASSWORD: ${KEYCLOAK_DEV_USER_PASSWORD}
       KEYCLOAK_LOGIN_THEME: ${KEYCLOAK_LOGIN_THEME:-keycloak.v2}
+      # Тема писем Keycloak (NOT-01 на языке получателя, NOT-19): в образе из каталога identity — imbc, в образе Keycloak без неё — keycloak.
+      KEYCLOAK_EMAIL_THEME: ${KEYCLOAK_EMAIL_THEME:-keycloak}
       # Почта Keycloak: письма установки и сброса пароля (AUTH-01, AUTH-08). По умолчанию — Mailpit.
       KEYCLOAK_SMTP_HOST: ${KEYCLOAK_SMTP_HOST:-mailpit}
       KEYCLOAK_SMTP_PORT: ${KEYCLOAK_SMTP_PORT:-1025}

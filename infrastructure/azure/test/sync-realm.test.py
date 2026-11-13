@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Profile step of sync-realm.py: email and username editable only by admin (MAN-05, ADM-05),
-first and last name optional (MAN-03, ADM-01: no name step after the password is set).
+"""Managed settings of sync-realm.py: email and username editable only by admin (MAN-05, ADM-05),
+first and last name optional (MAN-03, ADM-01: no name step after the password is set), and the Keycloak
+email theme `imbc` that sends NOT-01 in the recipient's language (NOT-19, NOT-20).
 
     python3 infrastructure/azure/test/sync-realm.test.py
 No Keycloak, Docker or network: the pure function and the desired realm JSON only.
@@ -10,6 +11,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -116,6 +118,59 @@ class ManagedUserProfile(unittest.TestCase):
             self.assertNotIn("required", attributes[name])
         self.assertEqual(attributes["email"]["required"], {"roles": ["user"]})
         self.assertEqual([g["name"] for g in profile["groups"]], ["user-metadata"])
+
+
+def realm_source() -> dict:
+    return json.loads((ROOT / "infrastructure/keycloak/imbc-realm.json").read_text())
+
+
+def realm_env() -> dict[str, str]:
+    """Every ${NAME} of the realm file with a dummy value, as the server .env would supply them."""
+    names = set(sync_realm.PLACEHOLDER.findall((ROOT / "infrastructure/keycloak/imbc-realm.json").read_text()))
+    return {name: "value" for name in names}
+
+
+class EmailTheme(unittest.TestCase):
+    """emailTheme is synchronised from --email-theme (default imbc): the stock Keycloak email theme has no
+    Kazakh text that is usable, so the existing realm must switch to the IMBC email theme on every rollout."""
+
+    def desired(self, *args: str) -> dict:
+        _, realm_patch, _ = sync_realm.desired_settings(realm_source(), realm_env(), "imbc", *args)
+        return realm_patch
+
+    def test_email_theme_is_a_managed_field_and_the_realm_file_takes_it_from_the_environment(self) -> None:
+        self.assertIn("emailTheme", sync_realm.REALM_FIELDS)
+        self.assertEqual(realm_source()["emailTheme"], "${KEYCLOAK_EMAIL_THEME}")
+        self.assertEqual(realm_source()["loginTheme"], "${KEYCLOAK_LOGIN_THEME}")
+
+    def test_email_theme_defaults_to_imbc_and_follows_the_argument(self) -> None:
+        self.assertEqual(self.desired()["emailTheme"], "imbc")
+        self.assertEqual(self.desired("keycloak")["emailTheme"], "keycloak")
+        # Not taken from the server .env: the value is the rollout's argument, like loginTheme.
+        env = {**realm_env(), "KEYCLOAK_EMAIL_THEME": "from-env"}
+        _, realm_patch, _ = sync_realm.desired_settings(realm_source(), env, "imbc")
+        self.assertEqual(realm_patch["emailTheme"], "imbc")
+        self.assertEqual(realm_patch["loginTheme"], "imbc")
+
+    def test_command_line_argument_default_and_override(self) -> None:
+        self.assertEqual(sync_realm.parse_args([]).email_theme, "imbc")
+        self.assertEqual(sync_realm.parse_args([]).theme, "imbc")
+        self.assertEqual(sync_realm.parse_args(["--email-theme", "keycloak"]).email_theme, "keycloak")
+        self.assertEqual(sync_realm.parse_args(["--theme", "other"]).email_theme, "imbc")
+
+    def test_invalid_theme_names_are_refused_before_anything_is_read(self) -> None:
+        for email_theme in ("", "a b", "../x", "imbc;rm", "а"):
+            with self.assertRaises(sync_realm.SyncError):
+                sync_realm.synchronize(ROOT / "does-not-exist", "imbc", email_theme)
+        self.assertTrue(re.fullmatch(r"[A-Za-z0-9._-]+", sync_realm.parse_args([]).email_theme))
+
+    def test_the_other_managed_realm_fields_are_unchanged(self) -> None:
+        patch = self.desired()
+        self.assertEqual(patch["loginTheme"], "imbc")
+        self.assertEqual(patch["sslRequired"], "value")
+        self.assertEqual(patch["actionTokenGeneratedByUserLifespan"], 259200)
+        self.assertEqual(patch["actionTokenGeneratedByAdminLifespan"], 259200)
+        self.assertNotIn("internationalizationEnabled", patch)
 
 
 if __name__ == "__main__":
