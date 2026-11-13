@@ -3,13 +3,16 @@ import { type AllowedMediaType, fileExtensionMatches, MAX_FILE_BYTES } from '@im
 import {
   type CallHandler,
   type ExecutionContext,
+  HttpException,
   Injectable,
+  Logger,
   mixin,
   type NestInterceptor,
   type Type,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
+import type { Request } from 'express';
 import type { Observable } from 'rxjs';
 import { ProblemException } from '../../common/problem.js';
 import { detectMediaType } from './file-type.js';
@@ -29,6 +32,8 @@ const typeMismatch = () =>
 const malformedUpload = () =>
   new ProblemException(400, 'validation', 'Запрос с файлом не разобран', 'Ожидается один файл в поле file');
 
+const logger = new Logger('FileUpload');
+
 /** Код MulterError по цепочке `cause` (FileInterceptor оборачивает её в HttpException). */
 function isFileSizeLimit(error: unknown): boolean {
   let link = error;
@@ -39,12 +44,33 @@ function isFileSizeLimit(error: unknown): boolean {
   return false;
 }
 
+/** Код и класс ошибки без текста: в тексте и полях MulterError — имя файла клиента. */
+const errorShape = (error: unknown) => ({
+  code: typeof (error as { code?: unknown } | null)?.code === 'string' ? (error as { code: string }).code : undefined,
+  name: error instanceof Error ? error.name : typeof error,
+});
+
+/**
+ * Ошибка разбора multipart → ответ. Ошибки клиента FileInterceptor уже перевёл в HttpException 4xx (коды
+ * MulterError `LIMIT_*`, `MISSING_FIELD_NAME`, `INVALID_FIELD_NAME`, ошибки разметки busboy, неподдерживаемый
+ * тип тела): предел размера — 413 `file_too_large`, прочие — 400 `validation`. Клиент оборвал запрос — тоже
+ * 400 (ответ ему уже не нужен, сбоем сервера это не считается). Всё остальное — строка журнала `{ code, name }`
+ * без имени файла и текста и ошибка без данных, которую общий фильтр отдаёт как 500 `internal`.
+ */
+export function uploadFailure(error: unknown, clientAborted = false): Error {
+  if (error instanceof ProblemException) return error;
+  if (error instanceof HttpException && error.getStatus() < 500)
+    return error.getStatus() === 413 || isFileSizeLimit(error) ? fileTooLarge() : malformedUpload();
+  if (clientAborted) return malformedUpload();
+  logger.error(errorShape(error), 'File upload: multipart parsing failed');
+  return new Error('File upload failed');
+}
+
 /**
  * Перехватчик загрузки одного файла в поле `file` (DATA-06): байты — в памяти (до 25 МБ, `MAX_FILE_BYTES`),
- * не больше одного файла и четырёх полей. Ошибки multer — problem+json без имени файла (MulterError несёт его
- * в `filename`, исходная ошибка не уходит ни в ответ, ни в журнал): предел размера — 413 `file_too_large`,
- * лишний файл, чужое поле и испорченный multipart — 400 `validation`. Имя части заголовка читается как UTF-8:
- * иначе busboy читает его как latin1 и портит кириллицу.
+ * не больше одного файла и четырёх полей. Ошибки multer — `uploadFailure`: problem+json без имени файла
+ * (MulterError несёт его в `filename`, исходная ошибка не уходит ни в ответ, ни в журнал). Имя части заголовка
+ * читается как UTF-8: иначе busboy читает его как latin1 и портит кириллицу.
  */
 export function uploadInterceptor(): Type<NestInterceptor> {
   const Multer = FileInterceptor('file', {
@@ -62,8 +88,7 @@ export function uploadInterceptor(): Type<NestInterceptor> {
         // Ошибки самого маршрута идут через Observable и сюда не попадают.
         return await this.multer.intercept(context, next);
       } catch (error) {
-        if (error instanceof ProblemException) throw error;
-        throw isFileSizeLimit(error) ? fileTooLarge() : malformedUpload();
+        throw uploadFailure(error, context.switchToHttp().getRequest<Request>().readableAborted === true);
       }
     }
   }

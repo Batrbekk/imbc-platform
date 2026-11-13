@@ -20,6 +20,7 @@ import { AuditService } from '../src/common/audit.service.js';
 import type { Env } from '../src/config/env.js';
 import type { Database } from '../src/database/database.module.js';
 import * as schema from '../src/database/schema/index.js';
+import { lockWaitExceeded } from '../src/database/lock-waits.js';
 import { withQueueTransaction } from '../src/database/transaction.js';
 import { FILE_SCAN_QUEUE_OPTIONS, QUEUES } from '../src/jobs/queues.js';
 import type { AuthContext } from '../src/modules/auth/auth.types.js';
@@ -31,9 +32,10 @@ import {
   orgChartSampleReadRule,
 } from '../src/modules/files/file-access.js';
 import { FilesController } from '../src/modules/files/files.controller.js';
+import type { Antivirus } from '../src/modules/files/antivirus.js';
 import { FILE_ROUTES, FilesService } from '../src/modules/files/files.service.js';
 import { type AcceptedUpload, acceptUpload, uploadInterceptor } from '../src/modules/files/upload.js';
-import { FileScanJob, type ScanPassedHook } from '../src/worker/file-scan.job.js';
+import { FileScanJob, OBJECT_MISSING_SIGNATURE, type ScanPassedHook } from '../src/worker/file-scan.job.js';
 import { StubAntivirus } from './support/antivirus-stub.js';
 import { migrateThrough, openTestPool, resetDatabase } from './support/database.js';
 import { type HttpStand, startHttp } from './support/http.js';
@@ -711,6 +713,195 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
     const retry = await http.get(content(file.fileObjectId), 'manufacturer');
     expect(retry.status).toBe(200);
     await retry.arrayBuffer();
+  });
+
+  it('HEAD: те же проверки и заголовки, что у GET, без тела, без чтения объекта и без file.downloaded; отказ — 403 и file.read denied', async () => {
+    const head = (path: string, role?: Role) =>
+      fetch(`${http.base}${path}`, { method: 'HEAD', headers: role ? { cookie: `imbc-session=${role}` } : {} });
+    const file = await createFile({ name: KAZAKH_NAME });
+    expect(await scanAs(file.versionId, { clean: true })).toBe('passed');
+    const get = await http.get(content(file.fileObjectId), 'manufacturer');
+    expect(get.status).toBe(200);
+    await get.arrayBuffer();
+    expect(await audits('file.downloaded', file.versionId)).toHaveLength(1);
+
+    const read = vi.spyOn(storage, 'get');
+    for (const query of ['', '?version=1']) {
+      const res = await head(content(file.fileObjectId, query), 'manufacturer');
+      expect(res.status, query).toBe(200);
+      for (const header of ['content-type', 'content-length', 'content-disposition', 'cache-control'])
+        expect(res.headers.get(header), header).toBe(get.headers.get(header));
+      expect((await res.arrayBuffer()).byteLength).toBe(0);
+    }
+    expect(read).not.toHaveBeenCalled();
+    expect(await audits('file.downloaded', file.versionId)).toHaveLength(1);
+
+    // Отказ правила — как у GET: 403 и file.read denied; состояние скана и сеанс — те же коды.
+    expect((await head(content(file.fileObjectId), 'operator')).status).toBe(403);
+    expect(await audits('file.read', file.fileObjectId)).toMatchObject([
+      { outcome: 'denied', object_type: 'file_object' },
+    ]);
+    const pending = await createFile();
+    expect((await head(content(pending.fileObjectId), 'manufacturer')).status).toBe(409);
+    expect((await head(content(file.fileObjectId))).status).toBe(401);
+    expect((await head(content(randomUUID()), 'manufacturer')).status).toBe(404);
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('скан: объекта нет в карантине — rejected с аудитом object_missing и предупреждением с id версии; зачистка её больше не берёт; прочий сбой хранилища — ошибка задания', async () => {
+    const lost = await createFile({ name: 'Потерянный план.pdf' });
+    const key = (await version(lost.versionId)).storage_key;
+    storage.objects.delete(`${QUARANTINE}/${key}`);
+    await pool.query('update file_version set uploaded_at = $2 where id = $1', [
+      lost.versionId,
+      new Date(Date.now() - 20 * 60_000),
+    ]);
+    const warn = vi.spyOn(Logger.prototype, 'warn');
+
+    expect(await scan.run({ fileVersionId: lost.versionId })).toBe('rejected');
+    expect(antivirus.calls).toBe(0);
+    const row = await version(lost.versionId);
+    expect(row.scan_state).toBe('rejected');
+    expect(row.scanned_at).toBeInstanceOf(Date);
+    expect(await audits('file.scan_rejected', lost.versionId)).toEqual([
+      {
+        user_id: SESSION_USER,
+        organization_id: ownerOrg,
+        object_type: 'file_version',
+        outcome: 'denied',
+        diff: { signature: OBJECT_MISSING_SIGNATURE },
+        ip: null,
+      },
+    ]);
+    expect(OBJECT_MISSING_SIGNATURE).toBe('object_missing');
+    expect(warn).toHaveBeenCalledWith({ fileVersionId: lost.versionId }, expect.stringContaining('missing'));
+    const text = logged([warn]);
+    expect(text).not.toContain(key);
+    expect(text).not.toContain('Потерянный');
+
+    await boss.deleteAllJobs(QUEUES.fileScan);
+    await scan.sweep();
+    expect(await jobs(lost.versionId)).toEqual([]);
+    expect(await scan.run({ fileVersionId: lost.versionId })).toBe('skipped');
+
+    // Хранилище недоступно (не «нет ключа») — ошибка задания и повтор, версия остаётся pending.
+    const unavailable = await createFile();
+    storage.failNext('get');
+    await expect(scanAs(unavailable.versionId, { clean: true })).rejects.toThrow();
+    expect(await version(unavailable.versionId)).toMatchObject({ scan_state: 'pending', scanned_at: null });
+  });
+
+  it('скан: байты карантина не совпадают с sha256 загрузки — ошибка задания, никогда не passed; в журнале только id версии', async () => {
+    const swapped = await createFile({ name: 'Подменённый план.pdf' });
+    const key = (await version(swapped.versionId)).storage_key;
+    storage.objects.set(`${QUARANTINE}/${key}`, fixture('sample.png'));
+    const warn = vi.spyOn(Logger.prototype, 'warn');
+
+    for (const verdict of [{ clean: true }, { clean: false, signature: 'Eicar-Test-Signature' }] as const) {
+      const error = await scanAs(swapped.versionId, verdict).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe(`file-scan ${swapped.versionId}: checksum mismatch`);
+    }
+    expect(antivirus.calls).toBe(2);
+    expect(await version(swapped.versionId)).toMatchObject({ scan_state: 'pending', scanned_at: null });
+    expect(storage.keys(FILES)).not.toContain(key);
+    expect(storage.keys(QUARANTINE)).toContain(key);
+    expect(await audits('file.scan_rejected', swapped.versionId)).toEqual([]);
+    expect(warn).toHaveBeenCalledWith({ fileVersionId: swapped.versionId }, expect.stringContaining('checksum'));
+    const text = logged([warn]);
+    expect(text).not.toContain(key);
+    expect(text).not.toContain('Подменённый');
+
+    // Те же байты, что приняла загрузка, — проходят.
+    storage.objects.set(`${QUARANTINE}/${key}`, fixture('sample.pdf'));
+    expect(await scanAs(swapped.versionId, { clean: true })).toBe('passed');
+  });
+
+  it('скан: параллельный запуск с другим вердиктом решил раньше — отклонил: наша копия в рабочем бакете удаляется; пропустил: копия остаётся', async () => {
+    /** Антивирус, пока «проверяет», даёт другому запуску перевести версию в `state`. */
+    const racing = (versionId: string, state: 'passed' | 'rejected'): Antivirus => ({
+      scan: async (body) => {
+        for await (const chunk of body) void chunk;
+        await pool.query('update file_version set scan_state = $2, scanned_at = now() where id = $1', [
+          versionId,
+          state,
+        ]);
+        return { clean: true };
+      },
+    });
+    const rejected = await createFile();
+    const rejectedKey = (await version(rejected.versionId)).storage_key;
+    const loser = new FileScanJob(
+      db,
+      storage,
+      racing(rejected.versionId, 'rejected'),
+      env,
+      new AuditService(db),
+      boss,
+      {},
+    );
+    expect(await loser.run({ fileVersionId: rejected.versionId })).toBe('skipped');
+    expect(storage.keys(FILES)).not.toContain(rejectedKey);
+    expect(storage.keys(QUARANTINE)).not.toContain(rejectedKey);
+
+    const passed = await createFile();
+    const passedKey = (await version(passed.versionId)).storage_key;
+    const second = new FileScanJob(
+      db,
+      storage,
+      racing(passed.versionId, 'passed'),
+      env,
+      new AuditService(db),
+      boss,
+      {},
+    );
+    expect(await second.run({ fileVersionId: passed.versionId })).toBe('skipped');
+    expect(storage.keys(FILES)).toContain(passedKey);
+    expect(storage.keys(QUARANTINE)).not.toContain(passedKey);
+  });
+
+  it('скан: транзакция перехода ждёт блокировку не дольше boundLockWaits — превышение — ошибка задания, версия pending; после снятия — passed', async () => {
+    const locked = await createFile();
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      await client.query('select 1 from file_version where id = $1 for update', [locked.versionId]);
+      const started = Date.now();
+      const error = await scanAs(locked.versionId, { clean: true }).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(lockWaitExceeded(error)).toBe(true);
+      expect(Date.now() - started).toBeLessThan(10_000);
+    } finally {
+      await client.query('rollback');
+      client.release();
+    }
+    expect(await version(locked.versionId)).toMatchObject({ scan_state: 'pending', scanned_at: null });
+    expect(await scanAs(locked.versionId, { clean: true })).toBe('passed');
+  });
+
+  it('параллельные recordVersion одного файла: номера версий не повторяются, ни одна загрузка не теряется (file_version_number_uq)', async () => {
+    const first = await createFile({ name: 'Схема v1.pdf' });
+    const uploads = await Promise.all([2, 3, 4, 5].map((n) => accepted(`Схема v${n}.pdf`)));
+    const results = await Promise.all(uploads.map((upload) => addVersion(first.fileObjectId, upload)));
+    expect(results.map((r) => r.versionNumber).sort((a, b) => a - b)).toEqual([2, 3, 4, 5]);
+    const rows = (
+      await pool.query<{ id: string; version_number: number; original_name: string }>(
+        'select id, version_number, original_name from file_version where file_object_id = $1 order by version_number',
+        [first.fileObjectId],
+      )
+    ).rows;
+    expect(rows.map((r) => r.version_number)).toEqual([1, 2, 3, 4, 5]);
+    expect(new Set(rows.map((r) => r.original_name)).size).toBe(5);
+    for (const result of results) {
+      expect(rows.find((r) => r.id === result.versionId)?.version_number).toBe(result.versionNumber);
+      expect(await jobs(result.versionId)).toHaveLength(1);
+    }
+    expect(storage.keys(QUARANTINE)).toHaveLength(5);
   });
 
   it('маршрут скачивания — FILE_ROUTES.content', () => {

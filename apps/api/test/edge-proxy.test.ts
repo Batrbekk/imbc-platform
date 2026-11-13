@@ -4,6 +4,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MAX_FILE_BYTES } from '@imbc/contracts';
 import { describe, expect, it } from 'vitest';
 
 const read = (path: string) => readFileSync(new URL(`../../../infrastructure/${path}`, import.meta.url), 'utf8');
@@ -145,6 +146,9 @@ describe('edge: S3 не опубликован (NFR-09)', () => {
     const azureRustfs = serviceBlock(composeAzure, 'rustfs');
     expect(azureRustfs).not.toBeNull();
     expect(publishedPorts(azureRustfs!)).toEqual(['127.0.0.1:9001:9001']);
+    // Без `!override` Compose склеивает списки портов: на сервере осталась бы публикация 9001 из compose.yaml на всех
+    // адресах, а разбор выше видел бы только список оверлея.
+    expect(azureRustfs).toMatch(/^\s+ports:\s*!override\s*$/m);
   });
 
   it('без подписанных ссылок: API не зависит от s3-request-presigner и не вызывает getSignedUrl', () => {
@@ -173,5 +177,81 @@ describe('edge: S3 не опубликован (NFR-09)', () => {
     expect(publishedPorts(serviceBlock(published, 'rustfs')!)).toEqual(['9000:9000', '9001:9001']);
     const listed = 'services:\n  rustfs:\n    ports:\n      - "9000:9000"\n      - "127.0.0.1:9001:9001"\n\nvolumes:\n';
     expect(publishedPorts(serviceBlock(listed, 'rustfs')!)).toEqual(['9000:9000', '127.0.0.1:9001:9001']);
+  });
+});
+
+// Пределы clamd (DATA-07): считаются по распакованному содержимому — DOCX и XLSX это ZIP, сжатые потоки PDF clamd
+// тоже распаковывает. С AlertExceedsMax no clamd на превышении молча прекращает проверку и отвечает OK; с yes —
+// FOUND Heuristics.Limits.Exceeded…, и worker отклоняет файл.
+const clamdConf = repository('infrastructure/clamav/clamd.conf');
+
+/** Действующие строки clamd.conf: ключ → значение (комментарии и пустые строки отброшены). */
+const clamdSettings = (conf: string) =>
+  new Map(
+    conf
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#'))
+      .map((line) => {
+        const [key, ...value] = line.split(/\s+/);
+        return [key!, value.join(' ')] as const;
+      }),
+  );
+
+/** Размер clamd в байтах: число и необязательный суффикс K или M (как читает clamd). */
+const clamdBytes = (value: string | undefined) => {
+  const size = /^(\d+)([kKmM]?)$/.exec(value ?? '');
+  if (!size) throw new Error(`не размер clamd: ${value}`);
+  const unit = { '': 1, k: 1024, m: 1024 * 1024 }[size[2]!.toLowerCase() as '' | 'k' | 'm'];
+  return Number(size[1]) * unit;
+};
+
+describe('ClamAV: пределы проверки и отказ на превышении (DATA-07)', () => {
+  it('Compose монтирует infrastructure/clamav/clamd.conf в /etc/clamav/clamd.conf только для чтения', () => {
+    const clamav = serviceBlock(compose, 'clamav');
+    expect(clamav).not.toBeNull();
+    expect(clamav).toMatch(/^\s+-\s+"?\.\/infrastructure\/clamav\/clamd\.conf:\/etc\/clamav\/clamd\.conf:ro"?\s*$/m);
+    // Оверлей Azure не подменяет тома clamav.
+    expect(serviceBlock(composeAzure, 'clamav')).toBeNull();
+  });
+
+  it('clamd.conf: AlertExceedsMax yes; StreamMaxLength ≥ MAX_FILE_BYTES, MaxFileSize ≥ StreamMaxLength, MaxScanSize ≥ MaxFileSize; строки образа сохранены', () => {
+    const settings = clamdSettings(clamdConf);
+    expect(settings.get('AlertExceedsMax')).toBe('yes');
+    const stream = clamdBytes(settings.get('StreamMaxLength'));
+    const file = clamdBytes(settings.get('MaxFileSize'));
+    const scan = clamdBytes(settings.get('MaxScanSize'));
+    expect(stream).toBeGreaterThanOrEqual(MAX_FILE_BYTES);
+    expect(file).toBeGreaterThanOrEqual(stream);
+    expect(scan).toBeGreaterThanOrEqual(file);
+    // Действующие строки файла образа clamav/clamav:1.4; порт — CLAMAV_PORT сервисов api и worker.
+    expect(
+      Object.fromEntries(
+        [...settings].filter(([key]) => ['LogFile', 'LogTime', 'LocalSocket', 'TCPSocket', 'User'].includes(key)),
+      ),
+    ).toEqual({
+      LogFile: '/var/log/clamav/clamd.log',
+      LogTime: 'yes',
+      LocalSocket: '/tmp/clamd.sock',
+      TCPSocket: '3310',
+      User: 'clamav',
+    });
+    expect(compose).toMatch(/^\s+CLAMAV_PORT:\s*3310\s*$/m);
+    // Каждая настройка — один раз: при повторе действующее значение было бы неочевидным, а сверка выше — неполной.
+    const keys = clamdConf
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#'))
+      .map((line) => line.split(/\s+/)[0]);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('разбор размеров clamd: суффиксы K и M, число без суффикса — байты', () => {
+    expect(clamdBytes('100M')).toBe(104_857_600);
+    expect(clamdBytes('1024m')).toBe(1_073_741_824);
+    expect(clamdBytes('25k')).toBe(25_600);
+    expect(clamdBytes('26214400')).toBe(MAX_FILE_BYTES);
+    expect(() => clamdBytes('1G')).toThrow();
+    expect(() => clamdBytes(undefined)).toThrow();
   });
 });

@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { ALLOWED_FILE_TYPES, fileContentQuerySchema } from '@imbc/contracts';
 import { Controller, Get, Logger, Param, Query, Req, StreamableFile } from '@nestjs/common';
 import { ApiProduces, ApiTags } from '@nestjs/swagger';
@@ -35,6 +36,12 @@ const logger = new Logger('FilesController');
 export class FilesController {
   constructor(private readonly files: FilesService) {}
 
+  /**
+   * GET — байты версии и аудит `file.downloaded`. HEAD Express отдаёт этому же обработчику: те же проверки прав и
+   * состояния (отказ — `file.read` `denied`) и те же заголовки, но объект из хранилища не читается и «скачано» не
+   * пишется (`describe`). Ветка по методу, а не отдельный `@Head`: GET-маршрут Express перехватил бы HEAD раньше,
+   * если бы он был объявлен первым.
+   */
   @Get(':id/content')
   @ApiProduces(...Object.keys(ALLOWED_FILE_TYPES), 'application/problem+json')
   async content(
@@ -44,7 +51,11 @@ export class FilesController {
     @Req() req: Request,
   ): Promise<StreamableFile> {
     const { version } = parseOrThrow(fileContentQuerySchema, query);
-    const file = await this.files.open(auth, id, version ?? null, auditIp(req));
+    const ip = auditIp(req);
+    const file =
+      req.method === 'HEAD'
+        ? { ...(await this.files.describe(auth, id, version ?? null, ip)), stream: Readable.from([]) }
+        : await this.files.open(auth, id, version ?? null, ip);
     return new StreamableFile(file.stream, {
       type: file.mediaType,
       length: file.byteSize,

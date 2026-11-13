@@ -1,12 +1,18 @@
 import { Readable } from 'node:stream';
-import type { ObjectStorage } from '../../src/modules/files/object-storage.js';
+import {
+  MISSING_OBJECT_REASON,
+  type ObjectStorage,
+  ObjectStorageError,
+} from '../../src/modules/files/object-storage.js';
 
 type Operation = 'put' | 'get' | 'copy' | 'remove';
 
 /**
  * Хранилище объектов в памяти для тестов (без сети): ключ карты — `${bucket}/${key}`. `failNext(op)` — следующая
  * операция `op` падает ошибкой, в тексте которой есть бакет и ключ, как у настоящего клиента S3: тест проверяет,
- * что ни ключ, ни имя файла не уходят в журнал и в ответ. Удаление отсутствующего объекта — не ошибка (как в S3).
+ * что ни ключ, ни имя файла не уходят в журнал и в ответ. Отсутствующий объект в `get` и `copy` —
+ * `ObjectStorageError` с `missing: true`, как у `S3ObjectStorage` на `NoSuchKey`; удаление отсутствующего объекта —
+ * не ошибка (как в S3).
  */
 export class MemoryObjectStorage implements ObjectStorage {
   readonly objects = new Map<string, Buffer>();
@@ -29,14 +35,14 @@ export class MemoryObjectStorage implements ObjectStorage {
   async get(bucket: string, key: string): Promise<Readable> {
     this.fail('get', bucket, key);
     const body = this.objects.get(`${bucket}/${key}`);
-    if (!body) throw new Error(`memory storage: no object ${bucket}/${key}`);
+    if (!body) throw new ObjectStorageError('get', MISSING_OBJECT_REASON);
     return Readable.from([body]);
   }
 
   async copy(fromBucket: string, key: string, toBucket: string): Promise<void> {
     this.fail('copy', fromBucket, key);
     const body = this.objects.get(`${fromBucket}/${key}`);
-    if (!body) throw new Error(`memory storage: no object ${fromBucket}/${key}`);
+    if (!body) throw new ObjectStorageError('copy', MISSING_OBJECT_REASON);
     this.objects.set(`${toBucket}/${key}`, Buffer.from(body));
   }
 

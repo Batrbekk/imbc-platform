@@ -15,6 +15,7 @@ import { databaseErrorSummary } from '../../database/pg-errors.js';
  */
 export interface ObjectStorage {
   put(bucket: string, key: string, body: Buffer, contentType: string): Promise<void>;
+  /** Объекта нет — `ObjectStorageError` с `missing: true` (S3 `NoSuchKey`); прочие сбои — `missing: false`. */
   get(bucket: string, key: string): Promise<Readable>;
   copy(fromBucket: string, key: string, toBucket: string): Promise<void>;
   /** Удаление отсутствующего объекта — не ошибка (S3 DeleteObject). */
@@ -23,22 +24,33 @@ export interface ObjectStorage {
 
 export const OBJECT_STORAGE = Symbol('OBJECT_STORAGE');
 
+/** Класс ошибки клиента S3, означающий «объекта с таким ключом нет» (не «нет бакета» и не сбой). */
+export const MISSING_OBJECT_REASON = 'NoSuchKey';
+
 /**
  * Сбой хранилища без бакета и ключа в тексте: ошибка клиента S3 может нести их (`Key`, `BucketName`, текст
- * ответа), а ошибка задания pg-boss и журнал их хранить не должны. Остаётся операция и класс ошибки клиента.
+ * ответа), а ошибка задания pg-boss и журнал их хранить не должны. Остаётся операция и класс ошибки клиента;
+ * исходная ошибка не сохраняется и в `cause`. `missing` — объекта с таким ключом нет (`NoSuchKey`).
  */
 export class ObjectStorageError extends Error {
+  readonly missing: boolean;
+
   constructor(
     readonly operation: 'put' | 'get' | 'copy' | 'remove',
     readonly reason: string,
   ) {
     super(`object storage ${operation} failed: ${reason}`);
     this.name = 'ObjectStorageError';
+    this.missing = reason === MISSING_OBJECT_REASON;
   }
 }
 
-/** Класс ошибки клиента (`NoSuchKey`, `TimeoutError`, `AccessDenied`…) без текста. */
-const reasonOf = (error: unknown) => (error instanceof Error ? error.name : 'unknown');
+/**
+ * Класс ошибки клиента (`NoSuchKey`, `TimeoutError`, `AccessDenied`…) без текста. Класс сервисной ошибки S3 —
+ * код из ответа сервера: всё, что не похоже на идентификатор, — `unknown`.
+ */
+const reasonOf = (error: unknown) =>
+  error instanceof Error && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(error.name) ? error.name : 'unknown';
 
 /**
  * Сводка сбоя пути файла для журнала (NFR-11): у ошибки базы — SQLSTATE и ограничение, у хранилища — операция

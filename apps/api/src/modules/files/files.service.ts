@@ -31,12 +31,16 @@ const rejectedByScan = () =>
 const storageUnavailable = () =>
   new ProblemException(503, 'storage_unavailable', 'Хранилище файлов недоступно. Попробуйте позже.');
 
-export interface OpenedFile {
-  stream: Readable;
+/** Версия, которую пользователь вправе получить: заголовки ответа скачивания (и HEAD) без байтов. */
+export interface FileDescription {
   originalName: string;
   mediaType: string;
   byteSize: number;
   versionNumber: number;
+}
+
+export interface OpenedFile extends FileDescription {
+  stream: Readable;
 }
 
 /**
@@ -171,12 +175,55 @@ export class FilesService {
   }
 
   /**
-   * Скачивание версии (GEN-09, DATA-07, NFR-09). Порядок: файл есть (иначе 404, и id не-UUID) → правило
-   * назначения `FILE_READ_RULES` (иначе аудит `file.read` `denied` и 403) → версия, по умолчанию последняя
-   * (нет — 404) → `pending` — 409 `file_pending_scan`, `rejected` — 409 `file_rejected` → поток из рабочего
-   * бакета (сбой — 503 `storage_unavailable`) → аудит `file.downloaded`. В карантин чтение не ходит никогда.
+   * Скачивание версии (GEN-09, DATA-07, NFR-09): проверки `authorize` → поток из рабочего бакета (сбой — 503
+   * `storage_unavailable`) → аудит `file.downloaded`. В карантин чтение не ходит никогда.
    */
   async open(auth: AuthContext, fileObjectId: string, version: number | null, ip: string | null): Promise<OpenedFile> {
+    const row = await this.authorize(auth, fileObjectId, version, ip);
+    let stream: Readable;
+    try {
+      stream = await this.storage.get(this.env.S3_BUCKET_FILES, row.storageKey);
+    } catch (error) {
+      this.logger.warn(failureSummary(error), 'File download: storage unavailable');
+      throw storageUnavailable();
+    }
+    try {
+      await this.audit.record({
+        userId: auth.user.id,
+        organizationId: auth.user.organizationId,
+        action: 'file.downloaded',
+        objectType: 'file_version',
+        objectId: row.id,
+        diff: { versionNumber: row.versionNumber },
+        ip,
+      });
+    } catch (error) {
+      // Скачивание без записи в аудит не отдаётся (AUD-01).
+      stream.destroy();
+      throw error;
+    }
+    return { stream, ...description(row) };
+  }
+
+  /**
+   * Те же проверки, что у `open`, без чтения объекта и без записи «скачано» — для HEAD: заголовки ответа
+   * скачивания без тела. Отказ правила пишется как у `open` (`file.read` `denied`).
+   */
+  async describe(
+    auth: AuthContext,
+    fileObjectId: string,
+    version: number | null,
+    ip: string | null,
+  ): Promise<FileDescription> {
+    return description(await this.authorize(auth, fileObjectId, version, ip));
+  }
+
+  /**
+   * Право и состояние версии (GEN-09, DATA-07). Порядок: файл есть (иначе 404, и id не-UUID) → правило назначения
+   * `FILE_READ_RULES` (иначе аудит `file.read` `denied` и 403) → версия, по умолчанию последняя (нет — 404) →
+   * `pending` — 409 `file_pending_scan`, всё, что не `passed`, — 409 `file_rejected`.
+   */
+  private async authorize(auth: AuthContext, fileObjectId: string, version: number | null, ip: string | null) {
     if (!isUuid(fileObjectId)) throw notFound();
     const [file] = await this.db
       .select({ id: fileObject.id, organizationId: fileObject.organizationId, purpose: fileObject.purpose })
@@ -225,35 +272,18 @@ export class FilesService {
     if (!row) throw notFound();
     if (row.scanState === 'pending') throw pendingScan();
     if (row.scanState !== 'passed') throw rejectedByScan();
-
-    let stream: Readable;
-    try {
-      stream = await this.storage.get(this.env.S3_BUCKET_FILES, row.storageKey);
-    } catch (error) {
-      this.logger.warn(failureSummary(error), 'File download: storage unavailable');
-      throw storageUnavailable();
-    }
-    try {
-      await this.audit.record({
-        userId: auth.user.id,
-        organizationId: auth.user.organizationId,
-        action: 'file.downloaded',
-        objectType: 'file_version',
-        objectId: row.id,
-        diff: { versionNumber: row.versionNumber },
-        ip,
-      });
-    } catch (error) {
-      // Скачивание без записи в аудит не отдаётся (AUD-01).
-      stream.destroy();
-      throw error;
-    }
-    return {
-      stream,
-      originalName: row.originalName,
-      mediaType: row.detectedMediaType ?? 'application/octet-stream',
-      byteSize: row.byteSize,
-      versionNumber: row.versionNumber,
-    };
+    return row;
   }
 }
+
+const description = (row: {
+  originalName: string;
+  detectedMediaType: string | null;
+  byteSize: number;
+  versionNumber: number;
+}): FileDescription => ({
+  originalName: row.originalName,
+  mediaType: row.detectedMediaType ?? 'application/octet-stream',
+  byteSize: row.byteSize,
+  versionNumber: row.versionNumber,
+});

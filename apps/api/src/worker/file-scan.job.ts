@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { pipeline, type Readable, Transform } from 'node:stream';
 import type { FilePurpose } from '@imbc/contracts';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, asc, eq, lt, sql } from 'drizzle-orm';
@@ -6,11 +8,18 @@ import { isUuid } from '../common/actor-transaction.js';
 import { AuditService } from '../common/audit.service.js';
 import { ENV, type Env } from '../config/env.js';
 import { DB, type Database } from '../database/database.module.js';
+import { boundLockWaits } from '../database/lock-waits.js';
 import { fileObject, fileVersion } from '../database/schema/index.js';
 import { QUEUE } from '../infra/infra.module.js';
 import { type FileScanJobData, QUEUES } from '../jobs/queues.js';
 import { ANTIVIRUS, type Antivirus } from '../modules/files/antivirus.js';
-import { OBJECT_STORAGE, type ObjectStorage, storageFailureSummary } from '../modules/files/object-storage.js';
+import {
+  OBJECT_STORAGE,
+  type ObjectStorage,
+  ObjectStorageError,
+  storageFailureSummary,
+} from '../modules/files/object-storage.js';
+import type { ScanVerdict } from './clamd.js';
 
 /**
  * Действие назначения после прохождения скана — в транзакции перехода версии в `passed` (например, образец
@@ -28,11 +37,27 @@ export const SCAN_PASSED_HOOKS = Symbol('SCAN_PASSED_HOOKS');
 export const SCAN_STALE_MS = 15 * 60_000;
 const SWEEP_BATCH = 500;
 
+/** Сигнатура отказа, когда объекта версии нет в карантине: проверять нечего (DATA-07). */
+export const OBJECT_MISSING_SIGNATURE = 'object_missing';
+
+type ScanVersion = {
+  id: string;
+  fileObjectId: string;
+  storageKey: string;
+  checksum: string;
+  uploadedBy: string | null;
+  purpose: FilePurpose;
+  organizationId: string | null;
+};
+
 /**
- * Проверка файла ClamAV (DATA-07): версия `pending` читается из карантина и передаётся в антивирус.
- * Чистая — копия в рабочий бакет, затем транзакция `passed` (`scanned_at`, хук назначения), затем удаление из
- * карантина. Найдена сигнатура — транзакция `rejected` с аудитом `file.scan_rejected`, затем удаление. Ответ
- * clamd, кроме OK и FOUND, и сбой хранилища — исключение: повтор pg-boss, версия остаётся `pending` и никому не
+ * Проверка файла ClamAV (DATA-07): версия `pending` читается из карантина и передаётся в антивирус, по тому же
+ * потоку считается sha256 — байты должны совпасть с `file_version.checksum` загрузки (иначе ошибка задания, не
+ * `passed`). Чистая — копия в рабочий бакет, затем транзакция `passed` (`scanned_at`, хук назначения), затем
+ * удаление из карантина. Найдена сигнатура — транзакция `rejected` с аудитом `file.scan_rejected`, затем удаление.
+ * Объекта в карантине нет (`NoSuchKey`) — `rejected` с сигнатурой `object_missing`: строка версии пишется только
+ * после `put`, потерянный объект проверять нечего. Ответ clamd, кроме OK и FOUND, прочие сбои хранилища и
+ * ожидание блокировки сверх `boundLockWaits` — исключение: повтор pg-boss, версия остаётся `pending` и никому не
  * открывается. Переход — только из `pending` (условие UPDATE): повтор и параллельное задание ничего не удваивают.
  */
 @Injectable()
@@ -51,12 +76,13 @@ export class FileScanJob {
 
   async run({ fileVersionId }: FileScanJobData): Promise<'passed' | 'rejected' | 'skipped'> {
     if (typeof fileVersionId !== 'string' || !isUuid(fileVersionId)) return 'skipped';
-    const [version] = await this.db
+    const [row] = await this.db
       .select({
         id: fileVersion.id,
         fileObjectId: fileVersion.fileObjectId,
         scanState: fileVersion.scanState,
         storageKey: fileVersion.storageKey,
+        checksum: fileVersion.checksum,
         uploadedBy: fileVersion.uploadedBy,
         purpose: fileObject.purpose,
         organizationId: fileObject.organizationId,
@@ -64,44 +90,67 @@ export class FileScanJob {
       .from(fileVersion)
       .innerJoin(fileObject, eq(fileObject.id, fileVersion.fileObjectId))
       .where(eq(fileVersion.id, fileVersionId));
-    if (!version || version.scanState !== 'pending') return 'skipped';
-
+    if (!row || row.scanState !== 'pending') return 'skipped';
+    const version: ScanVersion = row;
     const quarantine = this.env.S3_BUCKET_QUARANTINE;
-    const body = await this.storage.get(quarantine, version.storageKey);
-    let verdict: Awaited<ReturnType<Antivirus['scan']>>;
+    const files = this.env.S3_BUCKET_FILES;
+
+    let body: Readable;
     try {
-      verdict = await this.antivirus.scan(body);
-    } finally {
-      body.destroy();
+      body = await this.storage.get(quarantine, version.storageKey);
+    } catch (error) {
+      if (!(error instanceof ObjectStorageError && error.missing)) throw error;
+      // Строка версии есть только после успешного put: объект потерян, проверять нечего. Иначе версия ждала бы
+      // вечно и занимала место в пачке зачистки.
+      this.logger.warn({ fileVersionId: version.id }, 'File scan: quarantine object missing, version rejected');
+      const result = await this.decide(version, { clean: false, signature: OBJECT_MISSING_SIGNATURE });
+      if (result === 'rejected') await this.discard(files, version);
+      return result;
     }
 
-    const pendingVersion = and(eq(fileVersion.id, version.id), eq(fileVersion.scanState, 'pending'));
-    let result: 'passed' | 'rejected' | 'skipped';
-    if (verdict.clean === true) {
-      // Копия до перехода: `passed` без байтов в рабочем бакете не бывает. Повтор копирует тот же объект.
-      await this.storage.copy(quarantine, version.storageKey, this.env.S3_BUCKET_FILES);
-      result = await this.db.transaction(async (tx) => {
-        const updated = await tx
-          .update(fileVersion)
-          .set({ scanState: 'passed', scannedAt: sql`now()` })
-          .where(pendingVersion)
-          .returning({ id: fileVersion.id });
-        if (!updated.length) return 'skipped';
+    const { verdict, checksum } = await this.scanCounted(body);
+    if (checksum !== version.checksum) {
+      // Байты карантина не те, что приняла загрузка (подмена или порча): вердикт о них ничего не значит —
+      // не переносим и не решаем.
+      this.logger.warn({ fileVersionId: version.id }, 'File scan: quarantine object does not match upload checksum');
+      throw new Error(`file-scan ${version.id}: checksum mismatch`);
+    }
+
+    // Копия до перехода: `passed` без байтов в рабочем бакете не бывает. Повтор копирует тот же объект.
+    if (verdict.clean === true) await this.storage.copy(quarantine, version.storageKey, files);
+    const result = await this.decide(version, verdict);
+    // Решение зафиксировано: копия карантина больше не нужна. У отклонённой версии удаляется и копия рабочего
+    // бакета, если её оставила прежняя попытка (чистый скан, сбой транзакции, повтор с новыми сигнатурами).
+    await this.discard(quarantine, version);
+    if (result === 'rejected') await this.discard(files, version);
+    // Параллельный запуск с другим вердиктом успел раньше: если он отклонил версию, наша копия в рабочем бакете лишняя.
+    else if (result === 'skipped' && verdict.clean === true && (await this.stateOf(version.id)) === 'rejected')
+      await this.discard(files, version);
+    return result;
+  }
+
+  /**
+   * Переход версии из `pending` одной транзакцией с ограниченным ожиданием блокировок (`boundLockWaits`, как
+   * `actorTransaction`): хук назначения берёт строки своей записи `for update`. Превышение — ошибка задания и
+   * повтор. Версия уже не `pending` — `skipped`.
+   */
+  private decide(version: ScanVersion, verdict: ScanVerdict): Promise<'passed' | 'rejected' | 'skipped'> {
+    return this.db.transaction(async (tx) => {
+      await boundLockWaits(tx);
+      const state = verdict.clean === true ? 'passed' : 'rejected';
+      const updated = await tx
+        .update(fileVersion)
+        .set({ scanState: state, scannedAt: sql`now()` })
+        .where(and(eq(fileVersion.id, version.id), eq(fileVersion.scanState, 'pending')))
+        .returning({ id: fileVersion.id });
+      if (!updated.length) return 'skipped';
+      if (verdict.clean === true) {
         await this.hooks[version.purpose]?.(tx, {
           id: version.id,
           fileObjectId: version.fileObjectId,
           purpose: version.purpose,
         });
-        return 'passed';
-      });
-    } else {
-      result = await this.db.transaction(async (tx) => {
-        const updated = await tx
-          .update(fileVersion)
-          .set({ scanState: 'rejected', scannedAt: sql`now()` })
-          .where(pendingVersion)
-          .returning({ id: fileVersion.id });
-        if (!updated.length) return 'skipped';
+      } else {
         await this.audit.record(
           {
             userId: version.uploadedBy,
@@ -114,25 +163,51 @@ export class FileScanJob {
           },
           tx,
         );
-        return 'rejected';
-      });
+      }
+      return state;
+    });
+  }
+
+  /**
+   * Антивирус читает поток через счётчик sha256: проверяются и сверяются одни и те же байты. Ошибка чтения
+   * хранилища доходит до антивируса (pipeline разрушает оба потока). Поток, прочитанный не до конца, даёт другую
+   * сумму — сверка не пройдёт.
+   */
+  private async scanCounted(body: Readable): Promise<{ verdict: ScanVerdict; checksum: string }> {
+    const hash = createHash('sha256');
+    const counted = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        hash.update(chunk);
+        callback(null, chunk);
+      },
+    });
+    pipeline(body, counted, () => undefined);
+    try {
+      const verdict = await this.antivirus.scan(counted);
+      return { verdict, checksum: hash.digest('hex') };
+    } finally {
+      body.destroy();
+      counted.destroy();
     }
-    // Решение зафиксировано: копия карантина больше не нужна. У отклонённой версии удаляется и копия рабочего
-    // бакета, если её оставила прежняя попытка (чистый скан, сбой транзакции, повтор с новыми сигнатурами).
-    await this.discard(quarantine, version.id, version.storageKey);
-    if (result === 'rejected') await this.discard(this.env.S3_BUCKET_FILES, version.id, version.storageKey);
-    return result;
+  }
+
+  private async stateOf(id: string) {
+    const [row] = await this.db
+      .select({ scanState: fileVersion.scanState })
+      .from(fileVersion)
+      .where(eq(fileVersion.id, id));
+    return row?.scanState;
   }
 
   /**
    * Сбой удаления не отменяет решения — предупреждение без ключа: объект карантина не читает никто (скачивание идёт
    * только из рабочего бакета и только версии `passed`).
    */
-  private async discard(bucket: string, fileVersionId: string, storageKey: string): Promise<void> {
+  private async discard(bucket: string, version: ScanVersion): Promise<void> {
     try {
-      await this.storage.remove(bucket, storageKey);
+      await this.storage.remove(bucket, version.storageKey);
     } catch (error) {
-      this.logger.warn({ fileVersionId, ...storageFailureSummary(error) }, 'File scan: object not removed');
+      this.logger.warn({ fileVersionId: version.id, ...storageFailureSummary(error) }, 'File scan: object not removed');
     }
   }
 

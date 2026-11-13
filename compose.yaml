@@ -177,14 +177,18 @@ services:
       start_period: 30s
 
   # Проверку файлов вызывает только worker (DATA-07): поток INSTREAM — не больше 25 МБ (MAX_FILE_BYTES, 26 214 400 байт).
-  # Пределы clamd — значения образа по умолчанию (ClamAV 1.x: StreamMaxLength и MaxFileSize 100M, MaxScanSize 400M),
-  # все не меньше 25 МБ; проверить на стенде: `docker compose exec clamav clamconf | grep -iE 'StreamMaxLength|MaxFileSize'`.
+  # Значений образа по умолчанию недостаточно: пределы считаются по распакованному содержимому (DOCX и XLSX — ZIP),
+  # и при AlertExceedsMax no clamd молча прекращает проверку и отвечает OK. Настройки — infrastructure/clamav/clamd.conf:
+  # AlertExceedsMax yes (превышение предела — FOUND Heuristics.Limits.Exceeded…, файл отклоняется) и пределы платформы.
   # Ответ clamd, кроме OK и FOUND (например, «INSTREAM size limit exceeded. ERROR»), — ошибка задания, не «чистый».
+  # clamd.conf примонтирован как файл: после его изменения контейнер clamav нужно пересоздать
+  # (`docker compose up -d --force-recreate clamav`); проверить действующие значения — `docker compose exec clamav clamconf`.
   clamav:
     image: ${CLAMAV_IMAGE:-clamav/clamav:1.4}
     restart: unless-stopped
     volumes:
       - clamav-db:/var/lib/clamav
+      - ./infrastructure/clamav/clamd.conf:/etc/clamav/clamd.conf:ro
     healthcheck:
       test: ["CMD", "clamdcheck.sh"]
       interval: 30s
