@@ -1,7 +1,10 @@
+import 'reflect-metadata';
 import { Logger } from '@nestjs/common';
 import type pg from 'pg';
 import { PgBoss } from 'pg-boss';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { Env } from '../src/config/env.js';
+import { InfraModule } from '../src/infra/infra.module.js';
 import { QUEUES, RETIRED_QUEUES, retireQueues } from '../src/jobs/queues.js';
 import { openTestPool } from './support/database.js';
 
@@ -102,5 +105,83 @@ describe.skipIf(!databaseUrl)('retireQueues: очереди прежней ве�
     expect(await jobStates('scan-file')).toEqual(['completed']);
     expect(await retireQueues(boss)).toEqual({ deleted: ['scan-file'], kept: [] });
     expect(await queueNames()).not.toContain('scan-file');
+  });
+
+  it('очередь удалил другой процесс после подсчёта заданий: deleteQueue не вызывается, в deleted и в журнале её нет', async () => {
+    const log = vi.spyOn(Logger.prototype, 'log');
+    for (const name of RETIRED_QUEUES) await boss.createQueue(name);
+    // Второй worker того же стенда удаляет send-notification, пока первый считает её задания.
+    const other = new PgBoss({ connectionString: databaseUrl, schema: SCHEMA, supervise: false, schedule: false });
+    other.on('error', () => undefined);
+    await other.start();
+    try {
+      const findJobs = boss.findJobs.bind(boss);
+      vi.spyOn(boss, 'findJobs').mockImplementation(async (name, options) => {
+        const jobs = await findJobs(name, options);
+        if (name === 'send-notification') await other.deleteQueue(name);
+        return jobs;
+      });
+      const deleteQueue = vi.spyOn(boss, 'deleteQueue');
+      expect(await retireQueues(boss)).toEqual({ deleted: ['scan-file'], kept: [] });
+      expect(deleteQueue.mock.calls).toEqual([['scan-file']]);
+      expect(log).toHaveBeenCalledWith('retired queues: scan-file');
+      expect(await queueNames()).not.toContain('send-notification');
+    } finally {
+      await other.stop();
+    }
+  });
+});
+
+// Подключение уборки в InfraModule: только процесс worker и до создания очередей; сбой уборки — строка журнала,
+// старт идёт дальше. Без базы: pg-boss и Valkey — заглушки.
+describe('InfraModule: уборка очередей прежней версии при старте', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const valkey = () => ({ on: vi.fn(), connect: vi.fn(async () => undefined), disconnect: vi.fn() });
+  const queue = (getQueue: () => Promise<unknown> = async () => null) => ({
+    on: vi.fn(),
+    start: vi.fn(async () => undefined),
+    stop: vi.fn(async () => undefined),
+    createQueue: vi.fn(async () => undefined),
+    getQueue: vi.fn(getQueue),
+    findJobs: vi.fn(async () => []),
+    deleteQueue: vi.fn(async () => undefined),
+  });
+  const start = async (role: 'api' | 'worker', boss: ReturnType<typeof queue>, cache = valkey()) => {
+    const module = new InfraModule(cache as never, boss as never, { PROCESS_ROLE: role } as Env);
+    await module.onModuleInit();
+    return cache;
+  };
+
+  it('api: очереди этапа 1 не проверяются и не удаляются; очереди API создаются', async () => {
+    const boss = queue();
+    await start('api', boss);
+    expect(boss.getQueue).not.toHaveBeenCalled();
+    expect(boss.deleteQueue).not.toHaveBeenCalled();
+    expect(boss.createQueue).toHaveBeenCalledWith(QUEUES.notify, expect.anything());
+  });
+
+  it('worker: очереди этапа 1 проверяются после start и до первого createQueue', async () => {
+    const boss = queue();
+    await start('worker', boss);
+    expect(boss.getQueue.mock.calls).toEqual(RETIRED_QUEUES.map((name) => [name]));
+    const [firstCreate] = boss.createQueue.mock.invocationCallOrder;
+    expect(boss.start.mock.invocationCallOrder[0]).toBeLessThan(boss.getQueue.mock.invocationCallOrder[0]!);
+    expect(Math.max(...boss.getQueue.mock.invocationCallOrder)).toBeLessThan(firstCreate!);
+  });
+
+  it('worker: сбой уборки пишется в журнал и старт не останавливает — очереди созданы, Valkey подключается', async () => {
+    const error = vi.spyOn(Logger.prototype, 'error');
+    const failure = new Error('сбой уборки очередей');
+    const boss = queue(async () => {
+      throw failure;
+    });
+    const cache = await start('worker', boss);
+    expect(error).toHaveBeenCalledWith(failure);
+    expect(boss.createQueue).toHaveBeenCalledWith(QUEUES.notify, expect.anything());
+    expect(boss.createQueue).toHaveBeenCalledWith(QUEUES.fileScan, expect.anything());
+    expect(cache.connect).toHaveBeenCalled();
   });
 });
