@@ -789,8 +789,8 @@ const stream = (name: string, data = Buffer.from('IMBC')): CfbStream => ({ name,
 const EQUATION = cfb([stream('Equation Native'), stream('\x01CompObj')]);
 
 describe('zipStructureIssue: объекты OLE — части CFB с внедрённым файлом (DATA-06, DATA-07)', () => {
-  it('часть CFB с потоком \\x01Ole10Native, Package или CONTENTS — embedded_file, сжатая и несжатая; ZIP64 в потоке Package — тоже', () => {
-    for (const name of ['\x01Ole10Native', 'Package', 'CONTENTS']) {
+  it('часть CFB с потоком \\x01Ole10Native или Package — embedded_file, сжатая и несжатая; ZIP64 в потоке Package — тоже', () => {
+    for (const name of ['\x01Ole10Native', 'Package']) {
       expect(zipStructureIssue(withOle(cfb([stream(name)]))), name).toBe('embedded_file');
       expect(zipStructureIssue(withOle(cfb([stream(name)]), { method: STORED })), name).toBe('embedded_file');
       // Поток не первый в каталоге.
@@ -804,8 +804,28 @@ describe('zipStructureIssue: объекты OLE — части CFB с внедр
     expect(zipStructureIssue(fixture('ole-native.docx'))).toBe('embedded_file');
   });
 
+  it('поток contents по имени не запрещён (элемент ActiveX) — принят; поток CONTENTS, который сам архив ZIP, — embedded_file по содержимому', () => {
+    // Элемент управления ActiveX (word/activeX/activeX1.bin): \x01CompObj, contents с данными элемента, \x03OCXNAME.
+    const control = Buffer.concat([Buffer.from('0002200035000000', 'hex'), Buffer.from('CommandButton1', 'utf16le')]);
+    const activeX = cfb([
+      stream('\x01CompObj'),
+      stream('contents', control),
+      stream('\x03OCXNAME', Buffer.from('B\0t\0n\0')),
+    ]);
+    expect(zipStructureIssue(withOle(activeX))).toBeNull();
+    expect(zipStructureIssue(docx({ name: 'word/activeX/activeX1.bin', data: activeX, method: DEFLATE }))).toBeNull();
+    for (const name of ['CONTENTS', 'Contents', 'contents']) {
+      expect(zipStructureIssue(withOle(cfb([stream(name)]))), name).toBeNull();
+      expect(zipStructureIssue(withOle(cfb([stream(name, fixture('sample.xlsx'))]))), name).toBe('embedded_file');
+      expect(
+        zipStructureIssue(withOle(cfb([stream(name, fixture('zip64-local.xlsx'))]), { method: STORED })),
+        name,
+      ).toBe('embedded_file');
+    }
+  });
+
   it('имя в другом регистре; без терминатора, но с cb = 2n; с терминатором и неверным cb — embedded_file; длиннее искомого — нет', () => {
-    for (const name of ['\x01OLE10NATIVE', 'package', 'Contents'])
+    for (const name of ['\x01OLE10NATIVE', '\x01ole10native', 'package', 'PACKAGE'])
       expect(zipStructureIssue(withOle(cfb([stream(name)]))), name).toBe('embedded_file');
     // За именем не 0x0000, но cb = 2 × 7.
     expect(zipStructureIssue(withOle(cfb([{ name: 'Package', nameField: nameField('PackageXY'), cb: 14 }])))).toBe(
@@ -875,7 +895,7 @@ describe('zipStructureIssue: объекты OLE — части CFB с внедр
     expect(zipStructureIssue(docx(embedded(sheetWithEquation)))).toBeNull();
   });
 
-  it('часть CFB: заявлено больше остатка бюджета — inflate_limit; сжатая часть соврала о размере или оборвана, заголовок не по MS-CFB — entry_data_malformed', () => {
+  it('часть CFB: заявлено больше остатка бюджета — inflate_limit; сжатая часть соврала о размере или оборвана, заголовок не по MS-CFB (сектор, мини-сектор) — entry_data_malformed', () => {
     // Часть с сигнатурой CFB и 64 МиБ нулей за каталогом.
     const huge = Buffer.concat([EQUATION, Buffer.alloc(MAX_INFLATED_BYTES)]);
     expect(zipStructureIssue(withOle(huge))).toBe('inflate_limit');
@@ -897,6 +917,25 @@ describe('zipStructureIssue: объекты OLE — части CFB с внедр
     expect(zipStructureIssue(withOle(shifted(6)))).toBe('entry_data_malformed');
     expect(zipStructureIssue(withOle(shifted(7), { method: STORED }))).toBe('entry_data_malformed');
     expect(zipStructureIssue(withOle(shifted(12)))).toBeNull();
+    // Мини-сектор не 64 байта (поле по 0x20 не 6): мини-поток лёг бы на смещение 32 по модулю 64, правило по
+    // содержимому (шаг 64) его бы не увидело.
+    const miniShifted = (shift: number) => {
+      const part = Buffer.from(EQUATION);
+      part.writeUInt16LE(shift, 0x20);
+      return part;
+    };
+    expect(EQUATION.readUInt16LE(0x20)).toBe(6);
+    expect(zipStructureIssue(withOle(miniShifted(5)))).toBe('entry_data_malformed');
+    expect(zipStructureIssue(withOle(miniShifted(5), { method: STORED }))).toBe('entry_data_malformed');
+    expect(zipStructureIssue(withOle(miniShifted(7)))).toBe('entry_data_malformed');
+    expect(zipStructureIssue(withOle(miniShifted(0)))).toBe('entry_data_malformed');
+    expect(zipStructureIssue(withOle(miniShifted(6)))).toBeNull();
+    // Поток-архив на смещении 32 по модулю 64 при мини-секторе 32 байта — отказ по заголовку, а не «принят».
+    const misaligned = Buffer.alloc(4096);
+    Buffer.from('504b0304', 'hex').copy(misaligned, 32);
+    const part32 = cfb([stream('Workbook', misaligned)]);
+    part32.writeUInt16LE(5, 0x20);
+    expect(zipStructureIssue(withOle(part32))).toBe('entry_data_malformed');
     const compressed = deflateRawSync(EQUATION);
     expect(zipStructureIssue(withOle(EQUATION, { payload: compressed.subarray(0, compressed.length - 4) }))).toBe(
       'entry_data_malformed',
