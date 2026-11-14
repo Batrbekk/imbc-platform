@@ -39,11 +39,14 @@ const folded = (name: string) => Array.from(name, (char) => fold(char.charCodeAt
 /** Потоки документа под паролем (MS-OFFCRYPTO): внедрённый документ под паролем антивирус не проверит. */
 const ENCRYPTED_NAMES = ['EncryptionInfo', 'EncryptedPackage'].map(folded);
 /**
- * Потоки внедрённого файла: `\x01Ole10Native` — «Пакет» с произвольным файлом, `Package` — документ OOXML,
- * `CONTENTS` — содержимое объекта (например, PDF). Архив в них clamd проверяет не так, как Office его откроет
- * (ZIP64 внутри объекта — «OK» на живом clamd), а платформа потоки CFB не разбирает.
+ * Потоки внедрённого файла: `\x01Ole10Native` — «Пакет» с произвольным файлом (данные — после заголовка, правило по
+ * содержимому их не видит), `Package` — документ OOXML. Архив в них clamd проверяет не так, как Office его откроет
+ * (ZIP64 внутри объекта — «OK» на живом clamd), а платформа потоки CFB не разбирает. `CONTENTS` в списке нет: поток
+ * `contents` есть у каждого элемента ActiveX (`word/activeX/activeX*.bin`) и у части старых объектов OLE — запрет
+ * имени отклонял бы формы с элементами управления. Поток `CONTENTS`, который сам архив ZIP, ловит правило по
+ * содержимому (`zipStreamInside`); прочее в нём (PDF через Acrobat) clamd проверяет сам.
  */
-const EMBEDDED_FILE_NAMES = ['\x01Ole10Native', 'Package', 'CONTENTS'].map(folded);
+const EMBEDDED_FILE_NAMES = ['\x01Ole10Native', 'Package'].map(folded);
 
 /**
  * В записи каталога по смещению `at` — имя `name`: поле имени начинается с него (латиница без учёта регистра) и
@@ -76,23 +79,34 @@ function zipStreamInside(bytes: Buffer): boolean {
   return false;
 }
 
-/** Заголовок CFB — 512 байт; степень двойки размера сектора — `uint16` по смещению `0x1E`. */
+/**
+ * Заголовок CFB — 512 байт; степень двойки размера сектора — `uint16` по смещению `0x1E`, мини-сектора — по `0x20`.
+ */
 const HEADER = 512;
 const SECTOR_SHIFT = 0x1e;
+const MINI_SECTOR_SHIFT = 0x20;
 /** MS-CFB: сектор 512 байт (версия 3) или 4096 (версия 4); другого Office не открывает. */
 const SECTOR_SHIFTS: ReadonlySet<number> = new Set([9, 12]);
+/** MS-CFB: мини-сектор — 64 байта (2⁶); на нём держится шаг 64 правила по содержимому. */
+const MINI_SECTOR = 6;
 
 /**
  * Часть CFB внутри пакета Office (объект OLE, `word/embeddings/oleObject1.bin`; сигнатуру проверил вызывающий) —
  * обход записей каталога по форме, без чтения цепочек FAT: каждое смещение, кратное 128. Поток `EncryptionInfo` или
- * `EncryptedPackage` — `encrypted`; иначе `\x01Ole10Native`, `Package` или `CONTENTS` — `embedded_file`; иначе
+ * `EncryptedPackage` — `encrypted`; иначе `\x01Ole10Native` или `Package` — `embedded_file`; иначе
  * поток-архив ZIP под любым именем (`zipStreamInside`) — `embedded_file`; иначе null (формула `Equation Native`,
- * рисунок `VisioDocument`, старая книга `Workbook`: потоки OLE2 clamd проверяет сам).
- * Часть короче заголовка или с сектором не 512 и не 4096 байт — `malformed`: записи каталога могли бы лежать не по
- * смещениям, кратным 128, и обход по форме их бы не увидел.
+ * рисунок `VisioDocument`, старая книга `Workbook`, элемент ActiveX: потоки OLE2 clamd проверяет сам).
+ * Часть короче заголовка, с сектором не 512 и не 4096 байт или с мини-сектором не 64 байта — `malformed`: записи
+ * каталога могли бы лежать не по смещениям, кратным 128, а потоки — не по смещениям, кратным 64, и обход по форме
+ * их бы не увидел.
  */
 export function cfbPartIssue(bytes: Buffer): 'encrypted' | 'embedded_file' | 'malformed' | null {
-  if (bytes.length < HEADER || !SECTOR_SHIFTS.has(bytes.readUInt16LE(SECTOR_SHIFT))) return 'malformed';
+  if (
+    bytes.length < HEADER ||
+    !SECTOR_SHIFTS.has(bytes.readUInt16LE(SECTOR_SHIFT)) ||
+    bytes.readUInt16LE(MINI_SECTOR_SHIFT) !== MINI_SECTOR
+  )
+    return 'malformed';
   let embedded = false;
   for (let at = 0; at + DIRECTORY_ENTRY <= bytes.length; at += DIRECTORY_ENTRY) {
     if (ENCRYPTED_NAMES.some((name) => nameAt(bytes, at, name))) return 'encrypted';
