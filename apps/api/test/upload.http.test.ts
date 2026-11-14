@@ -211,6 +211,36 @@ describe('загрузка файла: предел, тип по содержи�
       expect(await upload(form(['file', fixture(name), name])), name).toMatchObject({ status: 200 });
   });
 
+  it('encrypted.docx — 415 file_encrypted; legacy.doc с именем .docx — 415 file_type_not_allowed; nested-deep.docx — 415 file_too_complex; nested-zip64.docx — 415 file_structure_unsupported; в журнале причина без имени файла (DATA-06, DATA-07)', async () => {
+    const log = vi.spyOn(Logger.prototype, 'log');
+    const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    for (const [file, name, code, reason] of [
+      // Под паролем: контейнер CFB с потоками EncryptionInfo и EncryptedPackage — под именем DOCX или XLSX.
+      ['encrypted.docx', 'Секретный план.docx', 'file_encrypted', null],
+      ['encrypted.docx', 'Секретный план.XLSX', 'file_encrypted', null],
+      // Тот же контейнер под другим именем и старый .doc — тип не допускается.
+      ['encrypted.docx', 'Секретный план.pdf', 'file_type_not_allowed', null],
+      ['legacy.doc', 'Секретный план.docx', 'file_type_not_allowed', null],
+      ['legacy.doc', 'Секретный план.doc', 'file_type_not_allowed', null],
+      ['nested-deep.docx', 'Секретный план.docx', 'file_too_complex', 'nested_too_deep'],
+      ['nested-zip64.docx', 'Секретный план.docx', 'file_structure_unsupported', 'zip64_local_values'],
+      ['gap.docx', 'Секретный план.docx', 'file_structure_unsupported', 'entries_gap'],
+    ] as const) {
+      log.mockClear();
+      const res = await upload(form(['file', fixture(file), name, DOCX]));
+      expect(res, `${file} как ${name}`).toMatchObject({ status: 415, body: { status: 415, code } });
+      expect(JSON.stringify(res.body)).not.toContain('Секретный');
+      if (reason === null)
+        expect(log).not.toHaveBeenCalledWith(expect.anything(), 'File upload: ZIP structure not accepted');
+      else expect(log).toHaveBeenCalledWith({ reason }, 'File upload: ZIP structure not accepted');
+      expect(inspect(log.mock.calls, { depth: 10 })).not.toContain('Секретный');
+    }
+    log.mockRestore();
+    // Законный вложенный XLSX и описатели данных (как пишет Java) принимаются.
+    for (const name of ['nested.docx', 'descriptor.xlsx'])
+      expect(await upload(form(['file', fixture(name), name])), name).toMatchObject({ status: 200 });
+  });
+
   it('без сеанса — 401, файл не разбирается', async () => {
     const res = await http.upload('/api/test/upload', undefined, form(['file', fixture('sample.pdf'), 'a.pdf']));
     expect(res.status).toBe(401);

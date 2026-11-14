@@ -153,6 +153,8 @@ export type OrgChartSampleCurrent = z.infer<typeof orgChartSampleCurrentSchema>;
  * и SessionGuard): по ним экран выбирает сообщение. `validation` — ошибка схемы query или разбора multipart,
  * `internal` — сбой 500. `file_structure_unsupported` — DOCX или XLSX с ZIP64 или повреждённой структурой архива,
  * который антивирус не проверил бы целиком (DATA-07): «сохраните документ заново в Word или Excel».
+ * `file_encrypted` — документ под паролем на открытие: антивирус не видит содержимого, «снимите пароль».
+ * `file_too_complex` — вложенных пакетов (документов внутри документа) больше, чем проверяется на файл.
  */
 export const FILE_PROBLEM_CODES = [
   'validation',
@@ -168,6 +170,8 @@ export const FILE_PROBLEM_CODES = [
   'file_type_not_allowed',
   'file_type_mismatch',
   'file_structure_unsupported',
+  'file_encrypted',
+  'file_too_complex',
   'file_pending_scan',
   'file_rejected',
   'storage_unavailable',

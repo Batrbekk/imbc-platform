@@ -1,7 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { crc32, deflateRawSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { type ZipStructureIssue, zipStructureIssue } from '../src/modules/files/zip-structure.js';
+import {
+  createInflateBudget,
+  MAX_ARCHIVE_ENTRIES,
+  MAX_INFLATED_BYTES,
+  MAX_NESTED_DEPTH,
+  MAX_NESTED_PACKAGES,
+  type ZipStructureIssue,
+  zipStructureIssue,
+} from '../src/modules/files/zip-structure.js';
 
 // Структура ZIP документа DOCX и XLSX (DATA-06, DATA-07): антивирус (libclamav при сброшенном бите 3 берёт размеры
 // и метод из локального заголовка) и Office (читает по центральному каталогу) должны читать архив одинаково.
@@ -54,12 +62,16 @@ interface Entry {
   local?: Header;
   /** Подмена полей записи каталога. */
   central?: Header & { offset?: number; disk?: number };
+  /** Байты перед локальным заголовком записи — вне каталога; смещения записей их учитывают. */
+  before?: Buffer;
+  /** Данные записи как есть (уже сжатые) вместо сжатия `data`; `data` — для CRC и несжатого размера. */
+  payload?: Buffer;
 }
 
 /**
  * Архив: локальные заголовки, данные и описатели, центральный каталог, запись его конца. `end` подменяет поля
- * записи конца, `beforeEnd` вставляется между каталогом и записью конца (записи ZIP64), `comment` — комментарий
- * архива, `after` — байты после записи конца.
+ * записи конца, `beforeDirectory` вставляется между последней записью и каталогом, `beforeEnd` — между каталогом
+ * и записью конца (записи ZIP64), `comment` — комментарий архива, `after` — байты после записи конца.
  */
 function zip(
   entries: Entry[],
@@ -72,6 +84,7 @@ function zip(
       size?: number;
       offset?: number;
     };
+    beforeDirectory?: Buffer;
     beforeEnd?: (directoryOffset: number, directorySize: number, endOffset: number) => Buffer;
     comment?: Buffer;
     after?: Buffer;
@@ -82,8 +95,12 @@ function zip(
   const central: Buffer[] = [];
   let offset = 0;
   for (const entry of entries) {
+    if (entry.before) {
+      parts.push(entry.before);
+      offset += entry.before.length;
+    }
     const method = entry.method ?? STORED;
-    const payload = method === DEFLATE ? deflateRawSync(entry.data) : entry.data;
+    const payload = entry.payload ?? (method === DEFLATE ? deflateRawSync(entry.data) : entry.data);
     const crc = crc32(entry.data);
     const flags = (entry.flags ?? 0) | (entry.descriptor ? DESCRIPTOR : 0);
     const name = Buffer.from(entry.name);
@@ -141,6 +158,10 @@ function zip(
     offsets.push(offset);
     parts.push(local);
     offset += local.length;
+  }
+  if (options.beforeDirectory) {
+    parts.push(options.beforeDirectory);
+    offset += options.beforeDirectory.length;
   }
   const directoryOffset = offset;
   const directory = Buffer.concat(central);
@@ -468,5 +489,214 @@ describe('zipStructureIssue: архив, который антивирус и Of
     expect(local.readUInt32LE(central)).toBe(0x02014b50);
     expect(local.readUInt32LE(central + 20)).toBe(24);
     expect(local.readUInt16LE(central + 30)).toBe(0);
+  });
+});
+
+// Вложенные пакеты (DOCX с диаграммой хранит XLSX): clamd разбирает их тем же кодом, что и внешний архив, — каждый
+// проверяется той же функцией, с пределами глубины, числа пакетов и объёма распаковки на файл.
+const XLSX_ENTRIES: Entry[] = [
+  { name: '[Content_Types].xml', data: Buffer.from('<Types/>') },
+  { name: 'xl/workbook.xml', data: Buffer.from('<workbook/>') },
+];
+/** Запись с вложенным пакетом (по умолчанию сжата deflate, как пишет Word). */
+const embedded = (data: Buffer, change: Partial<Entry> = {}): Entry => ({
+  name: 'word/embeddings/sheet.xlsx',
+  data,
+  method: DEFLATE,
+  ...change,
+});
+/** DOCX из двух записей и `extra`. */
+const docx = (...extra: Entry[]) => zip([...ENTRIES, ...extra]);
+/** XLSX из двух записей и `extra`. */
+const xlsx = (...extra: Entry[]) => zip([...XLSX_ENTRIES, ...extra]);
+/** Пустые несжатые блоки deflate (5 байт каждый): поток не даёт ни байта, пока они не кончатся. */
+const emptyBlocks = (count: number) =>
+  Buffer.concat(Array.from({ length: count }, () => Buffer.from('000000ffff', 'hex')));
+
+describe('zipStructureIssue: вложенные пакеты, записи вне каталога (DATA-07)', () => {
+  it('вложенный законный XLSX в DOCX принят; вложенный XLSX с ZIP64 в локальном заголовке — zip64_local_values (DATA-07)', () => {
+    expect(zipStructureIssue(fixture('nested.docx'))).toBeNull();
+    expect(zipStructureIssue(fixture('nested-zip64.docx'))).toBe('zip64_local_values');
+    // Тот же вложенный файл, собранный по байтам: сжатый, несжатый, под именем [Content_Types].xml.
+    expect(zipStructureIssue(docx(embedded(fixture('sample.xlsx'))))).toBeNull();
+    expect(zipStructureIssue(docx(embedded(fixture('sample.xlsx'), { method: STORED })))).toBeNull();
+    expect(zipStructureIssue(docx(embedded(fixture('zip64-local.xlsx'))))).toBe('zip64_local_values');
+    expect(zipStructureIssue(docx(embedded(fixture('zip64-local.xlsx'), { method: STORED })))).toBe(
+      'zip64_local_values',
+    );
+    expect(zipStructureIssue(zip([{ name: '[Content_Types].xml', data: fixture('zip64-local.xlsx') }]))).toBe(
+      'zip64_local_values',
+    );
+    // Первая причина вложенного пакета возвращается как есть.
+    expect(zipStructureIssue(docx(embedded(fixture('truncated.docx'))))).toBe('end_record_missing');
+    expect(zipStructureIssue(docx(embedded(fixture('gap.docx'))))).toBe('entries_gap');
+    expect(zipStructureIssue(docx(embedded(zip([{ name: 'a.txt', data: Buffer.from('a') }]))))).toBe(
+      'content_types_missing',
+    );
+    // Бюджет файла расходуется: один пакет, распакованные байты (пакет в 604 байта и начала записей), пять записей.
+    const budget = createInflateBudget();
+    expect(budget).toEqual({
+      remainingBytes: MAX_INFLATED_BYTES,
+      remainingPackages: MAX_NESTED_PACKAGES,
+      remainingEntries: MAX_ARCHIVE_ENTRIES,
+    });
+    expect(zipStructureIssue(fixture('nested.docx'), { budget })).toBeNull();
+    expect(budget.remainingPackages).toBe(MAX_NESTED_PACKAGES - 1);
+    expect(budget.remainingBytes).toBeLessThan(MAX_INFLATED_BYTES - 604);
+    expect(budget.remainingEntries).toBe(MAX_ARCHIVE_ENTRIES - 5);
+  });
+
+  it('три уровня вложения — nested_too_deep; 33 вложенных пакета — nested_too_many; вложенный пакет больше 64 МиБ после распаковки — inflate_limit (бюджет общий на файл)', () => {
+    expect(MAX_NESTED_DEPTH).toBe(2);
+    expect(MAX_NESTED_PACKAGES).toBe(32);
+    expect(MAX_INFLATED_BYTES).toBe(64 * 1024 * 1024);
+
+    expect(zipStructureIssue(fixture('nested-deep.docx'))).toBe('nested_too_deep');
+    const level2 = fixture('sample.xlsx');
+    const level1 = xlsx(embedded(level2, { name: 'xl/embeddings/level2.xlsx' }));
+    expect(zipStructureIssue(docx(embedded(level1)))).toBeNull();
+    const deeper = xlsx(embedded(xlsx(embedded(level2, { name: 'xl/embeddings/level3.xlsx' })), { name: 'x.xlsx' }));
+    expect(zipStructureIssue(docx(embedded(deeper)))).toBe('nested_too_deep');
+    // Глубина задаётся параметром: пакет на глубине 2 вложенного уже не содержит.
+    expect(zipStructureIssue(fixture('nested.docx'), { depth: 1 })).toBeNull();
+    expect(zipStructureIssue(fixture('nested.docx'), { depth: 2 })).toBe('nested_too_deep');
+
+    const sheets = (count: number) =>
+      Array.from({ length: count }, (_, i) => embedded(level2, { name: `word/embeddings/sheet${i}.xlsx` }));
+    expect(zipStructureIssue(docx(...sheets(32)))).toBeNull();
+    expect(zipStructureIssue(docx(...sheets(33)))).toBe('nested_too_many');
+    // Пакеты второго уровня считаются в том же бюджете: 16 × (пакет + вложенный в него) = 32.
+    const pairs = (count: number) =>
+      Array.from({ length: count }, (_, i) => embedded(level1, { name: `word/embeddings/pair${i}.xlsx` }));
+    expect(zipStructureIssue(docx(...pairs(16)))).toBeNull();
+    expect(zipStructureIssue(docx(...pairs(16), embedded(level2, { name: 'word/embeddings/one-more.xlsx' })))).toBe(
+      'nested_too_many',
+    );
+
+    // Пакет больше 64 МиБ после распаковки (сжатый — около 64 КиБ).
+    const huge = xlsx({ name: 'xl/media/zeros.bin', data: Buffer.alloc(MAX_INFLATED_BYTES) });
+    expect(huge.length).toBeGreaterThan(MAX_INFLATED_BYTES);
+    const hugeEntry = embedded(huge);
+    expect(zipStructureIssue(docx(hugeEntry))).toBe('inflate_limit');
+    // Бюджет общий на файл: два пакета по 40 МиБ порознь принимаются, вместе — нет.
+    const large = xlsx({ name: 'xl/media/zeros.bin', data: Buffer.alloc(40 * 1024 * 1024) });
+    const first = { ...embedded(large, { name: 'word/embeddings/a.xlsx' }), payload: deflateRawSync(large) };
+    const second = { ...first, name: 'word/embeddings/b.xlsx' };
+    expect(zipStructureIssue(docx(first))).toBeNull();
+    expect(zipStructureIssue(docx(first, second))).toBe('inflate_limit');
+    // Переданный бюджет соблюдается: на распаковку начала записей уже не хватает байтов, пакетов не осталось.
+    const left = (change: Partial<ReturnType<typeof createInflateBudget>>) => ({ ...createInflateBudget(), ...change });
+    expect(zipStructureIssue(fixture('nested.docx'), { budget: left({ remainingBytes: 100 }) })).toBe('inflate_limit');
+    expect(zipStructureIssue(fixture('nested.docx'), { budget: left({ remainingPackages: 0 }) })).toBe(
+      'nested_too_many',
+    );
+  });
+
+  it('записей в файле и вложенных пакетах вместе больше 65 535 — entries_too_many: ограничено время проверки', () => {
+    expect(MAX_ARCHIVE_ENTRIES).toBe(65_535);
+    // DOCX из трёх записей и вложенный XLSX из 2 + n записей: всего 65 535 — принят, 65 536 — отказ.
+    const filler = (count: number) =>
+      Array.from({ length: count }, (): Entry => ({ name: 'a', data: Buffer.alloc(0) }));
+    expect(zipStructureIssue(docx(embedded(xlsx(...filler(65_530)))))).toBeNull();
+    expect(zipStructureIssue(docx(embedded(xlsx(...filler(65_531)))))).toBe('entries_too_many');
+    // Сам файл пределом не ограничен сильнее, чем форматом: 65 534 записи (больше — только ZIP64) принимаются.
+    expect(zipStructureIssue(docx(...filler(65_532)))).toBeNull();
+    expect(
+      zipStructureIssue(fixture('nested.docx'), { budget: { ...createInflateBudget(), remainingEntries: 4 } }),
+    ).toBe('entries_too_many');
+  });
+
+  it('64 нулевых байта между записями — entries_gap; байты до первой записи — entries_gap; записи с битом 3 и описателем 12 и 16 байт — приняты', () => {
+    expect(zipStructureIssue(fixture('gap.docx'))).toBe('entries_gap');
+    expect(zipStructureIssue(zip(withEntry(1, { before: Buffer.alloc(64) })))).toBe('entries_gap');
+    expect(zipStructureIssue(zip(withEntry(0, { before: Buffer.from('MZ') })))).toBe('entries_gap');
+    expect(zipStructureIssue(zip(ENTRIES, { beforeDirectory: Buffer.alloc(1) }))).toBe('entries_gap');
+    // Запись вне каталога: целый локальный заголовок с данными, на который каталог не ссылается.
+    const hidden = zip([
+      { name: 'word/hidden.bin', data: Buffer.from('скрытая запись IMBC '.repeat(8)), method: DEFLATE },
+    ]);
+    const hiddenRecord = hidden.subarray(0, hidden.readUInt32LE(hidden.length - 6));
+    expect(zipStructureIssue(zip(withEntry(1, { before: hiddenRecord })))).toBe('entries_gap');
+    expect(zipStructureIssue(zip(ENTRIES, { beforeDirectory: hiddenRecord }))).toBe('entries_gap');
+
+    // Описатель данных: 16 байт с сигнатурой 50 4B 07 08 (Java, Python без seek), 12 байт без неё.
+    expect(zipStructureIssue(fixture('descriptor.xlsx'))).toBeNull();
+    expect(zipStructureIssue(zip(deflated({ descriptor: 'signed' })))).toBeNull();
+    expect(zipStructureIssue(zip(deflated({ descriptor: 'unsigned' })))).toBeNull();
+    expect(zipStructureIssue(zip(withEntry(0, { descriptor: 'unsigned' })))).toBeNull();
+    expect(
+      zipStructureIssue(zip(ENTRIES.map((entry) => ({ ...entry, method: DEFLATE, descriptor: 'unsigned' as const })))),
+    ).toBeNull();
+    // Бит 3 без описателя и описатель без бита 3 — данные записи кончаются не там, где начинается следующая.
+    expect(zipStructureIssue(zip(withEntry(0, { flags: DESCRIPTOR })))).toBe('entries_gap');
+    expect(zipStructureIssue(zip(withEntry(1, { flags: DESCRIPTOR })))).toBe('entries_gap');
+    expect(zipStructureIssue(zip(withEntry(1, { before: Buffer.concat([u32(0x08074b50), Buffer.alloc(12)]) })))).toBe(
+      'entries_gap',
+    );
+    // Описатель длиннее 16 байт (ZIP64: 24) — промежуток.
+    expect(
+      zipStructureIssue(
+        zip([
+          { ...ENTRIES[0]!, descriptor: 'signed' },
+          { ...ENTRIES[1]!, before: Buffer.alloc(8) },
+        ]),
+      ),
+    ).toBe('entries_gap');
+  });
+
+  it('фикстуры этапа 2 sample.docx и sample.xlsx по-прежнему приняты', () => {
+    for (const name of ['sample.docx', 'sample.xlsx', 'sample-deflated.docx']) {
+      const budget = createInflateBudget();
+      expect(zipStructureIssue(fixture(name), { budget }), name).toBeNull();
+      // Вложенных пакетов нет — бюджет пакетов не тронут.
+      expect(budget.remainingPackages, name).toBe(MAX_NESTED_PACKAGES);
+    }
+  });
+
+  it('начало сжатой записи: пакет за пустыми блоками deflate виден по первому КиБ; больше КиБ без данных, испорченный поток, обрыв и неверный размер вложенного пакета — entry_data_malformed', () => {
+    const nested = (blocks: number, data: Buffer, change: Partial<Entry> = {}) =>
+      docx(embedded(data, { payload: Buffer.concat([emptyBlocks(blocks), deflateRawSync(data)]), ...change }));
+    // 70 байт пустых блоков: первые 64 байта не дают данных, первый КиБ — даёт.
+    expect(zipStructureIssue(nested(14, fixture('sample.xlsx')))).toBeNull();
+    expect(zipStructureIssue(nested(14, fixture('zip64-local.xlsx')))).toBe('zip64_local_values');
+    // 1050 байт пустых блоков: начало данных записи не определить — отказ, а не «не пакет».
+    expect(zipStructureIssue(nested(210, fixture('zip64-local.xlsx')))).toBe('entry_data_malformed');
+    expect(zipStructureIssue(nested(210, Buffer.from('<w:document/>'), { name: 'word/document2.xml' }))).toBe(
+      'entry_data_malformed',
+    );
+    // Короткая запись, весь поток прочитан: меньше 4 байт данных — не пакет.
+    expect(zipStructureIssue(nested(100, Buffer.from('ab'), { name: 'word/short.xml' }))).toBeNull();
+    expect(zipStructureIssue(docx({ name: 'word/empty.xml', data: Buffer.alloc(0), method: DEFLATE }))).toBeNull();
+
+    // Испорченный поток deflate: блок типа 3.
+    expect(
+      zipStructureIssue(
+        docx({
+          name: 'word/bad.xml',
+          data: Buffer.from('abcd'),
+          method: DEFLATE,
+          payload: Buffer.from([0x07, 0, 0, 0]),
+        }),
+      ),
+    ).toBe('entry_data_malformed');
+    // Вложенный пакет: поток оборван, распакованный размер больше или меньше заявленного в обоих заголовках.
+    const sample = fixture('sample.xlsx');
+    const stream = deflateRawSync(sample);
+    expect(zipStructureIssue(docx(embedded(sample, { payload: stream.subarray(0, stream.length - 8) })))).toBe(
+      'entry_data_malformed',
+    );
+    const sized = (uncompressed: number) => embedded(sample, { local: { uncompressed }, central: { uncompressed } });
+    expect(zipStructureIssue(docx(sized(sample.length - 1)))).toBe('entry_data_malformed');
+    expect(zipStructureIssue(docx(sized(sample.length + 1)))).toBe('entry_data_malformed');
+    expect(zipStructureIssue(docx(sized(3)))).toBe('entry_data_malformed');
+    // Короткий «пакет» (сигнатура и обрывок, 18 байт) распаковывается и проверяется как пакет.
+    const stub = Buffer.concat([u32(0x04034b50), Buffer.from('обрывок')]);
+    expect(zipStructureIssue(docx(embedded(stub)))).toBe('end_record_missing');
+    expect(zipStructureIssue(docx(embedded(stub, { method: STORED })))).toBe('end_record_missing');
+    // Заявлен маленький размер, а распаковывается 64 МиБ — распаковка останавливается на заявленном.
+    const huge = xlsx({ name: 'xl/media/zeros.bin', data: Buffer.alloc(MAX_INFLATED_BYTES) });
+    expect(
+      zipStructureIssue(docx(embedded(huge, { local: { uncompressed: 4096 }, central: { uncompressed: 4096 } }))),
+    ).toBe('entry_data_malformed');
   });
 });

@@ -580,6 +580,8 @@
       "file_type_not_allowed": "Allowed types: PDF, JPG, PNG, DOCX, XLSX.",
       "file_type_mismatch": "The file content does not match its extension.",
       "file_structure_unsupported": "The file could not be checked: save the document again in Word or Excel and upload it once more.",
+      "file_encrypted": "The document is password-protected. Remove the password and upload it again.",
+      "file_too_complex": "The file has too many embedded documents to be checked. Save it without embedded objects or split it.",
       "file_pending_scan": "The file is still being scanned. Try again in a moment.",
       "file_rejected": "The file failed the virus scan.",
       "storage_unavailable": "File storage is unavailable. Try again in a few minutes."

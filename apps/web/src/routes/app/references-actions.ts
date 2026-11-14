@@ -54,6 +54,8 @@ export const REFERENCE_PROBLEM_MESSAGES: Record<ReferenceProblemCode | FileProbl
   file_type_not_allowed: "file_type_not_allowed",
   file_type_mismatch: "file_type_mismatch",
   file_structure_unsupported: "file_structure_unsupported",
+  file_encrypted: "file_encrypted",
+  file_too_complex: "file_too_complex",
   file_pending_scan: "file_pending_scan",
   file_rejected: "file_rejected",
   storage_unavailable: "storage_unavailable",

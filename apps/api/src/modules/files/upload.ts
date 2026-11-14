@@ -15,8 +15,9 @@ import { memoryStorage } from 'multer';
 import type { Request } from 'express';
 import type { Observable } from 'rxjs';
 import { ProblemException } from '../../common/problem.js';
+import { isEncryptedOfficeDocument } from './cfb.js';
 import { detectMediaType } from './file-type.js';
-import { zipStructureIssue } from './zip-structure.js';
+import { createInflateBudget, type ZipStructureIssue, zipStructureIssue } from './zip-structure.js';
 
 /** Длина имени файла в символах (кодовых точках), как её хранит `file_version.original_name`. */
 export const MAX_FILE_NAME_LENGTH = 255;
@@ -37,6 +38,15 @@ const structureUnsupported = () =>
   );
 const typeMismatch = () =>
   new ProblemException(415, 'file_type_mismatch', 'Расширение имени не соответствует содержимому файла');
+const fileEncrypted = () =>
+  new ProblemException(415, 'file_encrypted', 'Документ защищён паролем', 'Снимите пароль и загрузите документ снова');
+const tooComplex = () =>
+  new ProblemException(
+    415,
+    'file_too_complex',
+    'В файле слишком много вложенных документов для проверки',
+    'Сохраните документ без внедрённых объектов или разделите его',
+  );
 const malformedUpload = () =>
   new ProblemException(400, 'validation', 'Запрос с файлом не разобран', 'Ожидается один файл в поле file');
 
@@ -137,10 +147,61 @@ export function cleanFileName(name: string): string {
 }
 
 /** DOCX и XLSX — архивы ZIP: их структура проверяется до хранилища. */
-const OOXML_TYPES: ReadonlySet<AllowedMediaType> = new Set<AllowedMediaType>([
+const OOXML_TYPES: readonly AllowedMediaType[] = [
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+];
+
+/** Почему файл не принят — код ответа 415 (DATA-06, DATA-07). Задача PDF добавит `file_has_attachments`. */
+export type InspectRefusal =
+  'file_type_not_allowed' | 'file_type_mismatch' | 'file_structure_unsupported' | 'file_encrypted' | 'file_too_complex';
+
+/**
+ * Итог проверки содержимого: тип по содержимому или код отказа. `reason` — причина структуры (`ZipStructureIssue`)
+ * для журнала и инструмента проверки папки; у отказов по типу и у документа CFB под паролем — null.
+ */
+export type InspectResult =
+  { ok: true; mediaType: AllowedMediaType } | { ok: false; code: InspectRefusal; reason: string | null };
+
+/** Пределы проверки вложенных пакетов исчерпаны — файл слишком сложен, чтобы проверить его целиком. */
+const TOO_COMPLEX: ReadonlySet<ZipStructureIssue> = new Set<ZipStructureIssue>([
+  'nested_too_deep',
+  'nested_too_many',
+  'inflate_limit',
+  'entries_too_many',
 ]);
+
+const refusalFor = (issue: ZipStructureIssue): InspectRefusal =>
+  issue === 'encrypted' ? 'file_encrypted' : TOO_COMPLEX.has(issue) ? 'file_too_complex' : 'file_structure_unsupported';
+
+/**
+ * Проверка содержимого файла (DATA-06, DATA-07) — без хранилища, базы и сети; её же вызывает инструмент проверки
+ * папки (`tools/check-upload.ts`). Порядок: тип по содержимому; типа нет, а это документ Office под паролем (CFB с
+ * потоком `EncryptionInfo` или `EncryptedPackage`) с расширением имени `docx` или `xlsx` — `file_encrypted`; прочее
+ * без типа — `file_type_not_allowed`; расширение не соответствует типу — `file_type_mismatch`; DOCX и XLSX —
+ * структура ZIP с новым бюджетом на файл (`zipStructureIssue`): шифрование записей — `file_encrypted`, пределы
+ * вложенных пакетов — `file_too_complex`, прочее — `file_structure_unsupported`. `originalName` — для расширения.
+ */
+export async function inspectFile(bytes: Buffer, originalName: string): Promise<InspectResult> {
+  const mediaType = await detectMediaType(bytes);
+  if (!mediaType) {
+    const officeName = OOXML_TYPES.some((type) => fileExtensionMatches(originalName, type));
+    if (officeName && isEncryptedOfficeDocument(bytes)) return { ok: false, code: 'file_encrypted', reason: null };
+    return { ok: false, code: 'file_type_not_allowed', reason: null };
+  }
+  if (!fileExtensionMatches(originalName, mediaType)) return { ok: false, code: 'file_type_mismatch', reason: null };
+  if (!OOXML_TYPES.includes(mediaType)) return { ok: true, mediaType };
+  const issue = zipStructureIssue(bytes, { budget: createInflateBudget() });
+  return issue === null ? { ok: true, mediaType } : { ok: false, code: refusalFor(issue), reason: issue };
+}
+
+const REFUSALS: Record<InspectRefusal, () => ProblemException> = {
+  file_type_not_allowed: typeNotAllowed,
+  file_type_mismatch: typeMismatch,
+  file_structure_unsupported: structureUnsupported,
+  file_encrypted: fileEncrypted,
+  file_too_complex: tooComplex,
+};
 
 /** Объявленный клиентом тип — только для записи (DATA-05): без управляющих символов, до 255 символов. */
 const cleanDeclaredType = (value: string | undefined) =>
@@ -148,10 +209,11 @@ const cleanDeclaredType = (value: string | undefined) =>
 
 /**
  * Проверка загруженного файла до хранилища и БД (DATA-06): нет файла — 400 `file_missing`; 0 байт — 400
- * `file_empty`; тип по содержимому не из пяти допустимых — 415 `file_type_not_allowed`; расширение имени не
- * соответствует содержимому — 415 `file_type_mismatch`; DOCX или XLSX с признаками ZIP64 или повреждённой
- * структурой ZIP (`zipStructureIssue`) — 415 `file_structure_unsupported`: антивирус проверил бы его не целиком
- * (DATA-07). Имени файла нет в тексте ни одной ошибки.
+ * `file_empty`; больше 25 МБ — 413 `file_too_large`; содержимое (`inspectFile`) — 415 с кодом отказа: тип не из
+ * пяти допустимых, расширение не по типу, DOCX или XLSX под паролем (`file_encrypted`), со структурой ZIP, которую
+ * антивирус проверил бы не целиком (`file_structure_unsupported`), или со вложенными пакетами сверх пределов
+ * (`file_too_complex`) (DATA-07). Причина структуры — строка журнала `{ reason }`; имени файла нет ни в журнале, ни
+ * в тексте ошибки.
  */
 export async function acceptUpload(file: Express.Multer.File | undefined): Promise<AcceptedUpload> {
   if (!file || !Buffer.isBuffer(file.buffer)) throw fileMissing();
@@ -160,19 +222,16 @@ export async function acceptUpload(file: Express.Multer.File | undefined): Promi
   // Предел держит multer; проверка повторена на случай другого пути к acceptUpload.
   if (bytes.length > MAX_FILE_BYTES) throw fileTooLarge();
   const originalName = cleanFileName(file.originalname ?? '');
-  const mediaType = await detectMediaType(bytes);
-  if (!mediaType) throw typeNotAllowed();
-  if (!fileExtensionMatches(originalName, mediaType)) throw typeMismatch();
-  const structure = OOXML_TYPES.has(mediaType) ? zipStructureIssue(bytes) : null;
-  if (structure !== null) {
+  const inspected = await inspectFile(bytes, originalName);
+  if (!inspected.ok) {
     // Причина — для разбора ложных отказов законным документам; имени файла в журнале нет.
-    logger.log({ reason: structure }, 'File upload: ZIP structure not accepted');
-    throw structureUnsupported();
+    if (inspected.reason !== null) logger.log({ reason: inspected.reason }, 'File upload: ZIP structure not accepted');
+    throw REFUSALS[inspected.code]();
   }
   return {
     originalName,
     declaredMediaType: cleanDeclaredType(file.mimetype),
-    mediaType,
+    mediaType: inspected.mediaType,
     bytes,
     checksum: createHash('sha256').update(bytes).digest('hex'),
   };
