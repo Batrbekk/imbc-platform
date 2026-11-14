@@ -56,6 +56,11 @@ async function liveJobCount(boss: PgBoss, name: string): Promise<number> {
  * существующую (`getQueue`) и без заданий `created`, `retry`, `active`. Очередь с таким заданием остаётся в `kept`
  * с предупреждением: имя очереди и число заданий, без их данных. Нет очереди — ничего не делается, поэтому повтор
  * при каждом старте безопасен. В эти очереди не ставит задания ни одна версия начиная с этапа 2.
+ *
+ * В `deleted` — только очередь, которая была в базе непосредственно перед `deleteQueue` и которой нет после неё:
+ * `deleteQueue` исчезнувшей очереди — пустая операция без ошибки (например, её удалил другой процесс), и в журнал
+ * такая очередь не попадает. Вызывает один процесс — worker (`InfraModule`); остаётся окно между последней
+ * проверкой и удалением, в котором два worker, стартующих одновременно, оба назовут очередь удалённой.
  */
 export async function retireQueues(boss: PgBoss): Promise<{ deleted: string[]; kept: string[] }> {
   const deleted: string[] = [];
@@ -68,8 +73,10 @@ export async function retireQueues(boss: PgBoss): Promise<{ deleted: string[]; k
       queuesLogger.warn(`retired queue kept: ${name} has ${live} jobs in created, retry or active`);
       continue;
     }
+    // Счёт заданий кэширует очередь в pg-boss; существование перед удалением — заново из базы.
+    if (!(await boss.getQueue(name))) continue;
     await boss.deleteQueue(name);
-    deleted.push(name);
+    if (!(await boss.getQueue(name))) deleted.push(name);
   }
   if (deleted.length > 0) queuesLogger.log(`retired queues: ${deleted.join(', ')}`);
   return { deleted, kept };

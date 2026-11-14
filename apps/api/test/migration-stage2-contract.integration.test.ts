@@ -44,21 +44,37 @@ const MOVED_KEYS = [
   ['tech_spec_files', 'tech_spec_files_file_id_file_object_id_fk', 'file_object'],
 ] as const;
 
+/** Те же ключи до 0011 — как их хранит PostgreSQL (имя длиннее 63 байт усечено). */
+const OLD_KEYS = [
+  ['certificates', 'certificates_file_id_file_objects_id_fk'],
+  ['documents', 'documents_file_id_file_objects_id_fk'],
+  ['due_diligence_records', 'due_diligence_records_enhanced_report_file_id_file_objects_id_f'],
+  ['due_diligence_records', 'due_diligence_records_report_file_id_file_objects_id_fk'],
+  ['forecast_versions', 'forecast_versions_source_file_id_file_objects_id_fk'],
+  ['operator_visit_marks', 'operator_visit_marks_file_id_file_objects_id_fk'],
+  ['review_decisions', 'review_decisions_file_version_id_file_versions_id_fk'],
+  ['site_survey_records', 'site_survey_records_report_file_id_file_objects_id_fk'],
+  ['tech_spec_files', 'tech_spec_files_file_id_file_objects_id_fk'],
+] as const;
+
 // Contract этапа 2 (NFR-06): 0011 удаляет то, что этап 2 оставил для совместимости с этапом 1, — журнал писем
 // notifications_sent (NOT-18), скелетные справочники и файлы, скелетный тип scan_state, — и даёт типу состояния
-// скана имя DBML (DATA-07). Сначала повторный перенос писем и проверка: строка в удаляемых таблицах останавливает
-// миграцию до фиксации любой правки (мигратор применяет пачку одной транзакцией).
+// скана имя DBML (DATA-07). Сначала блокировка удаляемых таблиц, повторный перенос писем и проверка: строка в
+// удаляемых таблицах останавливает миграцию до фиксации любой правки (мигратор применяет пачку одной транзакцией).
 describe('0011: текст миграции', () => {
-  it('первый оператор — тот же перенос notifications_sent → notification, что третий оператор 0010; второй — блок проверки с RAISE EXCEPTION; правки схемы — только после них', () => {
+  it('первый оператор — исключительная блокировка пяти удаляемых таблиц; второй — тот же перенос notifications_sent → notification, что третий оператор 0010; третий — блок проверки с RAISE EXCEPTION; правки схемы — только после них', () => {
     const body = statements(CONTRACT);
-    expect(body[0]).toBe(statements(DATA)[2]);
-    expect(body[1]).toMatch(/^DO \$\$/);
-    expect(body[1]).toContain("RAISE EXCEPTION 'stage 2 contract: % notifications_sent rows not in notification'");
-    expect(body[1]).toContain(
+    expect(body[0]).toBe(
+      'LOCK TABLE "notifications_sent", "dictionary_entries", "dictionaries", "file_versions", "file_objects" IN ACCESS EXCLUSIVE MODE;',
+    );
+    expect(body[1]).toBe(statements(DATA)[2]);
+    expect(body[2]).toMatch(/^DO \$\$/);
+    expect(body[2]).toContain("RAISE EXCEPTION 'stage 2 contract: % notifications_sent rows not in notification'");
+    expect(body[2]).toContain(
       'skeleton tables dictionaries, dictionary_entries, file_objects, file_versions are not empty',
     );
-    for (const statement of body.slice(0, 2)) expect(statement).not.toMatch(/\b(DROP|ALTER|DELETE|UPDATE|TRUNCATE)\b/);
-    for (const statement of body.slice(2))
+    for (const statement of body.slice(0, 3)) expect(statement).not.toMatch(/\b(DROP|ALTER|DELETE|UPDATE|TRUNCATE)\b/);
+    for (const statement of body.slice(3))
       expect(statement).toMatch(
         /^(ALTER TABLE "\w+" (DROP|ADD) CONSTRAINT "\w+"|DROP TABLE "notifications_sent", "dictionary_entries", "dictionaries", "file_versions", "file_objects";$|DROP TYPE "public"\."scan_state";$|ALTER TYPE "public"\."file_scan_state" RENAME TO "scan_state";$|ALTER TABLE "org_chart_sample" ALTER COLUMN "is_current" SET DEFAULT false;?$)/,
       );
@@ -69,11 +85,10 @@ describe('0011: текст миграции', () => {
     expect(text).not.toMatch(/\bCASCADE\b/i);
     // Действия внешнего ключа (ON DELETE / ON UPDATE no action) — не операторы.
     expect(text.replace(/ ON (DELETE|UPDATE) no action/g, '')).not.toMatch(/\b(DELETE|UPDATE|TRUNCATE)\b/);
-    // Девять ключей: прежний снимается, новый ставится.
-    for (const [table, name] of MOVED_KEYS) {
+    // Девять ключей: прежний снимается по имени, под которым он хранится в базе, новый ставится.
+    for (const [table, name] of MOVED_KEYS)
       expect(text).toContain(`ALTER TABLE "${table}" ADD CONSTRAINT "${name}" FOREIGN KEY`);
-      expect(text).toMatch(new RegExp(`ALTER TABLE "${table}" DROP CONSTRAINT "\\w+_file_(objects|versions)_id_f`));
-    }
+    for (const [table, name] of OLD_KEYS) expect(text).toContain(`ALTER TABLE "${table}" DROP CONSTRAINT "${name}";`);
   });
 });
 
@@ -379,6 +394,34 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('contract этапа 2: мигр
       expect(await journal()).toBe(journalTags().length);
       expect(await exists('notifications_sent')).toBe(false);
       expect((await pool.query('select count(*)::int as n from notification')).rows).toEqual([{ n: 0 }]);
+    });
+
+    it('сбой посреди правок схемы (последний из девяти прежних ключей переименован — DROP CONSTRAINT падает с 42704): восемь уже переведённых ключей, перенос письма и блокировка откатываются, база — как после 0010', async () => {
+      await resetDatabase(pool);
+      await migrateThrough(pool, DATA);
+      await legacyLetter(`sub-5:${randomUUID()}`, 'late@stage3.local');
+      await pool.query(
+        'alter table tech_spec_files rename constraint tech_spec_files_file_id_file_objects_id_fk to tech_spec_files_file_id_renamed_fk',
+      );
+      await expect(migrateThrough(pool)).rejects.toMatchObject({ cause: expect.objectContaining({ code: '42704' }) });
+      await expectUntouched();
+      // Восемь пар DROP/ADD до сбоя не зафиксированы: прежние ключи на месте, новых нет.
+      const names = async (list: readonly (readonly [string, string, ...string[]])[]) =>
+        (
+          await pool.query<{ conname: string }>(
+            "select conname from pg_constraint where contype = 'f' and conname = any($1::text[])",
+            [list.map(([, name]) => name)],
+          )
+        ).rows
+          .map((r) => r.conname)
+          .sort();
+      expect(await names(OLD_KEYS)).toEqual(
+        OLD_KEYS.map(([, name]) => name)
+          .filter((name) => name !== 'tech_spec_files_file_id_file_objects_id_fk')
+          .sort(),
+      );
+      expect(await names(MOVED_KEYS)).toEqual([]);
+      expect((await pool.query('select count(*)::int as n from notifications_sent')).rows).toEqual([{ n: 1 }]);
     });
   });
 

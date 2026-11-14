@@ -3,7 +3,11 @@
 -- file_versions (DATA-05) и скелетный тип scan_state; тип состояния скана file_scan_state получает имя DBML
 -- scan_state (DATA-07); образец оргструктуры по умолчанию не текущий. Предыдущая версия (этап 2) на этой схеме
 -- не работает (читает notifications_sent): откат — только восстановление резервной копии.
--- Порядок: 1) повторный перенос писем, которые этап 1 записал после 0010, — тот же оператор, что третий в 0010;
+-- Порядок: 0) исключительная блокировка пяти удаляемых таблиц до конца транзакции: перенос, проверка и удаление
+--    видят одни и те же строки, вставить между ними некому (начиная с этапа 2 в них никто не пишет, блокировка
+--    обычно мгновенная; чужая открытая транзакция с этими таблицами дольше lock_timeout мигратора — например, письмо
+--    NOT-03 прежнего worker на медленном SMTP — отказ 55P03 до любой правки);
+-- 1) повторный перенос писем, которые этап 1 записал после 0010, — тот же оператор, что третий в 0010;
 -- 2) проверка: письмо с кодом правила не в notification или строка в скелетной таблице — RAISE EXCEPTION, и
 --    вся пачка миграций выката откатывается (мигратор применяет её одной транзакцией), перенос — тоже;
 -- 3) девять внешних ключей пустых колонок скелета переводятся с file_objects / file_versions на file_object /
@@ -13,6 +17,7 @@
 --    переименование file_scan_state → scan_state (колонка file_version.scan_state, её умолчание и частичный
 --    индекс file_version_pending_idx ссылаются на тип по OID и не меняются);
 -- 5) умолчание org_chart_sample.is_current — false.
+LOCK TABLE "notifications_sent", "dictionary_entries", "dictionaries", "file_versions", "file_objects" IN ACCESS EXCLUSIVE MODE;--> statement-breakpoint
 INSERT INTO notification (rule_code, recipient_email, user_account_id, language, dedup_key, sent_at)
   SELECT ns.code, ns.recipient, ua.id,
          CASE WHEN ns.locale IN ('kk','ru','en') THEN ns.locale::locale ELSE 'kk'::locale END,

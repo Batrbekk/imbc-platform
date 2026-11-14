@@ -878,6 +878,8 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
     expect(await journal('NOT-03', key)).toEqual([row]);
     expect((await notifyJobs(key)).map((j) => j.state)).toEqual(['completed']);
     expect(log).toHaveBeenCalledWith('notification NOT-03: sent 0, duplicates 1, observers 0, invalid 0');
+    // Запись auth.locked_out для события, которое прежняя версия уже обработала, после contract пишется сознательно:
+    // сверки с её журналом нет, а на стенде такое событие не встретится — оно лежит до курсора опроса событий.
     expect(await lockouts(user.id)).toHaveLength(1);
   });
 
