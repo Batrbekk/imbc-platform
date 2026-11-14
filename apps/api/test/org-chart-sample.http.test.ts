@@ -31,6 +31,7 @@ const FILE = {
   mediaType: 'application/pdf',
   scanState: 'passed',
   uploadedAt: '2026-11-13T05:00:00.000Z',
+  rejectionReason: null,
 } as const;
 const STATE: OrgChartSampleState = { current: FILE, latest: { ...FILE, scanState: 'pending' } };
 const UPLOAD: OrgChartSampleUpload = { upload: { ...FILE, scanState: 'pending' } };

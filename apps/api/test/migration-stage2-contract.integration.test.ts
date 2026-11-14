@@ -154,6 +154,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('contract этапа 2: мигр
     let lockedAccount: string;
     let legacySentAt: Date;
     const before: Record<string, Record<string, unknown>[]> = {};
+    /** Те же таблицы сразу после 0011 — до миграций следующих этапов, которые добавляют колонки. */
+    const afterContract: Record<string, Record<string, unknown>[]> = {};
     const KEPT = ['file_object', 'file_version', 'org_chart_sample', 'dictionary_entry', 'notification'];
 
     beforeAll(async () => {
@@ -202,6 +204,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('contract этапа 2: мигр
       for (const table of KEPT) before[table] = await rows(table);
       // Прежняя версия (этап 1) в окне выката этапа 2 записала письмо после 0010: перенос 0010 его не видел.
       legacySentAt = (await legacyLetter('sub-2:1700000000001', 'Locked@Stage3.local')).rows[0]!.sent_at;
+      await migrateThrough(pool, CONTRACT);
+      for (const table of KEPT) afterContract[table] = await rows(table);
+      // Остальные проверки — на схеме этой версии: миграции после 0011 только добавляют (NFR-06).
       await migrateThrough(pool);
     }, 60000);
 
@@ -225,9 +230,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('contract этапа 2: мигр
 
     it('данные этапа 2 целы: file_object, file_version (passed, rejected, pending), текущий образец, значение справочника и письма журнала — те же строки; scan_state — те же значения (DATA-07)', async () => {
       for (const table of KEPT.filter((t) => t !== 'notification'))
-        expect(await rows(table), table).toEqual(before[table]);
+        expect(afterContract[table], table).toEqual(before[table]);
       // В журнале — прежние строки и одна перенесённая.
-      const letters = await rows('notification');
+      const letters = afterContract.notification!;
       expect(letters).toHaveLength(before.notification!.length + 1);
       expect(letters).toEqual(expect.arrayContaining(before.notification!));
       // Порядок — порядок значений типа (pending, passed, rejected), как в FILE_SCAN_STATES.

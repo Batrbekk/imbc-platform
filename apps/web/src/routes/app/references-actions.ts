@@ -4,11 +4,13 @@ import {
   entryDisplayName,
   FILE_PROBLEM_CODES,
   type FileProblemCode,
+  type FileRejectionReason,
   type Locale,
   REFERENCE_PROBLEM_CODES,
   type ReferenceProblemCode,
 } from "@imbc/contracts";
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
+import { useCallback } from "react";
 import { useLocale, useTranslations } from "use-intl";
 
 import type { Messages } from "@/i18n/messages";
@@ -87,6 +89,17 @@ function problemKey(error: unknown): ProblemMessage {
 export function useReferenceProblemMessage() {
   const t = useTranslations("references");
   return (error: unknown) => t(`errors.${problemKey(error)}`);
+}
+
+/**
+ * Текст причины, по которой файл не прошёл проверку антивирусом (DATA-07): «найдена угроза», «защищён паролем»,
+ * «слишком сложен для проверки», «не удалось проверить». Причины нет (отказ этапа 2, ответ прежней версии API) —
+ * null: экран показывает общий текст. Ключ — значение `FILE_REJECTION_REASONS`: новое значение без текста в en.json
+ * не скомпилируется (те же ключи в kk и ru проверяет messages.test.ts).
+ */
+export function useRejectionReasonMessage() {
+  const t = useTranslations("references.sample.rejectionReason");
+  return useCallback((reason: FileRejectionReason | null | undefined) => (reason ? t(reason) : null), [t]);
 }
 
 const isEntryResult = (value: unknown): value is { entry: DictionaryEntry } =>

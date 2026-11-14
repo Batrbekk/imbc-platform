@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
   FILE_PROBLEM_CODES,
   type FilePurpose,
+  type FileRejectionReason,
   type OrgChartSampleFile,
   orgChartSampleCurrentSchema,
   orgChartSampleStateSchema,
@@ -208,6 +209,15 @@ describe.skipIf(!databaseUrl)(
       ).rows;
 
     const passed = (file: OrgChartSampleFile): OrgChartSampleFile => ({ ...file, scanState: 'passed' });
+    /** Загрузка, не прошедшая скан, с причиной отказа (DATA-07). */
+    const rejectedWith = (
+      file: OrgChartSampleFile,
+      rejectionReason: FileRejectionReason | null,
+    ): OrgChartSampleFile => ({
+      ...file,
+      scanState: 'rejected',
+      rejectionReason,
+    });
 
     beforeAll(async () => {
       pool = openTestPool();
@@ -302,6 +312,7 @@ describe.skipIf(!databaseUrl)(
         mediaType: 'application/pdf',
         scanState: 'pending',
         uploadedAt: expect.any(String),
+        rejectionReason: null,
       });
 
       const object = await pool.query('select organization_id, purpose, data_class from file_object where id = $1', [
@@ -390,7 +401,7 @@ describe.skipIf(!databaseUrl)(
 
       const third = await upload('Үшінші.pdf');
       expect(await scanAs(third.fileId, { clean: false, signature: 'Eicar-Test-Signature' })).toBe('rejected');
-      expect(await samples.state()).toEqual({ current: passed(second), latest: { ...third, scanState: 'rejected' } });
+      expect(await samples.state()).toEqual({ current: passed(second), latest: rejectedWith(third, 'malware') });
       expect(await rows()).toEqual([
         { file_object_id: first.fileId, is_current: false },
         { file_object_id: second.fileId, is_current: true },
@@ -779,7 +790,39 @@ describe.skipIf(!databaseUrl)(
       await pool.query('delete from org_chart_sample; delete from file_version; delete from file_object');
       const infected = await upload('Құрылым.pdf');
       expect(await scanAs(infected.fileId, { clean: false, signature: 'Eicar-Test-Signature' })).toBe('rejected');
-      expect(await samples.state()).toEqual({ current: null, latest: { ...infected, scanState: 'rejected' } });
+      expect(await samples.state()).toEqual({ current: null, latest: rejectedWith(infected, 'malware') });
+    });
+
+    it('state: latest rejected несёт причину отказа (PDF под паролем — encrypted), сигнатуры в ответе нет; у current причина null; rejected без причины (этап 2, worker R1 в окне выката) — rejectionReason null (ADM-11, DATA-07, NFR-06)', async () => {
+      const first = await upload('Бірінші.pdf');
+      expect(await scanAs(first.fileId)).toBe('passed');
+      const locked = await upload('Құпиясөзбен.pdf');
+      expect(await scanAs(locked.fileId, { clean: false, signature: 'Heuristics.Encrypted.PDF' })).toBe('rejected');
+      const state = await samples.state();
+      expect(state).toEqual({ current: passed(first), latest: rejectedWith(locked, 'encrypted') });
+      expect(state.current?.rejectionReason).toBeNull();
+      expect(orgChartSampleStateSchema.parse(state)).toEqual(state);
+      const res = await http.get(ORG_CHART_SAMPLE_ROUTES.sample, 'director');
+      const text = await res.text();
+      expect(JSON.parse(text)).toEqual(state);
+      expect(text).not.toContain('Heuristics');
+
+      for (const [signature, reason] of [
+        ['Heuristics.Limits.Exceeded.MaxScanSize', 'scan_limits'],
+        ['IMBC.Unverifiable.Zip64LocalHeader-1.UNOFFICIAL', 'scan_limits'],
+      ] as const) {
+        const next = await upload('Келесі.pdf');
+        expect(await scanAs(next.fileId, { clean: false, signature })).toBe('rejected');
+        expect(await samples.state()).toEqual({ current: passed(first), latest: rejectedWith(next, reason) });
+      }
+
+      // Отказ, записанный прежней версией worker: состояние rejected без причины.
+      const legacy = await upload('Ескі.pdf');
+      await pool.query(
+        "update file_version set scan_state = 'rejected', scanned_at = now() where file_object_id = $1",
+        [legacy.fileId],
+      );
+      expect(await samples.state()).toEqual({ current: passed(first), latest: rejectedWith(legacy, null) });
     });
 
     it('исполнитель перестал быть администратором — 403, объект карантина удалён, строк нет', async () => {

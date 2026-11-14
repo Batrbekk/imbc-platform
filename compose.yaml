@@ -182,14 +182,21 @@ services:
   # и при AlertExceedsMax no clamd молча прекращает проверку и отвечает OK. Настройки — infrastructure/clamav/clamd.conf:
   # AlertExceedsMax yes (превышение предела — FOUND Heuristics.Limits.Exceeded…, файл отклоняется) и пределы платформы.
   # Ответ clamd, кроме OK и FOUND (например, «INSTREAM size limit exceeded. ERROR»), — ошибка задания, не «чистый».
-  # clamd.conf примонтирован как файл: после его изменения контейнер clamav нужно пересоздать
+  # Своя база сигнатур — infrastructure/clamav/imbc.ndb (IMBC.Unverifiable.Zip64LocalHeader-1 и -2: локальный заголовок
+  # ZIP с размером 0xFFFFFFFF, ZIP64, — такой архив clamd 1.4 не разбирает и признаёт чистым на любой глубине; FOUND —
+  # отказ с причиной scan_limits, DATA-07). Стартовый скрипт образа (/init, set -eu) делает chown -R clamav:clamav
+  # /var/lib/clamav: файл, примонтированный в этот каталог только для чтения, уронил бы chown, и контейнер не стартовал
+  # бы. Поэтому imbc.ndb монтируется рядом с clamd.conf и копируется в каталог баз при каждом старте (entrypoint).
+  # clamd.conf и imbc.ndb примонтированы как файлы: после изменения любого из них контейнер clamav нужно пересоздать
   # (`docker compose up -d --force-recreate clamav`); проверить действующие значения — `docker compose exec clamav clamconf`.
   clamav:
     image: ${CLAMAV_IMAGE:-clamav/clamav:1.4}
     restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c", "cp /etc/clamav/imbc.ndb /var/lib/clamav/imbc.ndb && exec /init"]
     volumes:
       - clamav-db:/var/lib/clamav
       - ./infrastructure/clamav/clamd.conf:/etc/clamav/clamd.conf:ro
+      - ./infrastructure/clamav/imbc.ndb:/etc/clamav/imbc.ndb:ro
     healthcheck:
       test: ["CMD", "clamdcheck.sh"]
       interval: 30s

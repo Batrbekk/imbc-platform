@@ -31,6 +31,10 @@ describe('check-upload: проверка каталога файлов', () => {
     const { lines, summary } = await run(FIXTURES);
     expect(lines).toEqual(
       expect.arrayContaining([
+        'attachment-annotation.pdf\tfile_has_attachments\tattachments',
+        'attachment-escaped.pdf\tfile_has_attachments\tattachments',
+        'attachment-objstm.pdf\tfile_has_attachments\tattachments',
+        'attachment.pdf\tfile_has_attachments\tattachments',
         'descriptor.xlsx\taccepted\t-',
         'encrypted.docx\tfile_encrypted\t-',
         'gap.docx\tfile_structure_unsupported\tentries_gap',
@@ -43,6 +47,8 @@ describe('check-upload: проверка каталога файлов', () => {
         'ole-native.docx\tfile_has_attachments\tembedded_file',
         'ole-package-zip64.docx\tfile_has_attachments\tembedded_file',
         'ole-zip-stream.docx\tfile_has_attachments\tembedded_file',
+        // Пароль только на права: открывается без пароля, проверка вложений — у ClamAV (расхождение 5).
+        'owner-password.pdf\taccepted\t-',
         'plain.zip\tfile_type_not_allowed\t-',
         'program.exe\tfile_type_not_allowed\t-',
         'sample-deflated.docx\taccepted\t-',

@@ -46,6 +46,17 @@ export const FILE_SCAN_STATES = ['pending', 'passed', 'rejected'] as const;
 export type FileScanState = (typeof FILE_SCAN_STATES)[number];
 
 /**
+ * Почему версия не прошла скан (DATA-07; расхождение 6 плана этапа 3а, в DBML перечисления нет): worker выводит
+ * причину из сигнатуры clamd, пользователь видит причину, а не сигнатуру. `malware` — найдена угроза; `encrypted` —
+ * документ или архив под паролем, антивирус не видит содержимого (вопрос 54); `scan_limits` — файл превысил пределы
+ * проверки или содержит то, что антивирус не разбирает (ZIP64); `unverifiable` — байты версии не проверить (объект
+ * потерян или не совпал с загрузкой). В БД — тип `file_rejection_reason` (порядок тот же); у `rejected` этапа 2 и у
+ * отказа, записанного прежней версией worker, причины нет (`null`).
+ */
+export const FILE_REJECTION_REASONS = ['malware', 'encrypted', 'scan_limits', 'unverifiable'] as const;
+export type FileRejectionReason = (typeof FILE_REJECTION_REASONS)[number];
+
+/**
  * Файлы секций профиля производителя (класс `b_manufacturer`): назначения, на которые ссылаются
  * таблицы профиля DBML — `main_information`, `personnel`, `personnel_cv`, `product_line`,
  * `production_photo`, `certificate`, `document`.
@@ -92,7 +103,8 @@ export type FileContentQuery = z.infer<typeof fileContentQuerySchema>;
 
 /**
  * Образец оргструктуры (ADM-11, MAN-19): файл и его проверка. `fileId` — id `file_object` для
- * `GET /api/v1/files/:id/content`; `uploadedAt` — время загрузки, ISO 8601 в UTC (`toISOString`).
+ * `GET /api/v1/files/:id/content`; `uploadedAt` — время загрузки, ISO 8601 в UTC (`toISOString`);
+ * `rejectionReason` — причина отказа скана, бывает не `null` только у `rejected` (у `rejected` этапа 2 — `null`).
  */
 export const orgChartSampleFileSchema = z
   .object({
@@ -102,6 +114,7 @@ export const orgChartSampleFileSchema = z
     mediaType: z.string(),
     scanState: z.enum(FILE_SCAN_STATES),
     uploadedAt: z.iso.datetime(),
+    rejectionReason: z.enum(FILE_REJECTION_REASONS).nullable(),
   })
   .strict();
 export type OrgChartSampleFile = z.infer<typeof orgChartSampleFileSchema>;
@@ -110,21 +123,27 @@ export type OrgChartSampleFile = z.infer<typeof orgChartSampleFileSchema>;
 export const ORG_CHART_SAMPLE_LATEST_SCAN_STATES = ['pending', 'rejected'] as const;
 
 /**
- * `GET /api/v1/org-chart-sample`: `current` — текущий образец (только `passed`, DATA-07), `latest` — последняя
- * загрузка, если она не текущая (`pending` — проверяется, `rejected` — не прошла проверку; `passed` здесь не бывает:
- * прошедшая проверку последняя загрузка становится текущей).
+ * `GET /api/v1/org-chart-sample`: `current` — текущий образец (только `passed`, DATA-07, причины нет), `latest` —
+ * последняя загрузка, если она не текущая (`pending` — проверяется, `rejected` — не прошла проверку, с причиной или
+ * без неё; `passed` здесь не бывает: прошедшая проверку последняя загрузка становится текущей).
  */
 export const orgChartSampleStateSchema = z
   .object({
-    current: orgChartSampleFileSchema.extend({ scanState: z.literal('passed') }).nullable(),
-    latest: orgChartSampleFileSchema.extend({ scanState: z.enum(ORG_CHART_SAMPLE_LATEST_SCAN_STATES) }).nullable(),
+    current: orgChartSampleFileSchema.extend({ scanState: z.literal('passed'), rejectionReason: z.null() }).nullable(),
+    latest: orgChartSampleFileSchema
+      .extend({ scanState: z.enum(ORG_CHART_SAMPLE_LATEST_SCAN_STATES) })
+      .refine((file) => file.scanState === 'rejected' || file.rejectionReason === null, {
+        message: 'rejectionReason only for rejected',
+        path: ['rejectionReason'],
+      })
+      .nullable(),
   })
   .strict();
 export type OrgChartSampleState = z.infer<typeof orgChartSampleStateSchema>;
 
-/** `POST /api/v1/org-chart-sample` — 202: загрузка принята, файл ждёт скана (`pending`). */
+/** `POST /api/v1/org-chart-sample` — 202: загрузка принята, файл ждёт скана (`pending`, причины нет). */
 export const orgChartSampleUploadSchema = z
-  .object({ upload: orgChartSampleFileSchema.extend({ scanState: z.literal('pending') }) })
+  .object({ upload: orgChartSampleFileSchema.extend({ scanState: z.literal('pending'), rejectionReason: z.null() }) })
   .strict();
 export type OrgChartSampleUpload = z.infer<typeof orgChartSampleUploadSchema>;
 

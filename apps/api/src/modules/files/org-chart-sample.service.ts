@@ -65,7 +65,8 @@ export class OrgChartSampleService {
    * Текущий образец и последняя загрузка, если она не текущая (на проверке или отклонена). Текущий — строка
    * `is_current` с версией `passed`: строка без прошедшей скан версии текущим не показывается (страховка от
    * умолчания колонки). Один запрос — один снимок: текущий и последний не расходятся при смене текущего между
-   * чтениями. Порядок «последней» — тот же, что у хука: `uploaded_at`, затем id.
+   * чтениями. Порядок «последней» — тот же, что у хука: `uploaded_at`, затем id. У отклонённой — причина отказа
+   * (`rejectionReason`, DATA-07), сигнатуры clamd в ответе нет; у отказа этапа 2 и прежней версии worker — null.
    */
   async state(): Promise<OrgChartSampleState> {
     const rows = await this.db
@@ -77,6 +78,7 @@ export class OrgChartSampleService {
         byteSize: fileVersion.byteSize,
         mediaType: fileVersion.detectedMediaType,
         scanState: fileVersion.scanState,
+        rejectionReason: fileVersion.rejectionReason,
       })
       .from(orgChartSample)
       .innerJoin(fileVersion, latestVersion)
@@ -97,6 +99,7 @@ export class OrgChartSampleService {
       mediaType: row.mediaType ?? 'application/octet-stream',
       scanState: row.scanState,
       uploadedAt: row.uploadedAt.toISOString(),
+      rejectionReason: row.scanState === 'rejected' ? row.rejectionReason : null,
     });
     const current = rows.find((row) => row.isCurrent && row.scanState === 'passed');
     // Последняя загрузка — первая строка (текущий не новее последней), если она не текущая и ещё не прошла скан:
@@ -248,6 +251,7 @@ export class OrgChartSampleService {
                 mediaType: upload.mediaType,
                 scanState: 'pending',
                 uploadedAt: sample!.uploadedAt.toISOString(),
+                rejectionReason: null,
               },
             },
             'загрузка образца оргструктуры',

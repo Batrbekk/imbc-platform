@@ -14,7 +14,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { createdAt, id } from './_shared.js';
 import { organizations, userAccounts } from './access.js';
-import { dataClass, filePurpose, scanState } from './enums.js';
+import { dataClass, filePurpose, fileRejectionReason, scanState } from './enums.js';
 
 /*
  * Файлы по DBML (`file_object`, `file_version`, `org_chart_sample`): байты — в объектном хранилище,
@@ -41,7 +41,8 @@ export const fileObject = pgTable(
  * никто не открывает (DATA-07); прежние версии остаются.
  *
  * Отступления от DBML: номер версии больше нуля; размер от 1 байта до 25 МБ (`MAX_FILE_BYTES`, DATA-06);
- * ключ объекта уникален; частичный индекс версий, ждущих скана, — для повторной постановки в очередь.
+ * ключ объекта уникален; частичный индекс версий, ждущих скана, — для повторной постановки в очередь; причина
+ * отказа скана `rejection_reason` (расхождение 6 плана этапа 3а, 0012).
  * Тип состояния — `scan_state` DBML (до 0011 — `file_scan_state`).
  */
 export const fileVersion = pgTable(
@@ -64,6 +65,13 @@ export const fileVersion = pgTable(
     uploadedBy: uuid('uploaded_by').references(() => userAccounts.id),
     /** Случайный ключ объекта без имени файла (NFR-09). */
     storageKey: text('storage_key').notNull(),
+    /**
+     * Причина отказа скана по сигнатуре clamd (DATA-07): worker пишет её вместе с `scan_state = 'rejected'`.
+     * CHECK «rejected ⇔ причина есть» не ставится (NFR-06): worker прежней версии в окне выката и после отката
+     * пишет `rejected` без причины — проверка остановила бы его скан; строки этапа 2 с `rejected` остаются без
+     * причины. Ограничение может добавить contract этапа 3.
+     */
+    rejectionReason: fileRejectionReason('rejection_reason'),
   },
   (t) => [
     uniqueIndex('file_version_number_uq').on(t.fileObjectId, t.versionNumber),

@@ -21,7 +21,7 @@ import { type AppFormat, useFormat } from "@/i18n/format";
 import { api } from "@/lib/api";
 
 import { useAdminAction, useAnnounce } from "./admin-actions";
-import { ORG_CHART_SAMPLE_KEY, useReferenceProblemMessage } from "./references-actions";
+import { ORG_CHART_SAMPLE_KEY, useReferenceProblemMessage, useRejectionReasonMessage } from "./references-actions";
 
 /** Пока последняя загрузка на проверке антивирусом, состояние перечитывается каждые 5 секунд (DATA-07). */
 const SAMPLE_POLL_MS = 5_000;
@@ -49,6 +49,7 @@ export function OrgChartSampleCard({ canManage }: { canManage: boolean }) {
   const common = useTranslations("common");
   const format = useFormat();
   const problem = useReferenceProblemMessage();
+  const reasonText = useRejectionReasonMessage();
   const announce = useAnnounce();
   const picker = useRef<HTMLInputElement>(null);
   // Отказ до отправки (файл больше предела): сервер сказал бы то же, но без лишнего ожидания.
@@ -94,6 +95,7 @@ export function OrgChartSampleCard({ canManage }: { canManage: boolean }) {
   // небольшой файл проверяется за секунду, и уже первое перечитывание отдаёт его текущим. Ожидание — только у файла,
   // загруженного на этой странице в этом сеансе (данные мутации): при открытии страницы с идущей чужой проверкой, после
   // перезагрузки и для прежней загрузки объявлять нечего. Если сам ответ на загрузку уже говорит об итоге — тоже.
+  // Отказ объявляется с причиной, если сервер её назвал (DATA-07).
   const uploaded: OrgChartSampleFile | undefined = upload.data?.upload;
   const announcedFor = useRef<string | null>(null);
   useEffect(() => {
@@ -112,11 +114,18 @@ export function OrgChartSampleCard({ canManage }: { canManage: boolean }) {
     if (verdict === "passed") {
       announce({ tone: "success", text: t("sample.checkPassed") });
     } else {
+      const rejected = uploaded.scanState === "rejected" ? uploaded : state.data?.latest;
       // «Текущий образец не изменился» — только если текущий был.
-      const kept = state.data?.current ? ` ${t("sample.keptCurrent")}` : "";
-      announce({ tone: "error", text: `${t("sample.checkRejected")}${kept}` });
+      const text = [
+        t("sample.checkRejected"),
+        reasonText(rejected?.rejectionReason),
+        state.data?.current ? t("sample.keptCurrent") : null,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      announce({ tone: "error", text });
     }
-  }, [uploaded, state.data, announce, t]);
+  }, [uploaded, state.data, announce, t, reasonText]);
 
   return (
     <Card className="@container">
@@ -219,7 +228,10 @@ function CurrentSample({ file, format }: { file: OrgChartSampleFile; format: App
 
 /**
  * Последняя загрузка, которая не стала текущей: на проверке («Проверяется антивирусом») или не прошла её
- * («Не прошёл проверку»). Область — role=status: смена состояния читается программой чтения с экрана.
+ * («Не прошёл проверку»). У отказа — причина, если сервер её назвал (DATA-07): «Файл защищён паролем: снимите
+ * пароль…» — её видят и администратор, и директор; в тексте причины уже сказано, что делать, поэтому общее
+ * «Загрузите другой» с ней не показывается. Отказ без причины (этап 2) — прежний общий текст. Область —
+ * role=status: смена состояния читается программой чтения с экрана.
  */
 function LatestUpload({
   file,
@@ -231,7 +243,9 @@ function LatestUpload({
   canManage: boolean;
 }) {
   const t = useTranslations("references.sample");
+  const reasonText = useRejectionReasonMessage();
   const pending = file.scanState === "pending";
+  const reason = pending ? null : reasonText(file.rejectionReason);
   return (
     <div role="status" className="flex flex-col gap-1.5 rounded-lg border border-dashed p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
@@ -251,6 +265,11 @@ function LatestUpload({
             {/* Проверка может идти дольше минуты: человек знает, что ждать и что страницу можно закрыть. */}
             <p>{t("pendingDuration")}</p>
             <p>{hasCurrent ? t("pendingHint") : t("pendingFirstHint")}</p>
+          </>
+        ) : reason ? (
+          <>
+            <p>{reason}</p>
+            {hasCurrent && <p>{t("keptCurrent")}</p>}
           </>
         ) : canManage ? (
           <>

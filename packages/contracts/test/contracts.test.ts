@@ -29,6 +29,7 @@ import {
   entryDisplayName,
   entryMandatorySchema,
   FILE_PURPOSES,
+  FILE_REJECTION_REASONS,
   FILE_SCAN_STATES,
   MANDATORY_DICTIONARIES,
   MANUFACTURER_FILE_PURPOSES,
@@ -44,6 +45,8 @@ import {
   POLICY_MATRIX,
   type PolicyMatrix,
   ORGANIZATION_TYPES,
+  orgChartSampleStateSchema,
+  orgChartSampleUploadSchema,
   ownAdataReadSchema,
   ownProfileSchema,
   PREFILL_FIELDS,
@@ -98,6 +101,8 @@ describe('файлы и справочники (DBML, ADM-08, DATA-05, DATA-07)'
     ]);
     // DBML `scan_state` — тип БД с тем же именем (с 0011; до неё — file_scan_state).
     expect(FILE_SCAN_STATES).toEqual(['pending', 'passed', 'rejected']);
+    // Причина отказа скана (расхождение 6 плана; в DBML её нет): тип БД file_rejection_reason, порядок тот же.
+    expect(FILE_REJECTION_REASONS).toEqual(['malware', 'encrypted', 'scan_limits', 'unverifiable']);
 
     // Файлы секций профиля — те назначения, на которые ссылаются таблицы профиля DBML.
     expect(MANUFACTURER_FILE_PURPOSES).toEqual([
@@ -128,6 +133,41 @@ describe('файлы и справочники (DBML, ADM-08, DATA-05, DATA-07)'
       'certificate_type',
       'document_type',
     ]);
+  });
+});
+
+describe('образец оргструктуры: причина отказа скана (ADM-11, DATA-07)', () => {
+  const file = (scanState: string, rejectionReason: string | null) => ({
+    fileId: '00000000-0000-4000-8000-000000000001',
+    originalName: 'Құрылым.pdf',
+    byteSize: 329,
+    mediaType: 'application/pdf',
+    scanState,
+    uploadedAt: '2026-11-14T08:30:00.000Z',
+    rejectionReason,
+  });
+
+  it('причина бывает только у rejected; у rejected этапа 2 — null; у текущего и у загрузки — null; без поля — отказ схемы', () => {
+    for (const reason of [...FILE_REJECTION_REASONS, null])
+      expect(
+        orgChartSampleStateSchema.safeParse({ current: null, latest: file('rejected', reason) }).success,
+        String(reason),
+      ).toBe(true);
+    expect(orgChartSampleStateSchema.safeParse({ current: null, latest: file('pending', null) }).success).toBe(true);
+    expect(orgChartSampleStateSchema.safeParse({ current: null, latest: file('pending', 'malware') }).success).toBe(
+      false,
+    );
+    expect(orgChartSampleStateSchema.safeParse({ current: null, latest: file('rejected', 'virus') }).success).toBe(
+      false,
+    );
+    expect(orgChartSampleStateSchema.safeParse({ current: file('passed', null), latest: null }).success).toBe(true);
+    expect(orgChartSampleStateSchema.safeParse({ current: file('passed', 'encrypted'), latest: null }).success).toBe(
+      false,
+    );
+    const { rejectionReason: _omitted, ...withoutReason } = file('rejected', null);
+    expect(orgChartSampleStateSchema.safeParse({ current: null, latest: withoutReason }).success).toBe(false);
+    expect(orgChartSampleUploadSchema.safeParse({ upload: file('pending', null) }).success).toBe(true);
+    expect(orgChartSampleUploadSchema.safeParse({ upload: file('pending', 'malware') }).success).toBe(false);
   });
 });
 

@@ -14,7 +14,8 @@ import { cleanFileName, inspectFile } from '../modules/files/upload.js';
  * По строке на файл (рекурсивно, в порядке имён; символические ссылки не раскрываются):
  * `<путь от каталога>\t<accepted|код>\t<причина|->`. Код — как в ответе загрузки (`file_encrypted`,
  * `file_structure_unsupported` …), кроме `too_large` (больше 25 МБ, не читается), `file_empty` и `unreadable`
- * (причина — код ошибки чтения). Причина — `ZipStructureIssue` для DOCX и XLSX. В конце — `accepted N, refused M`.
+ * (причина — код ошибки чтения). Причина — `ZipStructureIssue` для DOCX и XLSX, `PdfStructureIssue` для PDF. В конце —
+ * `accepted N, refused M`.
  * Код выхода 0; без каталога — 2, каталог не читается — 1.
  */
 

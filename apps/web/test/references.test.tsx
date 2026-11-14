@@ -8,6 +8,8 @@ import {
   type DictionaryEntry,
   type DictionarySummary,
   FILE_PROBLEM_CODES,
+  FILE_REJECTION_REASONS,
+  type FileRejectionReason,
   MANDATORY_DICTIONARIES,
   type OrgChartSampleState,
   REFERENCE_PROBLEM_CODES,
@@ -155,8 +157,15 @@ function listResponse(store: Store, code: DictionaryCode, url: URL): Response {
   return Response.json(result);
 }
 
-/** Файл образца: у каждого имени свой id; проверяемый и прошедший проверку файл с одним именем — один и тот же файл. */
-const sampleFile = (scanState: "passed" | "pending" | "rejected", name = "Образец оргструктуры.pdf") => ({
+/**
+ * Файл образца: у каждого имени свой id; проверяемый и прошедший проверку файл с одним именем — один и тот же файл.
+ * Причина отказа — только у `rejected`; без неё — отказ этапа 2 (DATA-07).
+ */
+const sampleFile = (
+  scanState: "passed" | "pending" | "rejected",
+  name = "Образец оргструктуры.pdf",
+  rejectionReason: FileRejectionReason | null = null,
+) => ({
   fileId: idOf("sample", name),
   originalName: name,
   byteSize: 1_572_864,
@@ -164,6 +173,7 @@ const sampleFile = (scanState: "passed" | "pending" | "rejected", name = "Обр
   scanState,
   // 08:30 UTC — 13:30 в Алматы.
   uploadedAt: "2026-11-12T08:30:00.000Z",
+  rejectionReason,
 });
 
 interface Backend {
@@ -1191,6 +1201,55 @@ describe("образец оргструктуры (ADM-11)", () => {
     expect(requests(api, "GET", /\/org-chart-sample$/)).toHaveLength(1);
   });
 
+  it("образец не прошёл проверку: текст причины encrypted на kk и en у «Не прошёл проверку» вместо общего «Загрузите другой»; текущий остаётся", async () => {
+    for (const [locale, messages] of [
+      ["kk", kk],
+      ["en", en],
+    ] as const) {
+      stubBackend({
+        sample: {
+          current: sampleFile("passed", "Прежний образец.pdf") as never,
+          latest: sampleFile("rejected", "Құпиясөз.pdf", "encrypted") as never,
+        },
+      });
+      renderRoute("/references", { locale });
+      const t = messages.references.sample;
+
+      const badge = await screen.findByText(t.rejected);
+      const status = badge.closest<HTMLElement>('[role="status"]')!;
+      expect(within(status).getByText(t.rejectionReason.encrypted)).toBeTruthy();
+      expect(within(status).getByText(t.keptCurrent)).toBeTruthy();
+      expect(within(status).queryByText(t.rejectedHint)).toBeNull();
+      expect(within(status).getByText("Құпиясөз.pdf")).toBeTruthy();
+      // Код причины на экран не выходит.
+      expect(status.textContent).not.toContain("encrypted");
+      expect(screen.getByText("Прежний образец.pdf")).toBeTruthy();
+      cleanup();
+    }
+  });
+
+  it("причина отказа видна и директору (загрузки нет); каждая причина — свой текст; отказ без причины (этап 2) — прежний общий текст", async () => {
+    for (const reason of FILE_REJECTION_REASONS) {
+      stubBackend({
+        me: DIRECTOR,
+        sample: { current: null, latest: sampleFile("rejected", "Отказ.pdf", reason) as never },
+      });
+      renderRoute("/references", { locale: "ru" });
+      const t = ru.references.sample;
+      const status = (await screen.findByText(t.rejected)).closest<HTMLElement>('[role="status"]')!;
+      expect(within(status).getByText(t.rejectionReason[reason]), reason).toBeTruthy();
+      expect(within(status).queryByText(t.rejectedPlain)).toBeNull();
+      cleanup();
+    }
+    stubBackend({ sample: { current: null, latest: sampleFile("rejected", "Отказ.pdf") as never } });
+    renderRoute("/references", { locale: "ru" });
+    const t = ru.references.sample;
+    const status = (await screen.findByText(t.rejected)).closest<HTMLElement>('[role="status"]')!;
+    expect(within(status).getByText(t.rejectedHint)).toBeTruthy();
+    for (const reason of FILE_REJECTION_REASONS)
+      expect(within(status).queryByText(t.rejectionReason[reason])).toBeNull();
+  });
+
   it("413, 415 и прочие отказы загрузки — переведённые сообщения в карточке; следующая загрузка убирает прежнее", async () => {
     let reply: Response = problemResponse(413, "file_too_large");
     const api = stubBackend({ overrides: [["POST", /\/org-chart-sample$/, () => reply.clone()]] });
@@ -1283,6 +1342,34 @@ describe("тексты ошибок и языки (LANG-01, LANG-02)", () => {
     expect(Object.keys(en.references.errors).sort()).toEqual([...used].sort());
     expect(en.references.errors.file_structure_unsupported).toBe(
       "The file could not be checked: save the document again in Word or Excel and upload it once more.",
+    );
+  });
+
+  it("каждая причина FILE_REJECTION_REASONS переведена на трёх языках без кода; file_has_attachments — общий текст для Office и PDF", () => {
+    for (const reason of FILE_REJECTION_REASONS)
+      for (const [locale, messages] of [
+        ["kk", kk],
+        ["ru", ru],
+        ["en", en],
+      ] as const) {
+        const text = (messages.references.sample.rejectionReason as Record<string, string>)[reason];
+        expect(text, `${locale}: ${reason}`).toBeTruthy();
+        expect(text!.trim(), `${locale}: ${reason}`).not.toBe("");
+        expect(text, `${locale}: ${reason}`).not.toContain(reason);
+      }
+    // Ключи причин не повисают.
+    expect(Object.keys(en.references.sample.rejectionReason).sort()).toEqual([...FILE_REJECTION_REASONS].sort());
+    expect(en.references.sample.rejectionReason).toEqual({
+      malware: "The antivirus found a threat in the file.",
+      encrypted: "The file is password-protected: remove the password and upload it again.",
+      scan_limits: "The file is too complex to be checked: save it again or split it.",
+      unverifiable: "The file could not be checked: upload it again.",
+    });
+    expect(en.references.errors.file_has_attachments).toBe(
+      "The file contains embedded or attached files that cannot be checked. Save it without them (a PDF can be printed to PDF again) and upload it again; upload those files separately.",
+    );
+    expect(ru.references.errors.file_has_attachments).toBe(
+      "В файле есть внедрённые или вложенные файлы — проверить их нельзя. Сохраните файл без них (PDF можно заново распечатать в PDF) и загрузите снова, а сами файлы загрузите отдельно.",
     );
   });
 
@@ -1930,6 +2017,25 @@ describe("образец оргструктуры: итог проверки в 
     expect(within(statusLine()).queryByText(t.uploaded)).toBeNull();
     expect(await sampleCard().findByText(t.rejected)).toBeTruthy();
     expect(sampleCard().getByText("Прежний образец.pdf")).toBeTruthy();
+  });
+
+  it("быстрый отказ с причиной: в строке итога — «не прошёл проверку», причина и «текущий не изменился»", async () => {
+    const sample: Backend["sample"] = { current: sampleFile("passed", "Прежний образец.pdf") as never, latest: null };
+    const rejectWith: Handler = (_url, init) => {
+      const name = ((init?.body as FormData).get("file") as File).name;
+      sample.latest = sampleFile("rejected", name, "encrypted") as never;
+      return Response.json({ upload: sampleFile("pending", name) }, { status: 202 });
+    };
+    stubBackend({ sample, overrides: [[...POST_SAMPLE, rejectWith]] });
+    const { user } = renderRoute("/references", { locale: "ru" });
+    const t = ru.references.sample;
+
+    await screen.findByRole("link", { name: t.download });
+    await user.upload(fileInput(), pdf("Под паролем.pdf"));
+    const failed = await within(statusLine()).findByText(
+      `${t.checkRejected} ${t.rejectionReason.encrypted} ${t.keptCurrent}`,
+    );
+    expect(failed.closest('[data-slot="alert"]')!.className).toContain("text-destructive");
   });
 
   it("быстрый отказ первого образца: без слов о неизменившемся текущем", async () => {

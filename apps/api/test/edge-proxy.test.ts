@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { MAX_FILE_BYTES } from '@imbc/contracts';
 import { describe, expect, it } from 'vitest';
 import { CLAMD_CLIENT_TIMEOUT_MS } from '../src/worker/clamd.js';
+import { clamdSettings, repository, serviceBlock } from './support/repository-files.js';
 
 const read = (path: string) => readFileSync(new URL(`../../../infrastructure/${path}`, import.meta.url), 'utf8');
 const caddyfile = read('azure/Caddyfile');
@@ -99,18 +100,8 @@ describe('edge: консоль аккаунта Keycloak закрыта (MAN-05,
 // Файлы никогда не доступны напрямую (NFR-09): S3 API RustFS (порт 9000) не опубликован ни на хосте, ни через
 // edge-прокси; байты отдаёт только API после проверки прав (GEN-09). Консоль RustFS (9001) на сервере — только
 // на 127.0.0.1 (доступ администратора через SSH-туннель).
-const repository = (path: string) => readFileSync(new URL(`../../../${path}`, import.meta.url), 'utf8');
 const compose = repository('compose.yaml');
 const composeAzure = repository('compose.azure.yaml');
-
-/** Блок сервиса `name` из `services:` (отступ два пробела) до следующего ключа того же или верхнего уровня. */
-const serviceBlock = (file: string, name: string) => {
-  const lines = file.split('\n');
-  const start = lines.indexOf(`  ${name}:`);
-  if (start === -1) return null;
-  const end = lines.findIndex((line, i) => i > start && /^ {0,2}[^\s#]/.test(line));
-  return lines.slice(start, end === -1 ? undefined : end).join('\n');
-};
 
 /** Значения `ports:` блока сервиса: список строк `- "…"` или строка `ports: [...]`. */
 const publishedPorts = (block: string) => {
@@ -185,19 +176,6 @@ describe('edge: S3 не опубликован (NFR-09)', () => {
 // тоже распаковывает. С AlertExceedsMax no clamd на превышении молча прекращает проверку и отвечает OK; с yes —
 // FOUND Heuristics.Limits.Exceeded…, и worker отклоняет файл.
 const clamdConf = repository('infrastructure/clamav/clamd.conf');
-
-/** Действующие строки clamd.conf: ключ → значение (комментарии и пустые строки отброшены). */
-const clamdSettings = (conf: string) =>
-  new Map(
-    conf
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith('#'))
-      .map((line) => {
-        const [key, ...value] = line.split(/\s+/);
-        return [key!, value.join(' ')] as const;
-      }),
-  );
 
 /** Размер clamd в байтах: число и необязательный суффикс K или M (как читает clamd). */
 const clamdBytes = (value: string | undefined) => {

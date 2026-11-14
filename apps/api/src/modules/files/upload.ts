@@ -17,6 +17,7 @@ import type { Observable } from 'rxjs';
 import { ProblemException } from '../../common/problem.js';
 import { isEncryptedOfficeDocument } from './cfb.js';
 import { detectMediaType } from './file-type.js';
+import { type PdfStructureIssue, pdfStructureIssue } from './pdf-structure.js';
 import { createInflateBudget, type ZipStructureIssue, zipStructureIssue } from './zip-structure.js';
 
 /** Длина имени файла в символах (кодовых точках), как её хранит `file_version.original_name`. */
@@ -51,8 +52,8 @@ const hasAttachments = () =>
   new ProblemException(
     415,
     'file_has_attachments',
-    'В файле есть внедрённые файлы',
-    'Удалите внедрённые файлы из документа и загрузите их отдельно',
+    'В файле есть внедрённые или вложенные файлы',
+    'Сохраните файл без них (PDF можно заново распечатать в PDF), а сами файлы загрузите отдельно',
   );
 const malformedUpload = () =>
   new ProblemException(400, 'validation', 'Запрос с файлом не разобран', 'Ожидается один файл в поле file');
@@ -159,7 +160,7 @@ const OOXML_TYPES: readonly AllowedMediaType[] = [
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ];
 
-/** Почему файл не принят — код ответа 415 (DATA-06, DATA-07). `file_has_attachments` — и для PDF с вложениями. */
+/** Почему файл не принят — код ответа 415 (DATA-06, DATA-07). `file_has_attachments` — объект OLE с файлом и PDF с вложениями. */
 export type InspectRefusal =
   | 'file_type_not_allowed'
   | 'file_type_mismatch'
@@ -169,11 +170,14 @@ export type InspectRefusal =
   | 'file_has_attachments';
 
 /**
- * Итог проверки содержимого: тип по содержимому или код отказа. `reason` — причина структуры (`ZipStructureIssue`)
- * для журнала и инструмента проверки папки; у отказов по типу и у документа CFB под паролем — null.
+ * Итог проверки содержимого: тип по содержимому или код отказа. `reason` — причина структуры для журнала и инструмента
+ * проверки папки: `ZipStructureIssue` у DOCX и XLSX (`structure: 'zip'`), `PdfStructureIssue` у PDF
+ * (`structure: 'pdf'`); у отказов по типу и у документа CFB под паролем — null.
  */
 export type InspectResult =
-  { ok: true; mediaType: AllowedMediaType } | { ok: false; code: InspectRefusal; reason: string | null };
+  | { ok: true; mediaType: AllowedMediaType }
+  | { ok: false; code: InspectRefusal; reason: null }
+  | { ok: false; code: InspectRefusal; reason: string; structure: 'zip' | 'pdf' };
 
 /** Пределы проверки вложенных пакетов исчерпаны — файл слишком сложен, чтобы проверить его целиком. */
 const TOO_COMPLEX: ReadonlySet<ZipStructureIssue> = new Set<ZipStructureIssue>([
@@ -182,6 +186,11 @@ const TOO_COMPLEX: ReadonlySet<ZipStructureIssue> = new Set<ZipStructureIssue>([
   'inflate_limit',
   'entries_too_many',
 ]);
+
+const PDF_REFUSALS: Record<PdfStructureIssue, InspectRefusal> = {
+  attachments: 'file_has_attachments',
+  inflate_limit: 'file_too_complex',
+};
 
 const refusalFor = (issue: ZipStructureIssue): InspectRefusal =>
   issue === 'encrypted'
@@ -199,7 +208,10 @@ const refusalFor = (issue: ZipStructureIssue): InspectRefusal =>
  * без типа — `file_type_not_allowed`; расширение не соответствует типу — `file_type_mismatch`; DOCX и XLSX —
  * структура ZIP с новым бюджетом на файл (`zipStructureIssue`): шифрование записей или внедрённый документ под
  * паролем — `file_encrypted`, объект OLE с внедрённым файлом — `file_has_attachments`, пределы вложенных пакетов —
- * `file_too_complex`, прочее — `file_structure_unsupported`. `originalName` — для расширения.
+ * `file_too_complex`, прочее — `file_structure_unsupported`; PDF — вложения с новым бюджетом на файл
+ * (`pdfStructureIssue`): вложенные файлы — `file_has_attachments`, потоки объектов сверх бюджета — `file_too_complex`.
+ * PDF под паролем на открытие здесь принимается: его отклоняет ClamAV (`AlertEncryptedDoc`, причина `encrypted`).
+ * `originalName` — для расширения.
  */
 export async function inspectFile(bytes: Buffer, originalName: string): Promise<InspectResult> {
   const mediaType = await detectMediaType(bytes);
@@ -209,10 +221,24 @@ export async function inspectFile(bytes: Buffer, originalName: string): Promise<
     return { ok: false, code: 'file_type_not_allowed', reason: null };
   }
   if (!fileExtensionMatches(originalName, mediaType)) return { ok: false, code: 'file_type_mismatch', reason: null };
+  if (mediaType === 'application/pdf') {
+    const issue = pdfStructureIssue(bytes, createInflateBudget());
+    return issue === null
+      ? { ok: true, mediaType }
+      : { ok: false, code: PDF_REFUSALS[issue], reason: issue, structure: 'pdf' };
+  }
   if (!OOXML_TYPES.includes(mediaType)) return { ok: true, mediaType };
   const issue = zipStructureIssue(bytes, { budget: createInflateBudget() });
-  return issue === null ? { ok: true, mediaType } : { ok: false, code: refusalFor(issue), reason: issue };
+  return issue === null
+    ? { ok: true, mediaType }
+    : { ok: false, code: refusalFor(issue), reason: issue, structure: 'zip' };
 }
+
+/** Строка журнала отказа по структуре — своя для ZIP (DOCX, XLSX) и PDF. */
+const STRUCTURE_REFUSED_LOG = {
+  zip: 'File upload: ZIP structure not accepted',
+  pdf: 'File upload: PDF not accepted',
+} as const;
 
 const REFUSALS: Record<InspectRefusal, () => ProblemException> = {
   file_type_not_allowed: typeNotAllowed,
@@ -231,9 +257,10 @@ const cleanDeclaredType = (value: string | undefined) =>
  * Проверка загруженного файла до хранилища и БД (DATA-06): нет файла — 400 `file_missing`; 0 байт — 400
  * `file_empty`; больше 25 МБ — 413 `file_too_large`; содержимое (`inspectFile`) — 415 с кодом отказа: тип не из
  * пяти допустимых, расширение не по типу, DOCX или XLSX под паролем (`file_encrypted`), со структурой ZIP, которую
- * антивирус проверил бы не целиком (`file_structure_unsupported`), со вложенными пакетами сверх пределов
- * (`file_too_complex`) или с внедрённым файлом в объекте OLE (`file_has_attachments`) (DATA-07). Причина
- * структуры — строка журнала `{ reason }`; имени файла нет ни в журнале, ни в тексте ошибки.
+ * антивирус проверил бы не целиком (`file_structure_unsupported`), со вложенными пакетами или потоками объектов PDF
+ * сверх пределов (`file_too_complex`), с внедрённым файлом в объекте OLE или PDF с вложениями
+ * (`file_has_attachments`) (DATA-07). Причина структуры — строка журнала `{ reason }` (`File upload: ZIP structure
+ * not accepted` или `File upload: PDF not accepted`); имени файла нет ни в журнале, ни в тексте ошибки.
  */
 export async function acceptUpload(file: Express.Multer.File | undefined): Promise<AcceptedUpload> {
   if (!file || !Buffer.isBuffer(file.buffer)) throw fileMissing();
@@ -245,7 +272,7 @@ export async function acceptUpload(file: Express.Multer.File | undefined): Promi
   const inspected = await inspectFile(bytes, originalName);
   if (!inspected.ok) {
     // Причина — для разбора ложных отказов законным документам; имени файла в журнале нет.
-    if (inspected.reason !== null) logger.log({ reason: inspected.reason }, 'File upload: ZIP structure not accepted');
+    if (inspected.reason !== null) logger.log({ reason: inspected.reason }, STRUCTURE_REFUSED_LOG[inspected.structure]);
     throw REFUSALS[inspected.code]();
   }
   return {

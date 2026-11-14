@@ -6,6 +6,7 @@ import {
   DATA_CLASSES,
   DOCUMENT_STATUSES,
   FILE_PURPOSES,
+  FILE_REJECTION_REASONS,
   FILE_SCAN_STATES,
   LOCALES,
   MARK_STATES,
@@ -41,6 +42,8 @@ export const locale = pgEnum('locale', LOCALES);
 export const filePurpose = pgEnum('file_purpose', FILE_PURPOSES);
 export const dataClass = pgEnum('data_class', DATA_CLASSES);
 export const scanState = pgEnum('scan_state', FILE_SCAN_STATES);
+/** Причина отказа скана (DATA-07, расхождение 6 плана этапа 3а; в DBML перечисления нет), 0012. */
+export const fileRejectionReason = pgEnum('file_rejection_reason', FILE_REJECTION_REASONS);
 
 export const revisionState = pgEnum('revision_state', ['working', 'submitted', 'verified', 'rejected', 'superseded']);
 export const decision = pgEnum('decision', ['verified', 'rejected']);

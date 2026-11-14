@@ -1,0 +1,2 @@
+CREATE TYPE "public"."file_rejection_reason" AS ENUM('malware', 'encrypted', 'scan_limits', 'unverifiable');--> statement-breakpoint
+ALTER TABLE "file_version" ADD COLUMN "rejection_reason" "file_rejection_reason";

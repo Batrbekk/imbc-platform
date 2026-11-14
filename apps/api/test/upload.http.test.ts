@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
 import { inspect } from 'node:util';
+import { deflateSync } from 'node:zlib';
 import { FILE_PROBLEM_CODES, MAX_FILE_BYTES } from '@imbc/contracts';
 import {
   BadRequestException,
@@ -22,6 +23,7 @@ import { MulterError } from 'multer';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ProblemException } from '../src/common/problem.js';
 import { acceptUpload, uploadFailure, uploadInterceptor } from '../src/modules/files/upload.js';
+import { MAX_INFLATED_BYTES } from '../src/modules/files/zip-structure.js';
 import { type HttpStand, startHttp } from './support/http.js';
 
 // Граница загрузки (DATA-06): multer с пределами, тип по содержимому, расширение имени, имя файла UTF-8.
@@ -259,6 +261,39 @@ describe('загрузка файла: предел, тип по содержи�
     }
     log.mockRestore();
     expect(await upload(form(['file', fixture('ole-equation.docx'), 'Формула.docx']))).toMatchObject({ status: 200 });
+  });
+
+  it('PDF с вложением — 415 file_has_attachments; поток объектов больше бюджета распаковки — 415 file_too_complex; в журнале причина без имени файла; PDF под паролем прав и обычный — 200 (DATA-06, DATA-07)', async () => {
+    const log = vi.spyOn(Logger.prototype, 'log');
+    // Поток объектов, который распаковывается больше чем в 64 МиБ.
+    const oversized = Buffer.concat([
+      Buffer.from('%PDF-1.7\n5 0 obj\n<< /Type /ObjStm /N 1 /First 4 /Filter /FlateDecode >>\nstream\n'),
+      deflateSync(Buffer.alloc(MAX_INFLATED_BYTES + 1, 0x20)),
+      Buffer.from('\nendstream\nendobj\n%%EOF\n'),
+    ]);
+    for (const [label, bytes, code, reason] of [
+      ['attachment.pdf', fixture('attachment.pdf'), 'file_has_attachments', 'attachments'],
+      ['attachment-annotation.pdf', fixture('attachment-annotation.pdf'), 'file_has_attachments', 'attachments'],
+      ['attachment-escaped.pdf', fixture('attachment-escaped.pdf'), 'file_has_attachments', 'attachments'],
+      ['attachment-objstm.pdf', fixture('attachment-objstm.pdf'), 'file_has_attachments', 'attachments'],
+      ['поток объектов сверх бюджета', oversized, 'file_too_complex', 'inflate_limit'],
+    ] as const) {
+      log.mockClear();
+      const res = await upload(form(['file', bytes, 'Секретный план.pdf', 'application/pdf']));
+      expect(res, label).toMatchObject({ status: 415, body: { status: 415, code } });
+      expect(JSON.stringify(res.body)).not.toContain('Секретный');
+      expect(log).toHaveBeenCalledWith({ reason }, 'File upload: PDF not accepted');
+      expect(log).not.toHaveBeenCalledWith(expect.anything(), 'File upload: ZIP structure not accepted');
+      expect(inspect(log.mock.calls, { depth: 10 })).not.toContain('Секретный');
+    }
+    log.mockClear();
+    for (const name of ['owner-password.pdf', 'sample.pdf'])
+      expect(await upload(form(['file', fixture(name), name])), name).toMatchObject({
+        status: 200,
+        body: { mediaType: 'application/pdf' },
+      });
+    expect(log).not.toHaveBeenCalledWith(expect.anything(), 'File upload: PDF not accepted');
+    log.mockRestore();
   });
 
   it('без сеанса — 401, файл не разбирается', async () => {

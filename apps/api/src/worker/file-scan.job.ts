@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { pipeline, type Readable, Transform } from 'node:stream';
-import type { FilePurpose } from '@imbc/contracts';
+import type { FilePurpose, FileRejectionReason } from '@imbc/contracts';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, asc, eq, lt, sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
@@ -42,6 +42,22 @@ export const OBJECT_MISSING_SIGNATURE = 'object_missing';
 /** Сигнатура окончательного отказа, когда байты карантина не совпадают с sha256 загрузки (DATA-05, DATA-07). */
 export const CHECKSUM_MISMATCH_SIGNATURE = 'checksum_mismatch';
 
+/**
+ * Причина отказа версии по сигнатуре (DATA-07, ADM-11; расхождение 6 плана этапа 3а): её видят производитель и
+ * администратор, сигнатуру — только аудит. `Heuristics.Encrypted.…` — документ или архив под паролем
+ * (`AlertEncryptedDoc`, `AlertEncryptedArchive`) — `encrypted`; `Heuristics.Limits.Exceeded…` — превышен предел
+ * проверки (`AlertExceedsMax`) и `IMBC.Unverifiable.…` — своя сигнатура платформы на то, что clamd не разбирает
+ * (`infrastructure/clamav/imbc.ndb`, clamd добавляет к имени `.UNOFFICIAL`) — `scan_limits`; `object_missing`,
+ * `checksum_mismatch` — `unverifiable`; прочее — найдена угроза, `malware`.
+ */
+export function rejectionReasonFor(signature: string): FileRejectionReason {
+  if (signature === OBJECT_MISSING_SIGNATURE || signature === CHECKSUM_MISMATCH_SIGNATURE) return 'unverifiable';
+  if (signature.startsWith('Heuristics.Encrypted.')) return 'encrypted';
+  if (signature.startsWith('Heuristics.Limits.Exceeded') || signature.startsWith('IMBC.Unverifiable.'))
+    return 'scan_limits';
+  return 'malware';
+}
+
 type ScanVersion = {
   id: string;
   fileObjectId: string;
@@ -57,7 +73,8 @@ type ScanVersion = {
  * Проверка файла ClamAV (DATA-07): версия `pending` читается из карантина и передаётся в антивирус, по тому же
  * потоку считается sha256 — байты должны совпасть с `file_version.checksum` загрузки. Чистая — копия в рабочий
  * бакет, затем транзакция `passed` (`scanned_at`, хук назначения), затем удаление из карантина. Найдена сигнатура —
- * транзакция `rejected` с аудитом `file.scan_rejected`, затем удаление.
+ * транзакция `rejected` с причиной `rejection_reason` (`rejectionReasonFor`) и аудитом `file.scan_rejected` с
+ * сигнатурой, затем удаление.
  *
  * Объекта в карантине нет (`NoSuchKey`) или sha256 не совпала — одно правило по возрасту версии: пока она
  * загружена не раньше `now − SCAN_STALE_MS`, это ошибка задания (повтор: временная путаница хранилища не
@@ -158,15 +175,16 @@ export class FileScanJob {
   /**
    * Переход версии из `pending` одной транзакцией с ограниченным ожиданием блокировок (`boundLockWaits`, как
    * `actorTransaction`): хук назначения берёт строки своей записи `for update`. Превышение — ошибка задания и
-   * повтор. Версия уже не `pending` — `skipped`.
+   * повтор. Версия уже не `pending` — `skipped`. У `rejected` — причина по сигнатуре, у `passed` — null.
    */
   private decide(version: ScanVersion, verdict: ScanVerdict): Promise<'passed' | 'rejected' | 'skipped'> {
     return this.db.transaction(async (tx) => {
       await boundLockWaits(tx);
       const state = verdict.clean === true ? 'passed' : 'rejected';
+      const rejectionReason = verdict.clean === true ? null : rejectionReasonFor(verdict.signature);
       const updated = await tx
         .update(fileVersion)
-        .set({ scanState: state, scannedAt: sql`now()` })
+        .set({ scanState: state, scannedAt: sql`now()`, rejectionReason })
         .where(and(eq(fileVersion.id, version.id), eq(fileVersion.scanState, 'pending')))
         .returning({ id: fileVersion.id });
       if (!updated.length) return 'skipped';

@@ -5,6 +5,7 @@ import { inspect } from 'node:util';
 import {
   type DataClass,
   FILE_PURPOSES,
+  FILE_REJECTION_REASONS,
   type FilePurpose,
   MANUFACTURER_FILE_PURPOSES,
   ROLES,
@@ -35,6 +36,7 @@ import {
   CHECKSUM_MISMATCH_SIGNATURE,
   FileScanJob,
   OBJECT_MISSING_SIGNATURE,
+  rejectionReasonFor,
   SCAN_STALE_MS,
   type ScanPassedHook,
 } from '../src/worker/file-scan.job.js';
@@ -161,6 +163,7 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
         uploaded_at: Date;
         uploaded_by: string | null;
         storage_key: string;
+        rejection_reason: string | null;
       }>('select * from file_version where id = $1', [id])
     ).rows[0]!;
 
@@ -285,6 +288,7 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
       scanned_at: null,
       uploaded_by: SESSION_USER,
       storage_key: keys[0],
+      rejection_reason: null,
     });
     expect(row.uploaded_at.getTime()).toBeGreaterThanOrEqual(started - 5000);
     expect(row.uploaded_at.getTime()).toBeLessThanOrEqual(Date.now() + 5000);
@@ -492,6 +496,55 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
     expect(storage.keys(QUARANTINE)).not.toContain(unsureKey);
   });
 
+  it('скан: причина отказа у версии — по сигнатуре clamd (Heuristics.Encrypted.PDF — encrypted; Heuristics.Limits.Exceeded.MaxScanSize и IMBC.Unverifiable.Zip64LocalHeader-2.UNOFFICIAL — scan_limits; Eicar-Signature — malware); аудит — сигнатура; passed — причина null (DATA-07, ADM-11)', async () => {
+    for (const [signature, reason] of [
+      ['Heuristics.Encrypted.PDF', 'encrypted'],
+      ['Heuristics.Encrypted.Zip', 'encrypted'],
+      ['Heuristics.Limits.Exceeded.MaxScanSize', 'scan_limits'],
+      ['IMBC.Unverifiable.Zip64LocalHeader-2.UNOFFICIAL', 'scan_limits'],
+      ['Eicar-Signature', 'malware'],
+      ['Win.Test.EICAR_HDB-1', 'malware'],
+    ] as const) {
+      const file = await createFile();
+      expect(await scanAs(file.versionId, { clean: false, signature }), signature).toBe('rejected');
+      expect(await version(file.versionId), signature).toMatchObject({
+        scan_state: 'rejected',
+        rejection_reason: reason,
+      });
+      expect(await audits('file.scan_rejected', file.versionId), signature).toMatchObject([
+        { outcome: 'denied', diff: { signature } },
+      ]);
+    }
+    const clean = await createFile();
+    expect(await scanAs(clean.versionId, { clean: true })).toBe('passed');
+    expect(await version(clean.versionId)).toMatchObject({ scan_state: 'passed', rejection_reason: null });
+    // Ошибка clamd — версия pending, причины нет.
+    const unsure = await createFile();
+    await expect(scanAs(unsure.versionId, new Error('clamd: timeout'))).rejects.toThrow('clamd');
+    expect(await version(unsure.versionId)).toMatchObject({ scan_state: 'pending', rejection_reason: null });
+  });
+
+  it('скан: object_missing и checksum_mismatch спустя 15 минут — rejected с причиной unverifiable; раньше — pending без причины (DATA-07)', async () => {
+    const lost = await createFile();
+    const lostRow = await version(lost.versionId);
+    storage.objects.delete(`${QUARANTINE}/${lostRow.storage_key}`);
+    await expect(scan.run({ fileVersionId: lost.versionId }, lostRow.uploaded_at)).rejects.toThrow('object_missing');
+    expect(await version(lost.versionId)).toMatchObject({ scan_state: 'pending', rejection_reason: null });
+    const lostLater = new Date(lostRow.uploaded_at.getTime() + SCAN_STALE_MS + 1000);
+    expect(await scan.run({ fileVersionId: lost.versionId }, lostLater)).toBe('rejected');
+    expect(await version(lost.versionId)).toMatchObject({ scan_state: 'rejected', rejection_reason: 'unverifiable' });
+
+    const swapped = await createFile();
+    const swappedRow = await version(swapped.versionId);
+    storage.objects.set(`${QUARANTINE}/${swappedRow.storage_key}`, fixture('sample.png'));
+    const swappedLater = new Date(swappedRow.uploaded_at.getTime() + SCAN_STALE_MS + 1000);
+    expect(await scan.run({ fileVersionId: swapped.versionId }, swappedLater)).toBe('rejected');
+    expect(await version(swapped.versionId)).toMatchObject({
+      scan_state: 'rejected',
+      rejection_reason: 'unverifiable',
+    });
+  });
+
   it('скан: хук назначения выполняется в транзакции перехода в passed; сбой хука — версия pending и исключение', async () => {
     const hook = vi.fn<ScanPassedHook>(async (tx, v) => {
       // Хук видит версию уже в passed — в той же транзакции.
@@ -661,7 +714,15 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
         ip: expect.stringMatching(/127\.0\.0\.1/),
       },
     ]);
-    const auditText = JSON.stringify((await pool.query("select * from audit_entries where action like 'file.%'")).rows);
+    // Записи об этом файле: в сигнатурах отказов других файлов бывает «IMBC» (своя база сигнатур clamd).
+    const auditText = JSON.stringify(
+      (
+        await pool.query("select * from audit_entries where action like 'file.%' and object_id = any($1)", [
+          [file.versionId, file.fileObjectId],
+        ])
+      ).rows,
+    );
+    expect(auditText).toContain('file.downloaded');
     for (const part of ['Құрылым', 'IMBC', 'v1.pdf', (await version(file.versionId)).storage_key])
       expect(auditText).not.toContain(part);
   });
@@ -954,5 +1015,42 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
 
   it('маршрут скачивания — FILE_ROUTES.content', () => {
     expect(FILE_ROUTES).toEqual({ content: '/api/v1/files/:id/content' });
+  });
+});
+
+// Причина отказа по сигнатуре clamd (DATA-07, расхождение 6 плана): пользователь видит причину, сигнатуру — нет.
+describe('rejectionReasonFor: сигнатура clamd → причина отказа версии (DATA-07)', () => {
+  it.each([
+    ['Heuristics.Encrypted.PDF', 'encrypted'],
+    ['Heuristics.Encrypted.Zip', 'encrypted'],
+    ['Heuristics.Encrypted.RAR', 'encrypted'],
+    ['Heuristics.Encrypted.OLE2', 'encrypted'],
+    ['Heuristics.Limits.Exceeded.MaxScanSize', 'scan_limits'],
+    ['Heuristics.Limits.Exceeded.MaxScanTime', 'scan_limits'],
+    ['Heuristics.Limits.Exceeded', 'scan_limits'],
+    ['IMBC.Unverifiable.Zip64LocalHeader-1.UNOFFICIAL', 'scan_limits'],
+    ['IMBC.Unverifiable.Zip64LocalHeader-2', 'scan_limits'],
+    [OBJECT_MISSING_SIGNATURE, 'unverifiable'],
+    [CHECKSUM_MISMATCH_SIGNATURE, 'unverifiable'],
+    ['Eicar-Signature', 'malware'],
+    ['Eicar-Test-Signature', 'malware'],
+    ['Win.Test.EICAR_HDB-1', 'malware'],
+    ['Heuristics.Broken.Executable', 'malware'],
+    ['Heuristics.OLE2.ContainsMacros', 'malware'],
+    // Похоже на причину, но не префикс: угроза.
+    ['Doc.Heuristics.Encrypted.PDF', 'malware'],
+    ['IMBC.Other', 'malware'],
+    ['object_missing_x', 'malware'],
+  ] as const)('%s — %s', (signature, reason) => {
+    expect(rejectionReasonFor(signature)).toBe(reason);
+  });
+
+  it('каждая причина FILE_REJECTION_REASONS достижима', () => {
+    const reached = new Set(
+      ['Eicar-Signature', 'Heuristics.Encrypted.PDF', 'Heuristics.Limits.Exceeded', OBJECT_MISSING_SIGNATURE].map(
+        rejectionReasonFor,
+      ),
+    );
+    expect([...reached].sort()).toEqual([...FILE_REJECTION_REASONS].sort());
   });
 });
