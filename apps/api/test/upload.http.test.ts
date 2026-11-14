@@ -241,6 +241,24 @@ describe('загрузка файла: предел, тип по содержи�
       expect(await upload(form(['file', fixture(name), name])), name).toMatchObject({ status: 200 });
   });
 
+  it('DOCX с объектом OLE: внедрённый файл — 415 file_has_attachments, внедрённый документ под паролем — 415 file_encrypted, формула — 200; имени файла нет ни в ответе, ни в журнале (DATA-06, DATA-07)', async () => {
+    const log = vi.spyOn(Logger.prototype, 'log');
+    for (const [file, code, reason] of [
+      ['ole-native.docx', 'file_has_attachments', 'embedded_file'],
+      ['ole-package-zip64.docx', 'file_has_attachments', 'embedded_file'],
+      ['ole-encrypted.docx', 'file_encrypted', 'encrypted'],
+    ] as const) {
+      log.mockClear();
+      const res = await upload(form(['file', fixture(file), 'Секретный план.docx']));
+      expect(res, file).toMatchObject({ status: 415, body: { status: 415, code } });
+      expect(JSON.stringify(res.body)).not.toContain('Секретный');
+      expect(log).toHaveBeenCalledWith({ reason }, 'File upload: ZIP structure not accepted');
+      expect(inspect(log.mock.calls, { depth: 10 })).not.toContain('Секретный');
+    }
+    log.mockRestore();
+    expect(await upload(form(['file', fixture('ole-equation.docx'), 'Формула.docx']))).toMatchObject({ status: 200 });
+  });
+
   it('без сеанса — 401, файл не разбирается', async () => {
     const res = await http.upload('/api/test/upload', undefined, form(['file', fixture('sample.pdf'), 'a.pdf']));
     expect(res.status).toBe(401);

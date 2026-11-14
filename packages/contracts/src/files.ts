@@ -154,7 +154,8 @@ export type OrgChartSampleCurrent = z.infer<typeof orgChartSampleCurrentSchema>;
  * `internal` — сбой 500. `file_structure_unsupported` — DOCX или XLSX с ZIP64 или повреждённой структурой архива,
  * который антивирус не проверил бы целиком (DATA-07): «сохраните документ заново в Word или Excel».
  * `file_encrypted` — документ под паролем на открытие: антивирус не видит содержимого, «снимите пароль».
- * `file_too_complex` — вложенных пакетов (документов внутри документа) больше, чем проверяется на файл.
+ * `file_too_complex` — файл слишком сложен для проверки: вложенных документов или частей больше пределов на файл.
+ * `file_has_attachments` — в документе внедрённые файлы (объект OLE с файлом; PDF с вложениями): проверить их нельзя.
  */
 export const FILE_PROBLEM_CODES = [
   'validation',
@@ -172,6 +173,7 @@ export const FILE_PROBLEM_CODES = [
   'file_structure_unsupported',
   'file_encrypted',
   'file_too_complex',
+  'file_has_attachments',
   'file_pending_scan',
   'file_rejected',
   'storage_unavailable',

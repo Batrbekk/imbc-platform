@@ -44,8 +44,15 @@ const tooComplex = () =>
   new ProblemException(
     415,
     'file_too_complex',
-    'В файле слишком много вложенных документов для проверки',
+    'Файл слишком сложен для проверки',
     'Сохраните документ без внедрённых объектов или разделите его',
+  );
+const hasAttachments = () =>
+  new ProblemException(
+    415,
+    'file_has_attachments',
+    'В файле есть внедрённые файлы',
+    'Удалите внедрённые файлы из документа и загрузите их отдельно',
   );
 const malformedUpload = () =>
   new ProblemException(400, 'validation', 'Запрос с файлом не разобран', 'Ожидается один файл в поле file');
@@ -152,9 +159,14 @@ const OOXML_TYPES: readonly AllowedMediaType[] = [
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ];
 
-/** Почему файл не принят — код ответа 415 (DATA-06, DATA-07). Задача PDF добавит `file_has_attachments`. */
+/** Почему файл не принят — код ответа 415 (DATA-06, DATA-07). `file_has_attachments` — и для PDF с вложениями. */
 export type InspectRefusal =
-  'file_type_not_allowed' | 'file_type_mismatch' | 'file_structure_unsupported' | 'file_encrypted' | 'file_too_complex';
+  | 'file_type_not_allowed'
+  | 'file_type_mismatch'
+  | 'file_structure_unsupported'
+  | 'file_encrypted'
+  | 'file_too_complex'
+  | 'file_has_attachments';
 
 /**
  * Итог проверки содержимого: тип по содержимому или код отказа. `reason` — причина структуры (`ZipStructureIssue`)
@@ -172,15 +184,22 @@ const TOO_COMPLEX: ReadonlySet<ZipStructureIssue> = new Set<ZipStructureIssue>([
 ]);
 
 const refusalFor = (issue: ZipStructureIssue): InspectRefusal =>
-  issue === 'encrypted' ? 'file_encrypted' : TOO_COMPLEX.has(issue) ? 'file_too_complex' : 'file_structure_unsupported';
+  issue === 'encrypted'
+    ? 'file_encrypted'
+    : issue === 'embedded_file'
+      ? 'file_has_attachments'
+      : TOO_COMPLEX.has(issue)
+        ? 'file_too_complex'
+        : 'file_structure_unsupported';
 
 /**
  * Проверка содержимого файла (DATA-06, DATA-07) — без хранилища, базы и сети; её же вызывает инструмент проверки
  * папки (`tools/check-upload.ts`). Порядок: тип по содержимому; типа нет, а это документ Office под паролем (CFB с
  * потоком `EncryptionInfo` или `EncryptedPackage`) с расширением имени `docx` или `xlsx` — `file_encrypted`; прочее
  * без типа — `file_type_not_allowed`; расширение не соответствует типу — `file_type_mismatch`; DOCX и XLSX —
- * структура ZIP с новым бюджетом на файл (`zipStructureIssue`): шифрование записей — `file_encrypted`, пределы
- * вложенных пакетов — `file_too_complex`, прочее — `file_structure_unsupported`. `originalName` — для расширения.
+ * структура ZIP с новым бюджетом на файл (`zipStructureIssue`): шифрование записей или внедрённый документ под
+ * паролем — `file_encrypted`, объект OLE с внедрённым файлом — `file_has_attachments`, пределы вложенных пакетов —
+ * `file_too_complex`, прочее — `file_structure_unsupported`. `originalName` — для расширения.
  */
 export async function inspectFile(bytes: Buffer, originalName: string): Promise<InspectResult> {
   const mediaType = await detectMediaType(bytes);
@@ -201,6 +220,7 @@ const REFUSALS: Record<InspectRefusal, () => ProblemException> = {
   file_structure_unsupported: structureUnsupported,
   file_encrypted: fileEncrypted,
   file_too_complex: tooComplex,
+  file_has_attachments: hasAttachments,
 };
 
 /** Объявленный клиентом тип — только для записи (DATA-05): без управляющих символов, до 255 символов. */
@@ -211,9 +231,9 @@ const cleanDeclaredType = (value: string | undefined) =>
  * Проверка загруженного файла до хранилища и БД (DATA-06): нет файла — 400 `file_missing`; 0 байт — 400
  * `file_empty`; больше 25 МБ — 413 `file_too_large`; содержимое (`inspectFile`) — 415 с кодом отказа: тип не из
  * пяти допустимых, расширение не по типу, DOCX или XLSX под паролем (`file_encrypted`), со структурой ZIP, которую
- * антивирус проверил бы не целиком (`file_structure_unsupported`), или со вложенными пакетами сверх пределов
- * (`file_too_complex`) (DATA-07). Причина структуры — строка журнала `{ reason }`; имени файла нет ни в журнале, ни
- * в тексте ошибки.
+ * антивирус проверил бы не целиком (`file_structure_unsupported`), со вложенными пакетами сверх пределов
+ * (`file_too_complex`) или с внедрённым файлом в объекте OLE (`file_has_attachments`) (DATA-07). Причина
+ * структуры — строка журнала `{ reason }`; имени файла нет ни в журнале, ни в тексте ошибки.
  */
 export async function acceptUpload(file: Express.Multer.File | undefined): Promise<AcceptedUpload> {
   if (!file || !Buffer.isBuffer(file.buffer)) throw fileMissing();

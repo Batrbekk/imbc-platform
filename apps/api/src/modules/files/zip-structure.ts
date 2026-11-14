@@ -1,4 +1,5 @@
 import { constants as zlib, inflateRawSync } from 'node:zlib';
+import { cfbPartIssue, isCfb } from './cfb.js';
 
 /**
  * Структура ZIP документа DOCX или XLSX до хранилища (DATA-06, DATA-07). Антивирус и Office читают архив
@@ -9,8 +10,10 @@ import { constants as zlib, inflateRawSync } from 'node:zlib';
  * заголовке — «OK»). Поэтому платформа принимает только архив, который обе стороны читают одинаково: без ZIP64,
  * без комментария, с совпадающими локальными заголовками и записями каталога, записи идут вплотную от начала файла
  * до каталога. Вложенный архив (DOCX с диаграммой хранит XLSX) clamd разбирает тем же кодом — он проверяется той же
- * функцией, рекурсивно, с пределами глубины, числа пакетов и объёма распаковки на файл. Разбор — по буферу;
- * распаковываются только начала сжатых записей и вложенные пакеты, с жёстким пределом вывода.
+ * функцией, рекурсивно, с пределами глубины, числа пакетов и объёма распаковки на файл. Объект OLE (часть CFB,
+ * `word/embeddings/oleObject1.bin`) с внедрённым файлом не принимается: архив с ZIP64 внутри объекта clamd не видит,
+ * а потоки CFB платформа не разбирает. Разбор — по буферу; распаковываются только начала сжатых записей, вложенные
+ * пакеты и части CFB, с жёстким пределом вывода.
  */
 
 /** Почему архив не принят — для журнала и тестов; клиенту уходит один код `file_structure_unsupported`. */
@@ -79,7 +82,8 @@ export type ZipStructureIssue =
   | 'entries_gap'
   /**
    * Сжатые данные записи не читаются так, как заявлены: поток deflate испорчен, первый КиБ сжатых данных не даёт
-   * и 4 байт, а поток длиннее; у вложенного пакета поток оборван или распакованный размер не равен размеру в каталоге.
+   * и 8 байт, а поток длиннее; у вложенного пакета или части CFB поток оборван или распакованный размер не равен
+   * размеру в каталоге; часть CFB короче заголовка или с сектором не 512 и не 4096 байт.
    */
   | 'entry_data_malformed'
   /** Вложенный пакет глубже `MAX_NESTED_DEPTH` уровней вложения. */
@@ -89,13 +93,25 @@ export type ZipStructureIssue =
   /** Распакованных данных (начала записей и вложенные пакеты) в файле больше `MAX_INFLATED_BYTES`. */
   | 'inflate_limit'
   /** Записей в файле и всех вложенных в него пакетах вместе больше `MAX_ARCHIVE_ENTRIES`. */
-  | 'entries_too_many';
+  | 'entries_too_many'
+  /**
+   * Часть CFB (объект OLE) с внедрённым файлом: в каталоге поток `\x01Ole10Native`, `Package` или `CONTENTS`
+   * (`cfbPartIssue`). Часть CFB с потоком `EncryptionInfo` или `EncryptedPackage` — `encrypted`.
+   */
+  | 'embedded_file';
 
+/*
+ * Пределы проверки одного файла (DATA-07, NFR-09: каждая загрузка проходит проверку до хранилища — пределы держат её
+ * время и память на любом файле до 25 МБ).
+ */
 /** Глубина вложения пакетов: файл — 0, пакет в нём — 1, пакет в пакете — 2; глубже — `nested_too_deep`. */
 export const MAX_NESTED_DEPTH = 2;
-/** Вложенных пакетов на файл, на всех уровнях вместе; больше — `nested_too_many`. */
+/** Вложенных пакетов на файл, на всех уровнях вместе; больше — `nested_too_many`. Части CFB сюда не входят. */
 export const MAX_NESTED_PACKAGES = 32;
-/** Распакованных байтов на файл: начала сжатых записей и вложенные пакеты всех уровней; больше — `inflate_limit`. */
+/**
+ * Распакованных байтов на файл: начала сжатых записей, вложенные пакеты и части CFB всех уровней; больше —
+ * `inflate_limit`.
+ */
 export const MAX_INFLATED_BYTES = 64 * 1024 * 1024;
 /**
  * Записей на файл — в нём и во всех вложенных пакетах вместе, столько, сколько вмещает один архив без ZIP64; больше —
@@ -146,9 +162,9 @@ const CONTENT_TYPES = Buffer.from('[Content_Types].xml', 'latin1');
 /** Описатель данных после записи с битом 3: CRC и два размера (12 байт), с сигнатурой впереди — 16. */
 const DESCRIPTOR = 12;
 const SIGNED_DESCRIPTOR = 16;
-/** По первым 4 байтам данных записи (`50 4B 03 04`) узнаётся вложенный пакет. */
-const HEAD = 4;
-/** Сколько сжатых байтов распаковывается, чтобы получить начало записи: 64, при выходе короче 4 байт — 1 КиБ. */
+/** По первым байтам данных записи узнаётся вложенный пакет (4 байта, `50 4B 03 04`) или часть CFB (8 байт). */
+const HEAD = 8;
+/** Сколько сжатых байтов распаковывается, чтобы получить начало записи: 64, при выходе короче 8 байт — 1 КиБ. */
 const HEAD_PREFIXES = [64, 1024] as const;
 
 /** Запись по каталогу: её локальный заголовок с ним уже сверен (флаги, метод, размеры). */
@@ -349,8 +365,8 @@ function inflatePrefix(prefix: Buffer, budget: InflateBudget): Buffer | 'inflate
 }
 
 /**
- * Первые байты данных записи (не меньше 4, если данных столько есть): stored — сами байты; deflate — распакованный
- * префикс 64 байта, при выходе короче 4 байт — 1 КиБ. Если и 1 КиБ сжатых данных не дал 4 байт, а поток длиннее,
+ * Первые байты данных записи (не меньше 8, если данных столько есть): stored — сами байты; deflate — распакованный
+ * префикс 64 байта, при выходе короче 8 байт — 1 КиБ. Если и 1 КиБ сжатых данных не дал 8 байт, а поток длиннее,
  * начало не определить — `entry_data_malformed` (законный писатель выдаёт данные сразу за заголовком блока).
  */
 function entryHead(bytes: Buffer, entry: ArchiveEntry, budget: InflateBudget): Buffer | ZipStructureIssue {
@@ -365,27 +381,32 @@ function entryHead(bytes: Buffer, entry: ArchiveEntry, budget: InflateBudget): B
 }
 
 /**
- * Байты вложенного пакета. Размер из каталога — верхняя граница: больше остатка бюджета — `inflate_limit` без
- * распаковки; распаковка не выходит за него (`maxOutputLength`), и поток, который даёт больше или меньше, —
- * `entry_data_malformed`. Буфер вывода один, на весь заявленный размер (`chunkSize` на байт больше: без второго
- * буфера и склейки кусков). Stored — часть буфера файла без копии, с тем же списанием.
+ * Все данные записи — вложенного пакета или части CFB. Размер из каталога — верхняя граница: больше остатка бюджета —
+ * `inflate_limit` без распаковки; распаковка не выходит за него (`maxOutputLength`), и поток, который даёт больше или
+ * меньше, — `entry_data_malformed`. Буфер вывода один, на весь заявленный размер (`chunkSize` на байт больше: без
+ * второго буфера и склейки кусков). Stored — часть буфера файла без копии, с тем же списанием. `seen` — сколько байт
+ * начала записи уже распаковано: заявлено меньше — размер в каталоге неверен.
  */
-function packageBytes(bytes: Buffer, entry: ArchiveEntry, budget: InflateBudget): Buffer | ZipStructureIssue {
+function entryBytes(
+  bytes: Buffer,
+  entry: ArchiveEntry,
+  budget: InflateBudget,
+  seen: number,
+): Buffer | ZipStructureIssue {
   if (entry.uncompressed > budget.remainingBytes) return 'inflate_limit';
   if (entry.method === STORED) {
     budget.remainingBytes -= entry.uncompressed;
     return bytes.subarray(entry.dataStart, entry.dataEnd);
   }
-  // Начало данных уже дало 4 байта: заявлено меньше — размер в каталоге неверен.
-  if (entry.uncompressed < HEAD) return 'entry_data_malformed';
+  if (entry.uncompressed < seen) return 'entry_data_malformed';
   try {
-    const nested = inflateRawSync(bytes.subarray(entry.dataStart, entry.dataEnd), {
+    const data = inflateRawSync(bytes.subarray(entry.dataStart, entry.dataEnd), {
       maxOutputLength: entry.uncompressed,
       chunkSize: Math.max(entry.uncompressed + 1, zlib.Z_MIN_CHUNK),
     });
-    if (nested.length !== entry.uncompressed) return 'entry_data_malformed';
-    budget.remainingBytes -= nested.length;
-    return nested;
+    if (data.length !== entry.uncompressed) return 'entry_data_malformed';
+    budget.remainingBytes -= data.length;
+    return data;
   } catch {
     // Поток длиннее заявленного размера, испорчен или оборван.
     return 'entry_data_malformed';
@@ -396,7 +417,10 @@ function packageBytes(bytes: Buffer, entry: ArchiveEntry, budget: InflateBudget)
  * Каждая запись, данные которой начинаются с `50 4B 03 04` (имя не важно, `[Content_Types].xml` тоже), — вложенный
  * пакет: проверяется той же `zipStructureIssue` на уровень глубже, с тем же бюджетом. Глубже `MAX_NESTED_DEPTH` —
  * `nested_too_deep`, пакетов больше бюджета — `nested_too_many`; первая причина вложенного пакета возвращается как
- * есть. Объекты OLE (`*.bin`) и архивы не с начала данных записи не разбираются — их разбирает ClamAV.
+ * есть. Запись, данные которой начинаются с сигнатуры CFB, — часть CFB (объект OLE): распаковывается целиком в
+ * пределах бюджета байтов (в счёт пакетов не идёт — объектов-формул в документе бывают сотни) и проверяется
+ * `cfbPartIssue`: внедрённый файл — `embedded_file`, поток документа под паролем — `encrypted`. Потоки CFB не
+ * разбираются, архивы внутри них и архивы не с начала данных записи не ищутся.
  */
 function nestedPackagesIssue(
   bytes: Buffer,
@@ -407,11 +431,18 @@ function nestedPackagesIssue(
   for (const entry of entries) {
     const head = entryHead(bytes, entry, budget);
     if (typeof head === 'string') return head;
-    if (head.length < HEAD || head.readUInt32LE(0) !== SIGNATURE.local) continue;
+    if (isCfb(head)) {
+      const part = entryBytes(bytes, entry, budget, head.length);
+      if (typeof part === 'string') return part;
+      const issue = cfbPartIssue(part);
+      if (issue !== null) return issue === 'malformed' ? 'entry_data_malformed' : issue;
+      continue;
+    }
+    if (head.length < 4 || head.readUInt32LE(0) !== SIGNATURE.local) continue;
     if (depth + 1 > MAX_NESTED_DEPTH) return 'nested_too_deep';
     if (budget.remainingPackages < 1) return 'nested_too_many';
     budget.remainingPackages -= 1;
-    const nested = packageBytes(bytes, entry, budget);
+    const nested = entryBytes(bytes, entry, budget, head.length);
     if (typeof nested === 'string') return nested;
     const issue = zipStructureIssue(nested, { budget, depth: depth + 1 });
     if (issue !== null) return issue;
