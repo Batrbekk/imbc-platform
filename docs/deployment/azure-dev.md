@@ -548,7 +548,7 @@ WHERE lower(email) = 'spectator@spectator.local' AND state = 'invited'
 
 Этап 2 — миграции `0009_stage2_foundation` и `0010_stage2_reference_data`, двенадцать справочников с загрузкой значений из файлов репозитория, файлы с проверкой ClamAV и образец оргструктуры, журнал писем `notification` с диспетчером `notify`, тема писем Keycloak `imbc` (план — `docs/superpowers/plans/2026-11-13-stage-2-dictionaries-files-notifications.md`). **Состояние на 14.11.2026: этап выкачен на стенд — `335ef02` ветки стенда `demo/prototype-cabinets` (слияние `feat/stage-2-foundation` `8ea71cb` и правка меню прототипа), `IMBC_DEPLOY_RESULT=ok`; запись — [verification-2026-11-14.md](verification-2026-11-14.md).** Раздел написан по коду и схеме ветки и сверен с кодом `c0e7e2e` и `8ea71cb`; на стенде 14.11.2026 выполнены шаги «До выката» (число миграций и очереди прежней версии, переопределения писем в Keycloak, резервная копия с пробным восстановлением, список лишних файлов) и все одиннадцать пунктов «Проверок после выката этапа 2» — в тексте они помечены «на стенде 14.11.2026»; значения не повторяются, они в записи проверки. Где в тексте сказано «на стенде не наблюдался», это по-прежнему так: ветки сбоев (`55P03`, «`clamav` не стал healthy»), откат, приёмка со входом и часть «Посмотреть при первом выкате». Что проверялось на живых системах локально и что нет — отмечено.
 
-Миграции этапа только добавляют (`0009` — `CREATE TYPE`, `CREATE TABLE`, индексы и внешние ключи; `0010` — `INSERT … ON CONFLICT DO NOTHING`), поэтому код откатывается на этап 1 без восстановления базы (NFR-06); таблицы, которые читает или пишет прежняя версия, остаются до отдельного релиза contract («Contract этапа 2» ниже).
+Миграции этапа только добавляют (`0009` — `CREATE TYPE`, `CREATE TABLE`, индексы и внешние ключи; `0010` — `INSERT … ON CONFLICT DO NOTHING`), поэтому код откатывается на этап 1 без восстановления базы (NFR-06); таблицы, которые читает или пишет прежняя версия, остаются до отдельного релиза contract («[Релиз contract этапа 2 (0011)](#релиз-contract-этапа-2-0011)» ниже).
 
 ### До выката этапа 2
 
@@ -881,7 +881,7 @@ sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql 
 - **Письма.** Письма, отправленные новой версией, прежняя не знает (журнал `notification`, она читает и пишет `notifications_sent`): при откате возможен повтор NOT-03 по событиям последних минут (прежний worker читает события Keycloak окном пять минут).
 - **Keycloak.** Realm-настройка `emailTheme` = `imbc` остаётся; если образ Keycloak откатывается на прежний (без темы `imbc` в JAR), по исходникам Keycloak 26.4 он пишет «Failed to find … theme … using built-in themes» и берёт тему по умолчанию: письма идут, но с исходными текстами Keycloak (казахские — с буквальными `\n\n`). `sync-realm.py` прежней версии `emailTheme` не меняет; на стенде этот путь не проверялся.
 - **ClamAV.** Прежняя конфигурация Compose не монтирует `clamd.conf`: контейнер пересоздаётся с настройками образа.
-- После релиза contract (`0011`) возврат кодом невозможен — только восстановление копии.
+- После релиза contract (`0011`) возврат кодом невозможен — только восстановление копии («[Релиз contract этапа 2 (0011)](#релиз-contract-этапа-2-0011)», «Откат после `0011`»).
 
 ### Обслуживание после этапа 2
 
@@ -912,32 +912,260 @@ sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql 
 - **Хранилище файлов: сроки.** Клиент S3 ограничивает соединение 5 с, простой сокета 30 с и путь до заголовков ответа 120 с, временный сбой повторяет сам (всего три попытки), поэтому зависшее хранилище даёт не вечное ожидание, а ошибку — у зависшего сервера через три попытки по 30 с плюс паузы (около полутора минут), при медленной отправке тела на загрузке — до трёх раз по 120 с: загрузка — `503 storage_unavailable` (журнал `api`: `File upload: quarantine storage unavailable`), скачивание — `503` (`File download: storage unavailable`) или обрыв ответа (`File download stream failed` / `Sample download stream failed` со сводкой `{ error: 'ObjectStorageError', operation: 'get', reason: 'TimeoutError' }`), проверка файла — ошибка задания `file-scan` (`output`: `object storage <операция> failed: TimeoutError`), версия остаётся `pending` и повторяется. Ключа объекта, бакета и имени файла в этих сообщениях нет. Причина — RustFS: `ps rustfs`, `logs --tail 50 rustfs`.
 - **Скачивание.** Файл идёт потоком из хранилища, и простой сокета хранилища — те же 30 с. На Azure Caddy отдаёт ответ потоком без буфера, поэтому если клиент перестал читать скачиваемый файл дольше чем на 30 с (сон ноутбука, обрыв мобильной сети), чтение из хранилища останавливается, срабатывает таймаут, и сервер обрывает скачивание — в журнале `api` строка `File download stream failed`; пользователь повторяет скачивание. Локально через nginx (буферизация включена) этого нет. Это принятое поведение, а не дефект: срок не меняют без решения.
 
-### Contract этапа 2 (следующим релизом)
+### Релиз contract этапа 2 (0011)
 
-Релиз `0011_stage2_contract` — первой задачей этапа 3, отдельным релизом, по образцу `0006`. Состав:
+Поставка **R1** плана этапа 3а (`docs/superpowers/plans/2026-11-14-stage-3a-profile-foundation.md`, «Поставки, миграции и зависимости»): только коммит задачи 1 — миграция `0011_stage2_contract` и удаление переходного кода этапа 2, раньше остальных задач этапа 3, отдельным выкатом по слову владельца. **После неё вернуться на этап 2 кодом нельзя — только восстановлением резервной копии** (раздел «Откат после `0011`» ниже): код этапа 2 читает удалённую таблицу `notifications_sent`. Выкат следующей поставки (R2, этап 3а: `0012`–`0015`) — только после того, как R1 выкачен на стенд и прошёл «Проверки после выката `0011`»; иначе R2 применит `0011` вместе со своими миграциями одним прогоном, и contract перестанет быть отдельным релизом. На стенде этот раздел ещё не выполнялся: он написан по коду, тестам `apps/api/test/migration-stage2-contract.integration.test.ts` и `queues.integration.test.ts` и по состоянию стенда на 14.11.2026 (11 миграций; `notifications_sent`, `notification`, `file_version`, `org_chart_sample` — по 0 строк; заданий в `scan-file` и `send-notification` нет).
 
-1. Повторный перенос `INSERT INTO notification … SELECT … FROM notifications_sent … ON CONFLICT (dedup_key) DO NOTHING` (письма, которые прежняя версия записала после `0010`) и проверка, что каждая строка `notifications_sent` с кодом правила есть в `notification` по `dedup_key`; иначе `RAISE EXCEPTION`.
-2. Проверка, что `dictionaries`, `dictionary_entries`, `file_objects` и `file_versions` пусты (иначе `RAISE EXCEPTION`): ни одна версия этапа 2 их не заполняет.
-3. Удаление `notifications_sent`, `dictionaries`, `dictionary_entries`, `file_objects`, `file_versions` и типа `scan_state` (скелет); переименование `file_scan_state` в `scan_state`.
-4. `org_chart_sample.is_current` — умолчание `false` (сейчас `true`, как в DBML; от текущего образца без скана защищает то, что сервис вставляет `false`).
-5. Из кода уходят два места сверки с `notifications_sent` (`JobHandlers.recordLockout` и `MailService.sentByPreviousVersion`, оба помечены «Убрать в contract») и схема `notificationsSent`; строки очередей `scan-file` и `send-notification` в `pgboss.queue` удаляются вручную.
-6. Перечисления PostgreSQL `contact_role` и `commodity_group` релиз не трогает: первое уходит вместе с заменой `contacts` на DBML `contact` (этап 3), второе — вместе с проекцией `catalog_profile` (этап 5).
+**Что делает `0011`** — по порядку, одной транзакцией мигратора вместе с остальными миграциями выката (в R1 их нет):
 
-До выката — те же проверки данных, что внутри миграции (чтобы не ждать её отказа), и резервная копия с пробным восстановлением (шаги 5–6 релиза `0006`, файл `backup-before-0011.dump`):
+1. Повторный перенос писем `notifications_sent` → `notification` — тот же оператор, что третий в `0010` (`INSERT … ON CONFLICT (dedup_key) DO NOTHING`): письма, которые этап 1 записал после `0010`, в окне выката этапа 2.
+2. Проверка (`DO $$ … RAISE EXCEPTION`): строка `notifications_sent` с кодом правила, которой нет в `notification` по `dedup_key`, — отказ `stage 2 contract: N notifications_sent rows not in notification`; строка в `dictionaries`, `dictionary_entries`, `file_objects` или `file_versions` — отказ `stage 2 contract: skeleton tables dictionaries, dictionary_entries, file_objects, file_versions are not empty (rows: a, b, c, d)` (числа строк — в том же порядке). Отказ откатывает всю пачку, в том числе перенос из шага 1: база остаётся как после `0010`. Строки `notifications_sent` с кодом вне семнадцати правил не переносятся (как в `0010`) и удаляются вместе с таблицей: писем по ним нет, повтора не будет.
+3. Девять внешних ключей пустых колонок скелета (`certificates.file_id`, `documents.file_id`, `review_decisions.file_version_id`, `site_survey_records.report_file_id`, `due_diligence_records.report_file_id` и `enhanced_report_file_id`, `operator_visit_marks.file_id`, `forecast_versions.source_file_id`, `tech_spec_files.file_id`) переводятся со скелетных `file_objects` / `file_versions` на `file_object` / `file_version`. Колонки пусты: на скелетные таблицы, проверенные в шаге 2, ссылаться было нечему.
+4. `DROP TABLE notifications_sent, dictionary_entries, dictionaries, file_versions, file_objects` и `DROP TYPE scan_state` (скелетное перечисление `pending, clean, infected, type_mismatch`) — без `CASCADE`: зависимость, о которой миграция не знает, останавливает её; затем `ALTER TYPE file_scan_state RENAME TO scan_state` — имя DBML (DATA-07). Колонка `file_version.scan_state`, её умолчание и частичный индекс `file_version_pending_idx` ссылаются на тип по OID: значения строк не меняются.
+5. `org_chart_sample.is_current` — умолчание `false` (было `true`): вставка без колонки не делает текущим файл, не прошедший скан.
 
-```bash
-sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -At -v ON_ERROR_STOP=1 -c "
-  select 'dictionaries' as t, count(*) from dictionaries
-  union all select 'dictionary_entries', count(*) from dictionary_entries
-  union all select 'file_objects', count(*) from file_objects
-  union all select 'file_versions', count(*) from file_versions
-  union all select 'not_moved', count(*) from notifications_sent s
-    where s.code in (select code from notification_rule)
-      and not exists (select 1 from notification n
-        where n.dedup_key = s.code || E'\n' || s.dedupe_key || E'\n' || lower(s.recipient));" </dev/null
-```
+**Что уходит из кода.** Сверка NOT-03 с `notifications_sent` в `JobHandlers.recordLockout` и `MailService.sendOnce` (`sentByPreviousVersion`), схемы `notificationsSent`, `dictionaries`, `dictionaryEntries`, `fileObjects`, `fileVersions`, скелетный `scanState` (TS-имя `scanState` теперь у типа `scan_state` DBML, прежнее `fileScanState` удалено). Очереди этапа 1 `scan-file` и `send-notification` (обработчиков у них нет с этапа 2) worker удаляет сам при старте — `retireQueues` (`apps/api/src/jobs/queues.ts`), а не SQL по схеме pg-boss: очередь удаляется вместе с завершёнными заданиями, только если в ней нет заданий `created`, `retry`, `active`. Перечисления `contact_role` и `commodity_group` релиз не трогает (этапы 3 и 5).
 
-Ожидается пять строк `имя|число`: первые четыре — `0` (иначе миграция остановится с ошибкой), `not_moved` может быть не нулевым — миграция перенесёт эти строки сама.
+**Что выкатывается на стенд.** Ветка стенда `demo/prototype-cabinets` (`335ef02` на 14.11.2026), в которую влит **коммит задачи 1**, а не голова ветки этапа `feat/stage-3-profile`: `git switch demo/prototype-cabinets && git merge --no-ff <коммит задачи 1>`. Слияние приносит и документы-предки коммита (план этапа 3, записи о выкате этапа 2) — только `docs/` и `README.md`. Конфликтов нет (проверено `git merge-tree` для `335ef02` и коммита задачи 1); серверная часть ветки стенда отличается от этапа 2 только `apps/api/src/database/migrate.ts` и `prototype-store.ts`, которых R1 не касается. До выката в чистом checkout слитой ветки проходят `pnpm install --frozen-lockfile && pnpm typecheck && pnpm lint && pnpm test && pnpm build`, набор API с базой (`TEST_DATABASE_URL`, раздел 14 `README.md`) и `PUBLIC_HOST=<хост> docker compose -f compose.yaml -f compose.azure.yaml config -q`. Файлов ветки стенда R1 не удаляет, но список «[Файлы, которых нет в выкатываемом коммите](#файлы-которых-нет-в-выкатываемом-коммите)» всё равно проходят: он строится по маркерам на VM. Проверки R1 не требуют регистрации и квоту Adata не расходуют.
+
+#### До выката 0011
+
+Команды — в `/home/imbc/imbc-platform` на VM (`./infrastructure/azure/deploy.sh ssh`), формат как в «[Релиз contract (0006)](#релиз-contract-0006)»: блоки можно вставлять целиком (у каждой `docker compose exec -T` без входного файла стоит `</dev/null`); если после `&&` нет строки `…-ok`, дальше не идти.
+
+1. **На стенде этап 2 — 11 миграций; что выкачено сейчас:**
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -At -v ON_ERROR_STOP=1 -c "
+     select count(*) from drizzle.__drizzle_migrations;" </dev/null
+   cat .deployed-source-commit .deployed-revision 2>/dev/null
+   ```
+
+   Ожидается `11` и коммит ветки стенда (на 14.11.2026 — `335ef02`): запишите его — это цель отката («Откат после `0011`», шаг 6). Другое число — стенд не на этапе 2: выяснить, что выкачено, и не продолжать.
+
+2. **Пять чисел** — те же проверки, что внутри миграции, чтобы не ждать её отказа:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -At -v ON_ERROR_STOP=1 -c "
+     select 'dictionaries' as t, count(*) from dictionaries
+     union all select 'dictionary_entries', count(*) from dictionary_entries
+     union all select 'file_objects', count(*) from file_objects
+     union all select 'file_versions', count(*) from file_versions
+     union all select 'not_moved', count(*) from notifications_sent s
+       where s.code in (select code from notification_rule)
+         and not exists (select 1 from notification n
+           where n.dedup_key = s.code || E'\n' || s.dedupe_key || E'\n' || lower(s.recipient));" </dev/null
+   ```
+
+   Ожидается пять строк `имя|число`, первые четыре — `0` (на 14.11.2026 все пять — `0`). Не `0` в одной из четырёх скелетных таблиц — выкат не начинать: ни одна версия приложения их не заполняет, строку внесли руками; разобрать с владельцем, строки без решения не удалять (миграция остановится на них сама, см. «Если `migrate` остановился» ниже). `not_moved` может быть не `0` — эти письма миграция перенесёт сама первым оператором.
+
+3. **Очереди этапа 1 пусты:**
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -At -v ON_ERROR_STOP=1 \
+     -c "select name, state, count(*) from pgboss.job where name in ('scan-file', 'send-notification') group by 1, 2" \
+     -c "select name from pgboss.queue where name in ('scan-file', 'send-notification') order by name" </dev/null
+   ```
+
+   Ожидается: первый запрос — пусто; второй — две строки `scan-file` и `send-notification` (их удалит новый worker). Строки первого запроса в состояниях `created`, `retry`, `active` — выкат не страшен (worker оставит такую очередь и предупредит, «Проверки после выката `0011`», шаг 5), но эти задания не выполнит ни одна версия: разобрать с владельцем до выката. `completed` и `failed` удаляются вместе с очередью.
+
+4. **Резервная копия** — единственный путь назад после `0011`. `umask 077` — файл только для `imbc`; без `dump-ok` дальше не идти. Проверьте место на диске под копию и пробную базу (`df -h /`):
+
+   ```bash
+   umask 077
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres pg_dump -U imbc -d imbc -Fc </dev/null > /home/imbc/backup-before-0011.dump && echo dump-ok
+   ls -l --time-style=full-iso /home/imbc/backup-before-0011.dump
+   ```
+
+   Запишите время файла — по нему при откате сверяется Keycloak. Файл хранится на VM вне каталога приложения и Git; удалить его можно, когда R1 принят и откат больше не нужен.
+
+5. **Пробное восстановление** в отдельную базу того же сервера — проверка копии и репетиция отката (оглавление `pg_restore --list` копию не проверяет):
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres createdb -U imbc -O imbc imbc_restore_check </dev/null && echo createdb-ok
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres pg_restore -U imbc -d imbc_restore_check --exit-on-error --single-transaction < /home/imbc/backup-before-0011.dump && echo restore-ok
+   for db in imbc imbc_restore_check; do
+     printf '%s: ' "$db"
+     sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d "$db" -At -v ON_ERROR_STOP=1 -c "
+       select (select count(*) from drizzle.__drizzle_migrations) || ' migrations, '
+         || (select count(*) from user_accounts) || ' user_accounts, ' || (select count(*) from manufacturer_profiles)
+         || ' manufacturer_profiles, ' || (select count(*) from notification) || ' notification, '
+         || (select count(*) from file_version) || ' file_version, notifications_sent '
+         || coalesce(to_regclass('notifications_sent')::text, 'missing');" </dev/null
+   done
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres dropdb -U imbc imbc_restore_check </dev/null && echo dropdb-ok
+   ```
+
+   Ожидается `createdb-ok`, `restore-ok`, две одинаковые строки (`11 migrations, …, notifications_sent notifications_sent`) и `dropdb-ok`. Запишите числа — по ним проверяется восстановление при откате. Разошлись, а между копией и проверкой на стенде кто-то работал, — повторите шаги 4 и 5. Нет `restore-ok` — копия негодна: снять заново и не выкатывать, пока пробное восстановление не пройдёт. `dropdb` удаляет только пробную базу.
+
+6. **Время выката.** Выкатывать, когда на стенде никто не загружает файлы (см. «Блокировки» ниже); на открытый сеанс работы с профилем это не влияет.
+
+#### Что делает выкат 0011
+
+Шаги одинаковы для `./infrastructure/azure/deploy.sh redeploy` и для конвейера (оба запускают `infrastructure/azure/vm-deploy.sh`).
+
+1. **Compose.** Одноразовый `migrate` применяет одну миграцию — `0011_stage2_contract` (в `drizzle.__drizzle_migrations` станет 12 строк) на соединении с `lock_timeout` 10 с, затем выдаёт права роли приложения (список прав не менялся), загружает `release` (`+0 (+0 переводов), пропущено удалённых: K` у каждого справочника) и при `SEED_DEMO=true` — `seed` (`+0`). В журнале `migrate` на стенде — «Таблица prototype_state готова» (код ветки стенда), «Миграции применены», строки «Справочники: …». Пересобираются и пересоздаются `api` и `worker` (новый образ), остальные сервисы — нет.
+2. **Worker при старте** удаляет очереди этапа 1 и пишет в журнал строку `retired queues: scan-file, send-notification` (контекст `Queues`); затем, как раньше, `очередей: 19, расписаний: 10 (Asia/Almaty)`. Очередь с заданием `created`, `retry` или `active` остаётся — вместо неё в журнале предупреждение `retired queue kept: <очередь> has N jobs in created, retry or active` (без данных заданий); сбой самой уборки — строка `Queue database error` со сводкой, старт worker он не останавливает, следующий старт повторит уборку. На следующих стартах очередей уже нет, и строки `retired queues` не будет.
+3. Готовность HTTPS/API и отказ закрытых маршрутов — как при любом выкате; realm не меняется.
+
+**Окно выката.** Между фиксацией `0011` и заменой контейнеров прежние `api` и `worker` этапа 2 работают на новой схеме. Прежний worker на блокировке входа (NOT-03) обращается к удалённой `notifications_sent` и получает `relation "notifications_sent" does not exist` (`42P01`): задание опроса `keycloak-events` падает, не сдвинув курсор, — новый worker прочитает те же события; задание `notify` NOT-03 уходит в повтор — письмо отправит новый worker. Письмо не теряется и не дублируется: журнал один, `notification`. Прежний `api` удалённых таблиц не читает; загрузка и скан файлов работают (тип переименован, его OID тот же). Ошибки `42P01` в журнале прежних контейнеров в эти секунды ожидаемы; в журнале новых их быть не должно (шаг 6 проверок).
+
+**Блокировки.** До фиксации `0011` держит исключительные блокировки удаляемых таблиц, восьми таблиц скелета, у которых меняется внешний ключ, и `org_chart_sample`, а на `file_object` и `file_version` — `SHARE ROW EXCLUSIVE` (новые внешние ключи), несовместимую с записью. Таблицы пусты, поэтому сама миграция идёт доли секунды. Открытая дольше 10 с транзакция прежней версии, которая пишет в `file_object` / `file_version` (загрузка, скан файла) или читает эти таблицы, — безопасный отказ `55P03`: пачка откатилась, в журнале миграций 11 строк, прежние `api` и `worker` работают на прежней схеме; дальше — абзац «Если `migrate` упал с `55P03`» раздела «[Что делает выкат этапа 2](#что-делает-выкат-этапа-2)» (найти долгую транзакцию и повторить `redeploy`; в журнале миграций при этом 11 строк, а не 9).
+
+**Если `migrate` остановился** (не `55P03`). Признаки те же: последняя строка выката `IMBC_DEPLOY_RESULT=failed step=compose-up`, контейнер `migrate` завершился с кодом 1, новые `api` и `worker` не стартовали, прежние работают, в журнале миграций 11 строк — база не изменилась. Причина — в `sudo docker compose -f compose.yaml -f compose.azure.yaml logs --tail 40 migrate </dev/null` (Drizzle печатает её как `cause` строки `Failed query: …`). Повторять выкат, пока причина не устранена, бессмысленно — он упадёт так же.
+
+- `stage 2 contract: skeleton tables … are not empty (rows: a, b, c, d)` (код `P0001`) — в скелетной таблице строка (числа — `dictionaries`, `dictionary_entries`, `file_objects`, `file_versions`). Разобрать с владельцем, чьи это строки (шаг 2 «До выката»); удалять их — только по его решению и после новой резервной копии.
+- `stage 2 contract: N notifications_sent rows not in notification` (`P0001`) — перенос не записал письма: в базе есть то, чего нет в миграциях (триггер или правило на `notification`, `\d notification`). Разобрать; таблицу не удалять руками.
+- `cannot drop table … because other objects depend on it` (`2BP01`) — на удаляемую таблицу ссылается объект, созданный не миграциями (представление, внешний ключ). `CASCADE` не добавлять: найти объект (`\d+ <таблица>`) и решить с владельцем.
+- `constraint "…_file_objects_id_fk" … does not exist` (`42704`) — схема стенда отличается от `0010`: сверить журнал миграций и `\d certificates`; не продолжать.
+
+#### Проверки после выката 0011
+
+Команды — на VM в `/home/imbc/imbc-platform`. Расхождение с ожидаемым — выкат не принят: разобраться до R2. Результаты записать в `docs/deployment/verification-<дата>.md`. Запросы разделов этапа 2, которые читают `notifications_sent` (шаг 4 «Проверок после выката этапа 2»), после `0011` не выполняются: таблицы нет.
+
+1. **Миграции:**
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml logs migrate </dev/null | grep -E 'Миграции применены|Справочники'
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -At -v ON_ERROR_STOP=1 -c "
+     select count(*) from drizzle.__drizzle_migrations;" </dev/null
+   ```
+
+   Ожидается «Миграции применены», строки «Справочники: … +0 (+0 переводов), пропущено удалённых: K» и `12`.
+
+2. **Скелета нет, тип — по DBML** (`to_regclass` пуст — то же, что `\dt <таблица>` без результата):
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -At -v ON_ERROR_STOP=1 \
+     -c "select to_regclass('notifications_sent'), to_regclass('dictionaries'), to_regclass('dictionary_entries'), to_regclass('file_objects'), to_regclass('file_versions')" \
+     -c "select enum_range(null::scan_state)" \
+     -c "select count(*) from pg_type where typname = 'file_scan_state'" </dev/null
+   ```
+
+   Ожидается `||||` (пять пустых значений), `{pending,passed,rejected}` и `0`.
+
+3. **Внешние ключи на файлы** — девять переведённых и два прежних (`file_version`, `org_chart_sample`):
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -At -v ON_ERROR_STOP=1 -c "
+     select conrelid::regclass, conname, confrelid::regclass from pg_constraint
+     where contype = 'f' and confrelid in ('file_object'::regclass, 'file_version'::regclass)
+     order by conrelid::regclass::text, conname;" </dev/null
+   ```
+
+   Ожидается ровно 11 строк:
+
+   ```text
+   certificates|certificates_file_id_file_object_id_fk|file_object
+   documents|documents_file_id_file_object_id_fk|file_object
+   due_diligence_records|due_diligence_records_enhanced_report_file_id_file_object_id_fk|file_object
+   due_diligence_records|due_diligence_records_report_file_id_file_object_id_fk|file_object
+   file_version|file_version_file_object_id_file_object_id_fk|file_object
+   forecast_versions|forecast_versions_source_file_id_file_object_id_fk|file_object
+   operator_visit_marks|operator_visit_marks_file_id_file_object_id_fk|file_object
+   org_chart_sample|org_chart_sample_file_object_id_file_object_id_fk|file_object
+   review_decisions|review_decisions_file_version_id_file_version_id_fk|file_version
+   site_survey_records|site_survey_records_report_file_id_file_object_id_fk|file_object
+   tech_spec_files|tech_spec_files_file_id_file_object_id_fk|file_object
+   ```
+
+4. **Умолчание образца:**
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -At -v ON_ERROR_STOP=1 -c "
+     select column_default from information_schema.columns where table_name = 'org_chart_sample' and column_name = 'is_current';" </dev/null
+   ```
+
+   Ожидается `false`.
+
+5. **Очереди этапа 1 удалены:**
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml logs worker </dev/null | grep -E 'retired queue|очередей'
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -At -v ON_ERROR_STOP=1 -c "
+     select name from pgboss.queue where name in ('scan-file', 'send-notification');" </dev/null
+   ```
+
+   Ожидается строка `retired queues: scan-file, send-notification`, строка `очередей: 19, расписаний: 10 (Asia/Almaty)` и пустой вывод запроса. Вместо первой — `retired queue kept: …`: очередь осталась с живым заданием (шаг 3 «До выката»); её задания не выполнит ни одна версия. Решение — за владельцем; если задания не нужны: `delete from pgboss.job where name = '<очередь>' and state in ('created', 'retry', 'active')` и `sudo docker compose -f compose.yaml -f compose.azure.yaml restart worker` — при старте worker удалит очередь.
+
+6. **Данные и сервисы.** Числа — как записанные на шаге 5 «До выката» (если между копией и выкатом на стенде никто не работал; `notification` растёт с каждым письмом), сервисы `healthy`, в журналах новых `api` и `worker` нет обращений к удалённой таблице:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -At -v ON_ERROR_STOP=1 -c "
+     select (select count(*) from user_accounts) || ' user_accounts, ' || (select count(*) from manufacturer_profiles)
+       || ' manufacturer_profiles, ' || (select count(*) from notification) || ' notification, '
+       || (select count(*) from file_version) || ' file_version';" </dev/null
+   sudo docker compose -f compose.yaml -f compose.azure.yaml ps </dev/null
+   sudo docker compose -f compose.yaml -f compose.azure.yaml logs api worker </dev/null | grep -c 'notifications_sent'
+   ```
+
+   Последнее число — `0`.
+
+7. **Одна блокировка входа — одно письмо NOT-03** (AUTH-04, NOT-18). На странице входа стенда 10–11 раз подряд ввести неверный пароль у `observer@observer.local` (демо-аккаунт; адрес `.local` — письмо в Mailpit, наружу не уходит). Keycloak заблокирует вход на 15 минут (`failureFactor` 10, `waitIncrementSeconds` 900); worker опрашивает события раз в минуту. Через 1–2 минуты:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc -At -v ON_ERROR_STOP=1 \
+     -c "select n.language, n.sent_at from notification n join user_accounts u on u.id = n.user_account_id
+         where n.rule_code = 'NOT-03' and lower(u.email) = 'observer@observer.local' order by n.sent_at desc limit 3" \
+     -c "select count(*) from audit_entries a join user_accounts u on u.id::text = a.object_id
+         where a.action = 'auth.locked_out' and lower(u.email) = 'observer@observer.local' and a.at > now() - interval '10 minutes'" </dev/null
+   ```
+
+   Ожидается одна новая строка `NOT-03` (время — минуты назад, язык — язык аккаунта) и `1`; в Mailpit (`/dev-mail/`, IP из `ADMIN_ALLOWED_IPS`) — одно письмо о блокировке на этот адрес. Через две минуты повторить запрос — строк и записей аудита не прибавилось (следующий опрос событий повтора не даёт). Вход наблюдателя возвращается через 15 минут.
+
+#### Откат после 0011
+
+Только восстановлением `/home/imbc/backup-before-0011.dump` — кодом на этап 2 не вернуться: его worker читает `notifications_sent`, которой нет, а `0011` назад не откатывается. Всё, что записано после копии, теряется: в том числе задания pg-boss (схема `pgboss` — в той же базе) и строки журнала писем, поэтому прежний worker, прочитав события Keycloak от курсора копии, может повторить NOT-03 по блокировкам, случившимся после копии. Копия восстанавливается в новую базу; живая база не удаляется, пока замена не проверена. База Keycloak `keycloak` и роли кластера не затрагиваются. Команды — в `/home/imbc/imbc-platform` на VM.
+
+1. Остановить новую версию:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml stop api worker </dev/null && echo stop-ok
+   ```
+
+2. Восстановить копию в `imbc_restore` и сверить с числами пробного восстановления (шаг 5 «До выката»): `11 migrations`, таблица `notifications_sent` есть:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres createdb -U imbc -O imbc imbc_restore </dev/null && echo createdb-ok
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres pg_restore -U imbc -d imbc_restore --exit-on-error --single-transaction < /home/imbc/backup-before-0011.dump && echo restore-ok
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc_restore -At -v ON_ERROR_STOP=1 -c "
+     select (select count(*) from drizzle.__drizzle_migrations) || ' migrations, '
+       || (select count(*) from user_accounts) || ' user_accounts, ' || (select count(*) from manufacturer_profiles)
+       || ' manufacturer_profiles, ' || (select count(*) from notification) || ' notification, '
+       || (select count(*) from file_version) || ' file_version, notifications_sent '
+       || coalesce(to_regclass('notifications_sent')::text, 'missing');" </dev/null
+   ```
+
+3. Права на уровне базы копия `-Fc` не содержит (права на схемы и таблицы в ней есть, а `migrate` прежней версии выдаст их заново на шаге 6):
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d imbc_restore -v ON_ERROR_STOP=1 \
+     -c 'GRANT CONNECT, CREATE ON DATABASE imbc_restore TO imbc_app' \
+     -c 'GRANT USAGE ON SCHEMA public TO imbc_app' </dev/null && echo grants-ok
+   ```
+
+4. Убедиться, что к `imbc` никто не подключён (ожидается `0`), и поменять базы местами из служебной базы `postgres`:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d postgres -At -v ON_ERROR_STOP=1 -c "
+     select count(*) from pg_stat_activity where datname = 'imbc';" </dev/null
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql -U imbc -d postgres -v ON_ERROR_STOP=1 \
+     -c 'ALTER DATABASE imbc RENAME TO imbc_after_0011' \
+     -c 'ALTER DATABASE imbc_restore RENAME TO imbc' </dev/null && echo swap-ok
+   ```
+
+   Подключения есть — посмотреть чьи (`select pid, usename, application_name, state from pg_stat_activity where datname = 'imbc'`) и остановить источник. Первое переименование прошло, второе нет (`swap-ok` не напечатан) — вернуть `ALTER DATABASE imbc_after_0011 RENAME TO imbc` и разобраться. После `swap-ok` версию R1 не запускать: её `migrate` применил бы `0011` к восстановленной базе снова.
+
+5. Сверить Keycloak с восстановленной базой — как шаг 5 подраздела «После `0006` — на версию до v1.3» (раздел «Откат» перехода на v1.3), со временем файла `backup-before-0011.dump`: пользователи, созданные или изменённые после копии, остаются в Keycloak без строк в базе платформы или с другим адресом.
+
+6. Выкатить прежнюю версию — коммит ветки стенда до слияния R1, записанный на шаге 1 «До выката» (на 14.11.2026 — `335ef02`): чистый checkout (`git switch --detach <коммит>`, `git status --short` пуст) → удаление лишних файлов на VM («[Файлы, которых нет в выкатываемом коммите](#файлы-которых-нет-в-выкатываемом-коммите)», `TARGET` — этот коммит) → `./infrastructure/azure/deploy.sh redeploy` → `IMBC_DEPLOY_RESULT=ok`. Миграций для применения у прежней версии нет (11 из 11), её `migrate` заново выдаёт права роли приложения.
+
+7. Только после того, как прежняя версия выкачена и проверена (вход, данные), удалить базу после `0011`. До этого она — полная копия данных на момент отката, и обратный путь — остановить `api` и `worker` и переименовать базы обратно:
+
+   ```bash
+   sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres dropdb -U imbc imbc_after_0011 </dev/null && echo dropdb-ok
+   ```
+
+**Дальше.** R2 (этап 3а) выкатывается только после «Проверок после выката `0011`» и записи их результата; до этого на стенд не выкатывается ничего новее коммита задачи 1.
 
 ## Статус и логи на VM
 

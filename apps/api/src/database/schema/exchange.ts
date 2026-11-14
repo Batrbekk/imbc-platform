@@ -2,7 +2,7 @@ import { boolean, index, integer, jsonb, numeric, pgTable, text, timestamp, uuid
 import { createdAt, id } from './_shared.js';
 import { userAccounts } from './access.js';
 import { commodityGroup, exportFormat, runResult, subscriptionPeriod } from './enums.js';
-import { fileObjects, manufacturerProfiles } from './profiles.js';
+import { fileObject } from './files.js';
 
 /** Подписка пользователя-оператора на сохранённый поиск (OPR-21…24, R2). */
 export const exportSubscriptions = pgTable('export_subscriptions', {
@@ -46,7 +46,7 @@ export const exportFiles = pgTable(
 /** Версии прогноза; опубликованная заменяет предыдущую одним указателем (ADM-20…22). */
 export const forecastVersions = pgTable('forecast_versions', {
   id: id(),
-  sourceFileId: uuid('source_file_id').references(() => fileObjects.id),
+  sourceFileId: uuid('source_file_id').references(() => fileObject.id),
   importReport: jsonb('import_report'),
   rowCount: integer('row_count').notNull().default(0),
   isPublished: boolean('is_published').notNull().default(false),
@@ -83,7 +83,7 @@ export const techSpecFiles = pgTable('tech_spec_files', {
   commodityGroup: commodityGroup('commodity_group').notNull(),
   fileId: uuid('file_id')
     .notNull()
-    .references(() => fileObjects.id),
+    .references(() => fileObject.id),
   createdAt: createdAt(),
   removedAt: timestamp('removed_at', { withTimezone: true }),
 });

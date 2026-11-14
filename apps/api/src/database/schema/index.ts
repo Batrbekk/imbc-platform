@@ -6,11 +6,4 @@ export * from './reference.js';
 export * from './files.js';
 export * from './notifications.js';
 export { exportSubscriptions, exportFiles, forecastVersions, forecastLines, techSpecFiles } from './exchange.js';
-export {
-  dictionaries,
-  dictionaryEntries,
-  auditEntries,
-  activitySnapshots,
-  notificationsSent,
-  catalogVisible,
-} from './platform.js';
+export { auditEntries, activitySnapshots, catalogVisible } from './platform.js';

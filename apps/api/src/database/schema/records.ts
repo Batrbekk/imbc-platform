@@ -29,7 +29,8 @@ import {
   requestState,
   valueSource,
 } from './enums.js';
-import { fileObjects, manufacturerProfiles } from './profiles.js';
+import { fileObject } from './files.js';
+import { manufacturerProfiles } from './profiles.js';
 
 /** Обследование площадки (IMBC-01…05). Site surveyed вычисляется, не хранится. */
 export const siteSurveyRecords = pgTable('site_survey_records', {
@@ -40,7 +41,7 @@ export const siteSurveyRecords = pgTable('site_survey_records', {
   visitFrom: date('visit_from'),
   visitTo: date('visit_to'),
   resultYes: boolean('result_yes').notNull(),
-  reportFileId: uuid('report_file_id').references(() => fileObjects.id),
+  reportFileId: uuid('report_file_id').references(() => fileObject.id),
   expiresOn: date('expires_on'),
   comment: text('comment'),
   source: valueSource('source').notNull().default('manual'),
@@ -58,10 +59,10 @@ export const dueDiligenceRecords = pgTable('due_diligence_records', {
   adataResult: ddResult('adata_result'),
   result: ddResult('result').notNull(),
   comment: text('comment'),
-  reportFileId: uuid('report_file_id').references(() => fileObjects.id),
+  reportFileId: uuid('report_file_id').references(() => fileObject.id),
   enhancedDone: boolean('enhanced_done').notNull().default(false),
   enhancedComment: text('enhanced_comment'),
-  enhancedReportFileId: uuid('enhanced_report_file_id').references(() => fileObjects.id),
+  enhancedReportFileId: uuid('enhanced_report_file_id').references(() => fileObject.id),
   changedBy: uuid('changed_by').references(() => userAccounts.id),
   createdAt: createdAt(),
 });
@@ -211,7 +212,7 @@ export const operatorVisitMarks = pgTable('operator_visit_marks', {
     .notNull()
     .references(() => manufacturerProfiles.id, { onDelete: 'cascade' }),
   visitedOn: date('visited_on').notNull(),
-  fileId: uuid('file_id').references(() => fileObjects.id),
+  fileId: uuid('file_id').references(() => fileObject.id),
   decision: decision('decision'),
   decidedBy: uuid('decided_by').references(() => userAccounts.id),
   createdBy: uuid('created_by')

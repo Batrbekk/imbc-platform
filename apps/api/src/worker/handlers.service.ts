@@ -10,7 +10,6 @@ import { withQueueTransaction } from '../database/transaction.js';
 import {
   certificates,
   exportFiles,
-  notificationsSent,
   otpCodes,
   sessions,
   trustedDevices,
@@ -213,13 +212,6 @@ export class JobHandlers {
         .onConflictDoNothing()
         .returning();
       if (!fresh) return;
-      // Expand (NFR-06): эту блокировку уже обработала предыдущая версия worker (письмо и аудит) — строка
-      // NOT-03 с тем же ключом в notifications_sent. Убрать в contract вместе с notifications_sent.
-      const [legacy] = await tx
-        .select({ id: notificationsSent.id })
-        .from(notificationsSent)
-        .where(and(eq(notificationsSent.code, 'NOT-03'), eq(notificationsSent.dedupeKey, eventKey)));
-      if (legacy) return;
       await enqueueNotification(
         this.queue,
         {

@@ -17,30 +17,10 @@ import { organizations, userAccounts } from './access.js';
 import { commodityGroup, profileTier, snapshotPeriod, updateStatus } from './enums.js';
 import { manufacturerProfiles } from './profiles.js';
 
-/** Справочники ADM-10 с переводами и флагом обязательности (ADM-11, DATA-04). */
-export const dictionaries = pgTable('dictionaries', {
-  code: text('code').primaryKey(),
-  title: text('title').notNull(),
-});
-
-export const dictionaryEntries = pgTable(
-  'dictionary_entries',
-  {
-    id: id(),
-    dictionaryCode: text('dictionary_code')
-      .notNull()
-      .references(() => dictionaries.code),
-    code: text('code').notNull(),
-    labelKk: text('label_kk').notNull(),
-    labelRu: text('label_ru').notNull(),
-    labelEn: text('label_en').notNull(),
-    parentCode: text('parent_code'),
-    isMandatory: boolean('is_mandatory').notNull().default(false),
-    retiredAt: timestamp('retired_at', { withTimezone: true }),
-    sortOrder: smallint('sort_order').notNull().default(0),
-  },
-  (t) => [uniqueIndex('dictionary_entries_uq').on(t.dictionaryCode, t.code)],
-);
+/*
+ * Справочники — по DBML в reference.ts, журнал писем — в notifications.ts; скелетные `dictionaries`,
+ * `dictionary_entries` и `notifications_sent` удалены contract этапа 2 (0011).
+ */
 
 /**
  * Журнал аудита (AUD-01…03): append-only, 5 лет. Роль приложения не имеет
@@ -80,23 +60,6 @@ export const activitySnapshots = pgTable(
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex('activity_snapshots_uq').on(t.period, t.periodStart)],
-);
-
-/**
- * Отправленные письма: одно письмо на событие и адрес (NOT-20, ADR-22).
- * Уникальный ключ делает повтор задания безопасным.
- */
-export const notificationsSent = pgTable(
-  'notifications_sent',
-  {
-    id: id(),
-    code: text('code').notNull(),
-    dedupeKey: text('dedupe_key').notNull(),
-    recipient: text('recipient').notNull(),
-    locale: text('locale').notNull(),
-    sentAt: timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [uniqueIndex('notifications_sent_uq').on(t.code, t.dedupeKey, sql`lower(${t.recipient})`)],
 );
 
 /**

@@ -18,7 +18,7 @@ import { locale } from './enums.js';
 
 /*
  * Справочники ADM-08 по DBML (`dictionary`, `dictionary_entry`, `dictionary_entry_translation`).
- * Скелетные `dictionaries` и `dictionary_entries` (platform.ts) живут до contract (NFR-06).
+ * Скелетные `dictionaries` и `dictionary_entries` удалены contract этапа 2 (0011).
  */
 
 /**

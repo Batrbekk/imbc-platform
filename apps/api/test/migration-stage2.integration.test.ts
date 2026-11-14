@@ -18,8 +18,11 @@ const statements = (tag: string) =>
     .split('--> statement-breakpoint')
     .map((s) => s.replace(/^\s*--.*$/gm, '').trim())
     .filter(Boolean);
-const journalLength = () =>
-  (JSON.parse(readFileSync(join(MIGRATIONS, 'meta/_journal.json'), 'utf8')) as { entries: unknown[] }).entries.length;
+/** Миграций до 0010 включительно: этап 2 проверяется на своей последней миграции (contract 0011 удаляет скелет). */
+const journalThroughData = () =>
+  (
+    JSON.parse(readFileSync(join(MIGRATIONS, 'meta/_journal.json'), 'utf8')) as { entries: { tag: string }[] }
+  ).entries.findIndex((e) => e.tag === DATA) + 1;
 
 /** Семнадцать правил NOT-01…NOT-17 (раздел 8.2): код, событие, получатели — ровно как в SQL 0010. */
 const RULES = [
@@ -44,7 +47,9 @@ const RULES = [
 
 // Этап 2: модель справочников, файлов и журнала уведомлений по DBML. 0009 — expand (NFR-06),
 // 0010 — данные: двенадцать справочников ADM-08, семнадцать правил NOT-01…NOT-17, перенос
-// notifications_sent в журнал notification (NOT-18).
+// notifications_sent в журнал notification (NOT-18). База каждого блока — после 0010 (`migrateThrough(pool, DATA)`):
+// следующая миграция, contract 0011, удаляет скелетные таблицы и переименовывает file_scan_state в scan_state
+// (её проверки — migration-stage2-contract.integration.test.ts).
 describe('0009 и 0010: текст миграций', () => {
   it('в 0009 нет DROP, RENAME, ALTER COLUMN, SET NOT NULL и ALTER TYPE', () => {
     const text = migrationText(EXPAND);
@@ -147,12 +152,12 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('этап 2: миграции 00
       before.sent = await row('notifications_sent', ids.sent);
       before.fileObject = await row('file_objects', ids.fileObject);
       before.fileVersion = await row('file_versions', ids.fileVersion);
-      await migrateThrough(pool);
+      await migrateThrough(pool, DATA);
     }, 60000);
 
     it('0009 и 0010 — expand: база 0008 с данными предыдущей версии мигрирует; запись предыдущей версии проходит (NFR-06)', async () => {
       const journal = await pool.query('select count(*)::int as n from drizzle.__drizzle_migrations');
-      expect(journal.rows).toEqual([{ n: journalLength() }]);
+      expect(journal.rows).toEqual([{ n: journalThroughData() }]);
       // Строки предыдущей версии целы.
       expect(await row('user_accounts', ids.account)).toEqual(before.account);
       expect(await row('notifications_sent', ids.sent)).toEqual(before.sent);
@@ -215,7 +220,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('этап 2: миграции 00
       await pool.query(
         "insert into notifications_sent (code, dedupe_key, recipient, locale) values ('LEGACY-01', 'k-1', 'locked@stage2.local', 'kk')",
       );
-      await migrateThrough(pool);
+      await migrateThrough(pool, DATA);
     }, 60000);
 
     it('0010: двенадцать справочников с кодами DBML в порядке ADM-08, семнадцать правил; повторный прогон SQL 0010 ничего не добавляет', async () => {
@@ -278,7 +283,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('этап 2: миграции 00
   describe('чистая база', () => {
     beforeAll(async () => {
       await resetDatabase(pool);
-      await migrateThrough(pool);
+      await migrateThrough(pool, DATA);
     }, 60000);
 
     let n = 0;

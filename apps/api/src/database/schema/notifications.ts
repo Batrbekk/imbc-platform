@@ -4,8 +4,8 @@ import { userAccounts } from './access.js';
 import { locale } from './enums.js';
 
 /*
- * Уведомления по DBML (`notification_rule`, `notification`). Скелетный `notifications_sent` (platform.ts)
- * живёт до contract: в него пишет предыдущая версия приложения (NFR-06); 0010 переносит его строки сюда.
+ * Уведомления по DBML (`notification_rule`, `notification`). Письма прежнего журнала `notifications_sent`
+ * перенесены сюда (0010, повторно — 0011), сама таблица удалена contract этапа 2 (0011, NOT-18).
  */
 
 /**

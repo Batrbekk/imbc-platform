@@ -1,4 +1,5 @@
-import type { Queue, QueueOptions } from 'pg-boss';
+import { Logger } from '@nestjs/common';
+import type { JobWithMetadata, PgBoss, Queue, QueueOptions } from 'pg-boss';
 
 /**
  * Очереди pg-boss (ADR-06). Ставит задания API, выполняет worker.
@@ -27,6 +28,52 @@ export const QUEUES = {
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
+
+/**
+ * Очереди этапа 1, которые этап 2 заменил на `file-scan` и `notify`: обработчиков у них нет, строки остались в
+ * `pgboss.queue`. Убирает их worker при старте (`retireQueues`, contract этапа 2, NFR-06).
+ */
+export const RETIRED_QUEUES = ['scan-file', 'send-notification'] as const;
+
+/** Задание, которое ещё может выполниться: такое не удаляется вместе с очередью. */
+const LIVE_JOB_STATES: ReadonlySet<JobWithMetadata['state']> = new Set(['created', 'retry', 'active']);
+const FIND_PAGE = 1000;
+const queuesLogger = new Logger('Queues');
+
+async function liveJobCount(boss: PgBoss, name: string): Promise<number> {
+  let live = 0;
+  let after: string | undefined;
+  for (;;) {
+    const page = await boss.findJobs(name, { limit: FIND_PAGE, ...(after === undefined ? {} : { after }) });
+    live += page.filter((job) => LIVE_JOB_STATES.has(job.state)).length;
+    if (page.length < FIND_PAGE) return live;
+    after = page.at(-1)!.id;
+  }
+}
+
+/**
+ * Удаляет очереди `RETIRED_QUEUES` (`boss.deleteQueue` — вместе с завершёнными и упавшими заданиями), но только
+ * существующую (`getQueue`) и без заданий `created`, `retry`, `active`. Очередь с таким заданием остаётся в `kept`
+ * с предупреждением: имя очереди и число заданий, без их данных. Нет очереди — ничего не делается, поэтому повтор
+ * при каждом старте безопасен. В эти очереди не ставит задания ни одна версия начиная с этапа 2.
+ */
+export async function retireQueues(boss: PgBoss): Promise<{ deleted: string[]; kept: string[] }> {
+  const deleted: string[] = [];
+  const kept: string[] = [];
+  for (const name of RETIRED_QUEUES) {
+    if (!(await boss.getQueue(name))) continue;
+    const live = await liveJobCount(boss, name);
+    if (live > 0) {
+      kept.push(name);
+      queuesLogger.warn(`retired queue kept: ${name} has ${live} jobs in created, retry or active`);
+      continue;
+    }
+    await boss.deleteQueue(name);
+    deleted.push(name);
+  }
+  if (deleted.length > 0) queuesLogger.log(`retired queues: ${deleted.join(', ')}`);
+  return { deleted, kept };
+}
 
 export const PLATFORM_TZ = 'Asia/Almaty';
 

@@ -39,8 +39,8 @@ export type DataClass = (typeof DATA_CLASSES)[number];
 
 /**
  * Состояние проверки версии файла (DATA-07): до `passed` версию никто не открывает, не скачивает,
- * не верифицирует и не публикует. В БД тип называется `file_scan_state`: имя `scan_state` занято
- * скелетным перечислением до contract (NFR-06).
+ * не верифицирует и не публикует. В БД — тип `scan_state` DBML (до contract этапа 2, миграции 0011, —
+ * `file_scan_state`: имя занимало скелетное перечисление).
  */
 export const FILE_SCAN_STATES = ['pending', 'passed', 'rejected'] as const;
 export type FileScanState = (typeof FILE_SCAN_STATES)[number];

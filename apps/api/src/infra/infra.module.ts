@@ -5,7 +5,13 @@ import nodemailer, { type Transporter } from 'nodemailer';
 import { PgBoss } from 'pg-boss';
 import { ENV, type Env } from '../config/env.js';
 import { databaseErrorSummary } from '../database/pg-errors.js';
-import { ADATA_QUEUE_OPTIONS, FILE_SCAN_QUEUE_OPTIONS, NOTIFY_QUEUE_OPTIONS, QUEUES } from '../jobs/queues.js';
+import {
+  ADATA_QUEUE_OPTIONS,
+  FILE_SCAN_QUEUE_OPTIONS,
+  NOTIFY_QUEUE_OPTIONS,
+  QUEUES,
+  retireQueues,
+} from '../jobs/queues.js';
 import { createS3Client, OBJECT_STORAGE, S3ObjectStorage } from '../modules/files/object-storage.js';
 
 export const VALKEY = Symbol('VALKEY');
@@ -85,6 +91,7 @@ export class InfraModule implements OnModuleInit, OnApplicationShutdown {
   constructor(
     @Inject(VALKEY) private readonly valkey: Redis,
     @Inject(QUEUE) private readonly queue: PgBoss,
+    @Inject(ENV) private readonly env: Env,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -97,6 +104,11 @@ export class InfraModule implements OnModuleInit, OnApplicationShutdown {
       this.logger.warn(`Valkey: ${error.message}`);
     });
     await this.queue.start();
+    // Очереди этапа 1 без обработчиков (contract этапа 2, NFR-06) убирает один процесс — worker, до создания
+    // очередей: пустые удаляются, с живым заданием остаются с предупреждением; на следующих стартах их уже нет.
+    // Сбой уборки старт не останавливает: очереди без обработчиков безвредны, следующий старт повторит.
+    if (this.env.PROCESS_ROLE === 'worker')
+      await retireQueues(this.queue).catch((error: unknown) => logQueueError(this.logger, error));
     // API can enqueue a registration before the worker process has finished starting.
     for (const name of [QUEUES.sendPasswordEmail, QUEUES.cleanupIdentity]) {
       await this.queue.createQueue(name, { retryLimit: 10, retryDelay: 30, retryBackoff: true });

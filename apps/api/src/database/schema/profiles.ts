@@ -26,10 +26,10 @@ import {
   profileSection,
   profileStatus,
   revisionState,
-  scanState,
   updateStatus,
   valueSource,
 } from './enums.js';
+import { fileObject, fileVersion } from './files.js';
 
 /** Профиль производителя: один на организацию (D-01, MAN-03). */
 export const manufacturerProfiles = pgTable(
@@ -209,38 +209,10 @@ export const equipmentProductLinks = pgTable(
   (t) => [primaryKey({ columns: [t.equipmentId, t.productLineId] })],
 );
 
-/** Файл и его версии: объект в S3 отдельно от записи (DATA-05, ADR-12). */
-export const fileObjects = pgTable('file_objects', {
-  id: id(),
-  organizationId: uuid('organization_id')
-    .notNull()
-    .references(() => organizations.id),
-  /** Класс данных для policy-слоя (архитектура §9): A, B, C, D, E, F. */
-  dataClass: text('data_class').notNull(),
-  createdAt: createdAt(),
-});
-
-export const fileVersions = pgTable(
-  'file_versions',
-  {
-    id: id(),
-    fileId: uuid('file_id')
-      .notNull()
-      .references(() => fileObjects.id, { onDelete: 'cascade' }),
-    version: integer('version').notNull(),
-    bucket: text('bucket').notNull(),
-    objectKey: text('object_key').notNull(),
-    originalName: text('original_name').notNull(),
-    mimeType: text('mime_type').notNull(),
-    sizeBytes: integer('size_bytes').notNull(),
-    sha256: text('sha256').notNull(),
-    scanState: scanState('scan_state').notNull().default('pending'),
-    scannedAt: timestamp('scanned_at', { withTimezone: true }),
-    uploadedBy: uuid('uploaded_by').references(() => userAccounts.id),
-    uploadedAt: timestamp('uploaded_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [uniqueIndex('file_versions_uq').on(t.fileId, t.version)],
-);
+/*
+ * Файлы скелета профиля ссылаются на file_object и file_version (files.ts, DATA-05): скелетные file_objects и
+ * file_versions удалены contract этапа 2 (0011), а ключи пустых колонок переведены на таблицы DBML.
+ */
 
 /** Сертификат (MAN-70…73). Истечение не скрывает профиль (REV-20). */
 export const certificates = pgTable(
@@ -256,7 +228,7 @@ export const certificates = pgTable(
     issuer: text('issuer').notNull(),
     issuedOn: date('issued_on').notNull(),
     expiresOn: date('expires_on'),
-    fileId: uuid('file_id').references(() => fileObjects.id),
+    fileId: uuid('file_id').references(() => fileObject.id),
     status: documentStatus('status').notNull().default('uploaded'),
   },
   (t) => [index('certificates_expires_idx').on(t.expiresOn)],
@@ -269,7 +241,7 @@ export const documents = pgTable('documents', {
     .notNull()
     .references(() => sectionRevisions.id, { onDelete: 'cascade' }),
   typeCode: text('type_code').notNull(),
-  fileId: uuid('file_id').references(() => fileObjects.id),
+  fileId: uuid('file_id').references(() => fileObject.id),
   noLicenceRequired: boolean('no_licence_required').notNull().default(false),
   status: documentStatus('status').notNull().default('uploaded'),
 });
@@ -294,7 +266,7 @@ export const reviewDecisions = pgTable('review_decisions', {
     .notNull()
     .references(() => reviewAssignments.id, { onDelete: 'cascade' }),
   sectionRevisionId: uuid('section_revision_id').references(() => sectionRevisions.id),
-  fileVersionId: uuid('file_version_id').references(() => fileVersions.id),
+  fileVersionId: uuid('file_version_id').references(() => fileVersion.id),
   decision: decision('decision').notNull(),
   comment: text('comment'),
   expertId: uuid('expert_id')

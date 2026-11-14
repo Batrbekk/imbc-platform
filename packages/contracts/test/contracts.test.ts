@@ -96,7 +96,7 @@ describe('файлы и справочники (DBML, ADM-08, DATA-05, DATA-07)'
       'e_administration',
       'f_forecast',
     ]);
-    // DBML `scan_state`; в БД тип называется file_scan_state, пока скелетный scan_state не удалён (NFR-06).
+    // DBML `scan_state` — тип БД с тем же именем (с 0011; до неё — file_scan_state).
     expect(FILE_SCAN_STATES).toEqual(['pending', 'passed', 'rejected']);
 
     // Файлы секций профиля — те назначения, на которые ссылаются таблицы профиля DBML.

@@ -854,42 +854,31 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
     expect(await lockouts(user.id)).toHaveLength(1);
   });
 
-  it('NOT-03, отправленное предыдущей версией: ключ журнала из 0010 совпадает с notificationDedupKey; тот же пакет событий не ставит ни задания, ни аудита (NOT-18)', async () => {
+  it('NOT-03, отправленное предыдущей версией до 0010: ключ журнала из 0010 совпадает с notificationDedupKey; после contract тот же пакет событий ставит задание, но второго письма нет — журнал отвечает duplicate (NOT-18)', async () => {
+    await boss.deleteAllJobs(QUEUES.notify);
     const key = `${legacy.subject}:${legacy.time}`;
     const [row] = await journal('NOT-03', key);
     // Формат ключа один в SQL миграции и в коде: код, ключ события, адрес в нижнем регистре.
     expect(row?.dedup_key).toBe(notificationDedupKey('NOT-03', key, legacy.email));
     expect(row?.dedup_key).toBe(`NOT-03\n${key}\n${legacy.email.toLowerCase()}`);
+    // Таблицы прежней версии больше нет (0011): сверки с ней нет, письмо держит один журнал notification.
+    const gone = await pool.query<{ t: string | null }>("select to_regclass('public.notifications_sent')::text as t");
+    expect(gone.rows).toEqual([{ t: null }]);
     const user = (await db.query.userAccounts.findFirst({
       where: eq(schema.userAccounts.idpSubject, legacy.subject),
     }))!;
     await keycloakWorker(() => [
       { type: 'USER_DISABLED_BY_TEMPORARY_LOCKOUT', userId: legacy.subject, time: legacy.time },
     ]).keycloakEvents();
-    expect(await notifyJobs(key)).toEqual([]);
-    expect(await journal('NOT-03', key)).toHaveLength(1);
-    expect(await lockouts(user.id)).toEqual([]);
-  });
-
-  it('окно выката (NFR-06): NOT-03, которое прежняя версия записала в notifications_sent после постановки задания, считается отправленным — письма и строки журнала нет', async () => {
-    await boss.deleteAllJobs(QUEUES.notify);
-    const user = await account('operator', { locale: 'ru' });
-    const time = Date.now() - 2000;
-    const key = `${user.idpSubject}:${time}`;
-    await keycloakWorker(() => [lockout(user, time)]).keycloakEvents();
     expect(await notifyJobs(key)).toHaveLength(1);
-    // Прежняя версия worker обработала ту же блокировку раньше нашего задания (адрес — в другом регистре).
-    await pool.query(
-      "insert into notifications_sent (code, dedupe_key, recipient, locale) values ('NOT-03', $1, $2, 'ru')",
-      [key, user.email.toUpperCase()],
-    );
     const { transport, dispatcher } = setup();
     const log = vi.spyOn(Logger.prototype, 'log');
     await drain(dispatcher);
     expect(transport.sent).toEqual([]);
-    expect(await journal('NOT-03', key)).toEqual([]);
+    expect(await journal('NOT-03', key)).toEqual([row]);
     expect((await notifyJobs(key)).map((j) => j.state)).toEqual(['completed']);
     expect(log).toHaveBeenCalledWith('notification NOT-03: sent 0, duplicates 1, observers 0, invalid 0');
+    expect(await lockouts(user.id)).toHaveLength(1);
   });
 
   it('гонка, вторая ветка: первая транзакция откатилась по сбою SMTP — ждавшая на уникальном индексе отправляет сама; одно письмо, одна строка журнала', async () => {

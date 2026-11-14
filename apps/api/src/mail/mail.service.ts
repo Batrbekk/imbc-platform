@@ -1,11 +1,10 @@
 import type { Locale } from '@imbc/contracts';
 import { Inject, Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
-import { and, eq, sql } from 'drizzle-orm';
 import type { Transporter } from 'nodemailer';
 import { ENV, type Env } from '../config/env.js';
 import { DB, type Database } from '../database/database.module.js';
 import { databaseErrorSummary } from '../database/pg-errors.js';
-import { notification, notificationsSent } from '../database/schema/index.js';
+import { notification } from '../database/schema/index.js';
 import { MAILER } from '../infra/infra.module.js';
 import { notificationDedupKey, type NotificationRuleCode } from '../notifications/rules.js';
 import type { RenderedMail } from './templates.js';
@@ -63,7 +62,6 @@ export class MailService implements OnApplicationBootstrap {
   async sendOnce(entry: NotificationEntry, mail: RenderedMail): Promise<'sent' | 'duplicate'> {
     const to = entry.to.trim();
     return this.db.transaction(async (tx) => {
-      if (await this.sentByPreviousVersion(tx, entry, to)) return 'duplicate';
       const [claimed] = await tx
         .insert(notification)
         .values(journalRow(entry, to))
@@ -106,29 +104,5 @@ export class MailService implements OnApplicationBootstrap {
       html: mail.html,
       headers: { 'X-IMBC-Notification': entry.ruleCode },
     });
-  }
-
-  /**
-   * Expand (NFR-06): предыдущая версия worker в окне выката пишет NOT-03 в `notifications_sent`. Строка с тем
-   * же ключом события и адресом там — письмо уже ушло: исход `duplicate`, строка в новый журнал не нужна.
-   * Убрать в contract вместе с `notifications_sent`.
-   */
-  private async sentByPreviousVersion(
-    tx: Pick<Database, 'select'>,
-    entry: NotificationEntry,
-    to: string,
-  ): Promise<boolean> {
-    if (entry.ruleCode !== 'NOT-03') return false;
-    const [legacy] = await tx
-      .select({ id: notificationsSent.id })
-      .from(notificationsSent)
-      .where(
-        and(
-          eq(notificationsSent.code, 'NOT-03'),
-          eq(notificationsSent.dedupeKey, entry.eventKey),
-          eq(sql`lower(${notificationsSent.recipient})`, to.toLowerCase()),
-        ),
-      );
-    return legacy !== undefined;
   }
 }

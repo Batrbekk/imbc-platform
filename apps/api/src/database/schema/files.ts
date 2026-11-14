@@ -14,13 +14,13 @@ import {
 } from 'drizzle-orm/pg-core';
 import { createdAt, id } from './_shared.js';
 import { organizations, userAccounts } from './access.js';
-import { dataClass, filePurpose, fileScanState } from './enums.js';
+import { dataClass, filePurpose, scanState } from './enums.js';
 
 /*
  * Файлы по DBML (`file_object`, `file_version`, `org_chart_sample`): байты — в объектном хранилище,
  * сначала в карантине, после скана — в рабочем бакете; строка домена указывает на file_object (DATA-05).
- * Скелетные `file_objects` и `file_versions` (profiles.ts) живут до contract: их читает предыдущая
- * версия приложения (NFR-06).
+ * Скелетные `file_objects` и `file_versions` удалены contract этапа 2 (0011); колонки скелета профиля,
+ * обследований и прогноза, ссылавшиеся на них, ссылаются на file_object и file_version.
  */
 
 /** Файл: владелец, назначение и класс данных. Организация пуста только у отчёта обследования без БИН. */
@@ -41,8 +41,8 @@ export const fileObject = pgTable(
  * никто не открывает (DATA-07); прежние версии остаются.
  *
  * Отступления от DBML: номер версии больше нуля; размер от 1 байта до 25 МБ (`MAX_FILE_BYTES`, DATA-06);
- * ключ объекта уникален; частичный индекс версий, ждущих скана, — для повторной постановки в очередь;
- * тип состояния — `file_scan_state` (имя `scan_state` занято скелетом до contract).
+ * ключ объекта уникален; частичный индекс версий, ждущих скана, — для повторной постановки в очередь.
+ * Тип состояния — `scan_state` DBML (до 0011 — `file_scan_state`).
  */
 export const fileVersion = pgTable(
   'file_version',
@@ -58,7 +58,7 @@ export const fileVersion = pgTable(
     /** Тип по содержимому, а не по имени (DATA-06). */
     detectedMediaType: text('detected_media_type'),
     checksum: text('checksum').notNull(),
-    scanState: fileScanState('scan_state').notNull().default('pending'),
+    scanState: scanState('scan_state').notNull().default('pending'),
     scannedAt: timestamp('scanned_at', { withTimezone: true }),
     uploadedAt: timestamp('uploaded_at', { withTimezone: true }).notNull().defaultNow(),
     uploadedBy: uuid('uploaded_by').references(() => userAccounts.id),
@@ -78,8 +78,9 @@ export const fileVersion = pgTable(
 
 /**
  * Образец оргструктуры, который производитель может скачать (MAN-19, ADM-11); не обязательный шаблон.
- * Текущий — один. Отступление от DBML: один файл — один образец. По умолчанию `is_current` — true
- * (DBML), но новый образец вставляется с false и становится текущим после скана (DATA-07).
+ * Текущий — один. Отступления от DBML: один файл — один образец; `is_current` по умолчанию false (в DBML —
+ * true, с 0011): новый образец становится текущим только после скана (DATA-07), и вставка без колонки не
+ * делает текущим непроверенный файл.
  */
 export const orgChartSample = pgTable(
   'org_chart_sample',
@@ -92,7 +93,7 @@ export const orgChartSample = pgTable(
       .notNull()
       .references(() => userAccounts.id),
     uploadedAt: timestamp('uploaded_at', { withTimezone: true }).notNull(),
-    isCurrent: boolean('is_current').notNull().default(true),
+    isCurrent: boolean('is_current').notNull().default(false),
   },
   (t) => [
     uniqueIndex('org_chart_sample_file_uq').on(t.fileObjectId),
