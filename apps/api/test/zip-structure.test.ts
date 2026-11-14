@@ -903,3 +903,81 @@ describe('zipStructureIssue: объекты OLE — части CFB с внедр
     );
   });
 });
+
+// Поток, который сам является архивом ZIP (документ OOXML или ODF), — под любым именем потока (EmbeddedOdf,
+// Contents1): начинается с начала сектора или мини-сектора — со смещения, кратного 64, — сигнатурой локального
+// заголовка или маркером разделённого архива.
+describe('zipStructureIssue: часть CFB с архивом ZIP в потоке под любым именем (DATA-06, DATA-07)', () => {
+  /** Данные потока: `bytes` по смещению `at` внутри потока (поток начинается с начала сектора, кратного 512). */
+  const placed = (bytes: Buffer, at: number) => {
+    const data = Buffer.alloc(4096);
+    bytes.copy(data, at);
+    return data;
+  };
+
+  it('поток EmbeddedOdf или Contents1 с архивом ZIP — embedded_file; ZIP64 в таком потоке — тоже', () => {
+    for (const name of ['EmbeddedOdf', 'Contents1', 'Equation Native']) {
+      expect(zipStructureIssue(withOle(cfb([stream(name, fixture('sample.xlsx'))]))), name).toBe('embedded_file');
+      expect(zipStructureIssue(withOle(cfb([stream(name, fixture('sample.xlsx'))]), { method: STORED })), name).toBe(
+        'embedded_file',
+      );
+    }
+    expect(
+      zipStructureIssue(withOle(cfb([stream('\x01CompObj'), stream('Contents1', fixture('zip64-local.xlsx'))]))),
+    ).toBe('embedded_file');
+    expect(zipStructureIssue(fixture('ole-zip-stream.docx'))).toBe('embedded_file');
+    // Во вложенном пакете — так же.
+    const sheet = xlsx({
+      name: 'xl/embeddings/oleObject1.bin',
+      data: cfb([stream('EmbeddedOdf', fixture('sample.docx'))]),
+      method: DEFLATE,
+    });
+    expect(zipStructureIssue(docx(embedded(sheet)))).toBe('embedded_file');
+  });
+
+  it('PK 03 04 по смещению, кратному 64, но не 512 (мини-сектор), PK 07 08 и PK 00 по смещению, кратному 64, — embedded_file', () => {
+    const local = Buffer.from('504b0304', 'hex');
+    for (const at of [64, 128, 192, 448, 3968]) {
+      const part = cfb([stream('Workbook', placed(local, at))]);
+      expect(part.indexOf(local) % 64, String(at)).toBe(0);
+      expect(part.indexOf(local) % 512, String(at)).not.toBe(0);
+      expect(zipStructureIssue(withOle(part)), String(at)).toBe('embedded_file');
+    }
+    for (const marker of ['504b0708', '504b3030'])
+      expect(
+        zipStructureIssue(withOle(cfb([stream('Workbook', placed(Buffer.from(marker, 'hex'), 256))]))),
+        marker,
+      ).toBe('embedded_file');
+    // Сигнатура — последние 4 байта части, смещение кратно 64: граница цикла `at + 4 <= length`.
+    const tail = Buffer.concat([EQUATION, local]);
+    expect((tail.length - 4) % 64).toBe(0);
+    expect(zipStructureIssue(withOle(tail))).toBe('embedded_file');
+    // Последние 3 байта — сигнатура не целиком: чтения за границу нет, принят.
+    expect(zipStructureIssue(withOle(Buffer.concat([EQUATION, local.subarray(0, 3)])))).toBeNull();
+  });
+
+  it('граница правила: PK 03 04 не с начала мини-сектора (смещение 64k + 1, 64k + 32) и другие байты после PK — принят', () => {
+    const local = Buffer.from('504b0304', 'hex');
+    for (const at of [1, 65, 96, 130, 4092])
+      expect(zipStructureIssue(withOle(cfb([stream('Workbook', placed(local, at))]))), String(at)).toBeNull();
+    for (const other of ['504b0102', '504b0506', '504b0000', '504b3031'])
+      expect(
+        zipStructureIssue(withOle(cfb([stream('Workbook', placed(Buffer.from(other, 'hex'), 128))]))),
+        other,
+      ).toBeNull();
+    // Формула и 40 частей CFB без внедрённого — по-прежнему приняты.
+    expect(zipStructureIssue(fixture('ole-equation.docx'))).toBeNull();
+    const parts = Array.from({ length: 40 }, (_, i): Entry => ({
+      name: `word/embeddings/oleObject${i + 1}.bin`,
+      data: EQUATION,
+      method: DEFLATE,
+    }));
+    expect(zipStructureIssue(docx(...parts))).toBeNull();
+  });
+
+  it('порядок итогов: encrypted, затем имена, затем содержимое', () => {
+    const zipStream = stream('Contents1', fixture('sample.xlsx'));
+    expect(zipStructureIssue(withOle(cfb([zipStream, stream('EncryptionInfo')])))).toBe('encrypted');
+    expect(zipStructureIssue(withOle(cfb([zipStream, stream('\x01Ole10Native')])))).toBe('embedded_file');
+  });
+});

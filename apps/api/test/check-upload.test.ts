@@ -42,6 +42,7 @@ describe('check-upload: проверка каталога файлов', () => {
         'ole-equation.docx\taccepted\t-',
         'ole-native.docx\tfile_has_attachments\tembedded_file',
         'ole-package-zip64.docx\tfile_has_attachments\tembedded_file',
+        'ole-zip-stream.docx\tfile_has_attachments\tembedded_file',
         'plain.zip\tfile_type_not_allowed\t-',
         'program.exe\tfile_type_not_allowed\t-',
         'sample-deflated.docx\taccepted\t-',

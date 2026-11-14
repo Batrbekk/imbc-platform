@@ -58,6 +58,24 @@ function nameAt(bytes: Buffer, at: number, name: readonly number[]): boolean {
   return bytes.readUInt16LE(at + 2 * name.length) === 0 || cb === 2 * name.length || cb === 2 * (name.length + 1);
 }
 
+/**
+ * Поток CFB начинается с начала сектора (512 или 4096 байт) или мини-сектора (64 байта внутри мини-потока, который
+ * сам лежит в обычных секторах) — со смещения, кратного 64. Поток, который сам является архивом ZIP (внедрённый
+ * документ OOXML или ODF под любым именем потока: `EmbeddedOdf`, `Contents1` …), начинается с `PK` и сигнатуры
+ * локального заголовка (`03 04`) или маркера разделённого архива (`07 08`, `30 30`). Архив не с начала потока
+ * (`PK` по смещению `64k + 1` и т. п.) правило не видит — граница зафиксирована тестом.
+ */
+const STREAM_ALIGNMENT = 64;
+const ZIP_PREFIX = 0x4b50;
+const ZIP_STARTS: ReadonlySet<number> = new Set([0x0403, 0x0807, 0x3030]);
+
+/** На смещении, кратном 64, начинается архив ZIP. */
+function zipStreamInside(bytes: Buffer): boolean {
+  for (let at = 0; at + 4 <= bytes.length; at += STREAM_ALIGNMENT)
+    if (bytes.readUInt16LE(at) === ZIP_PREFIX && ZIP_STARTS.has(bytes.readUInt16LE(at + 2))) return true;
+  return false;
+}
+
 /** Заголовок CFB — 512 байт; степень двойки размера сектора — `uint16` по смещению `0x1E`. */
 const HEADER = 512;
 const SECTOR_SHIFT = 0x1e;
@@ -68,7 +86,8 @@ const SECTOR_SHIFTS: ReadonlySet<number> = new Set([9, 12]);
  * Часть CFB внутри пакета Office (объект OLE, `word/embeddings/oleObject1.bin`; сигнатуру проверил вызывающий) —
  * обход записей каталога по форме, без чтения цепочек FAT: каждое смещение, кратное 128. Поток `EncryptionInfo` или
  * `EncryptedPackage` — `encrypted`; иначе `\x01Ole10Native`, `Package` или `CONTENTS` — `embedded_file`; иначе
- * null (формула `Equation Native`, рисунок `VisioDocument`, старая книга `Workbook`: потоки OLE2 clamd проверяет сам).
+ * поток-архив ZIP под любым именем (`zipStreamInside`) — `embedded_file`; иначе null (формула `Equation Native`,
+ * рисунок `VisioDocument`, старая книга `Workbook`: потоки OLE2 clamd проверяет сам).
  * Часть короче заголовка или с сектором не 512 и не 4096 байт — `malformed`: записи каталога могли бы лежать не по
  * смещениям, кратным 128, и обход по форме их бы не увидел.
  */
@@ -79,5 +98,5 @@ export function cfbPartIssue(bytes: Buffer): 'encrypted' | 'embedded_file' | 'ma
     if (ENCRYPTED_NAMES.some((name) => nameAt(bytes, at, name))) return 'encrypted';
     if (!embedded) embedded = EMBEDDED_FILE_NAMES.some((name) => nameAt(bytes, at, name));
   }
-  return embedded ? 'embedded_file' : null;
+  return embedded || zipStreamInside(bytes) ? 'embedded_file' : null;
 }

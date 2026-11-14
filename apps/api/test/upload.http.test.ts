@@ -246,6 +246,8 @@ describe('загрузка файла: предел, тип по содержи�
     for (const [file, code, reason] of [
       ['ole-native.docx', 'file_has_attachments', 'embedded_file'],
       ['ole-package-zip64.docx', 'file_has_attachments', 'embedded_file'],
+      // Поток с произвольным именем (Contents1), данные которого — архив ZIP.
+      ['ole-zip-stream.docx', 'file_has_attachments', 'embedded_file'],
       ['ole-encrypted.docx', 'file_encrypted', 'encrypted'],
     ] as const) {
       log.mockClear();
