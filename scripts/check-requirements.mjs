@@ -19,10 +19,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const DEFAULT_SPEC = 'docs/analyst/2026-11-11/specification-v1.3.md';
+export const DEFAULT_SPEC = 'docs/analyst/2026-11-13/specification-v1.4.md';
 export const BASELINE_FILE = 'scripts/requirements-baseline.json';
 
-// Префиксы разделов спецификации v1.3. При запуске скрипта префиксы берутся
+// Префиксы разделов текущей спецификации. При запуске скрипта префиксы берутся
 // из самой спецификации; этот список — значение по умолчанию для разбора текста.
 export const REQUIREMENT_PREFIXES = [
   'GEN',
@@ -42,6 +42,7 @@ export const REQUIREMENT_PREFIXES = [
   'MIG',
   'NFR',
   'ACC',
+  'LPS',
 ];
 
 // Где ищутся ссылки: отслеживаемые git файлы этих путей.
@@ -76,7 +77,7 @@ const TEST_FILE = /(^|\/)(test|tests|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$/;
 const RANGE_SEPARATORS = ['…', '...', '–'];
 
 const FIX_HINT =
-  'Что делать: замените ID на ID v1.3 по тексту спецификации; если файл переписывается на своём этапе — ' +
+  'Что делать: замените ID на ID текущей спецификации; если файл переписывается на своём этапе — ' +
   `перегенерируйте базовый список: node scripts/check-requirements.mjs --update-baseline (${BASELINE_FILE}).`;
 
 export function isInScope(path) {

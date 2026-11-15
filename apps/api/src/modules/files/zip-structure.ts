@@ -95,8 +95,9 @@ export type ZipStructureIssue =
   /** Записей в файле и всех вложенных в него пакетах вместе больше `MAX_ARCHIVE_ENTRIES`. */
   | 'entries_too_many'
   /**
-   * Часть CFB (объект OLE) с внедрённым файлом: в каталоге поток `\x01Ole10Native`, `Package` или `CONTENTS`
-   * (`cfbPartIssue`). Часть CFB с потоком `EncryptionInfo` или `EncryptedPackage` — `encrypted`.
+   * Часть CFB (объект OLE) с внедрённым файлом (`cfbPartIssue`): в каталоге поток `\x01Ole10Native` или `Package`
+   * либо поток под любым именем, который сам архив ZIP (правило по содержимому). Часть CFB с потоком
+   * `EncryptionInfo` или `EncryptedPackage` — `encrypted`.
    */
   | 'embedded_file';
 

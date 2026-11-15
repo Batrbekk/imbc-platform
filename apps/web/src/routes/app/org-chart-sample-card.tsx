@@ -228,9 +228,8 @@ function CurrentSample({ file, format }: { file: OrgChartSampleFile; format: App
 
 /**
  * Последняя загрузка, которая не стала текущей: на проверке («Проверяется антивирусом») или не прошла её
- * («Не прошёл проверку»). У отказа — причина, если сервер её назвал (DATA-07): «Файл защищён паролем: снимите
- * пароль…» — её видят и администратор, и директор; в тексте причины уже сказано, что делать, поэтому общее
- * «Загрузите другой» с ней не показывается. Отказ без причины (этап 2) — прежний общий текст. Область —
+ * («Не прошёл проверку»). У отказа — причина, если сервер её назвал (DATA-07): администратор получает подсказку,
+ * директор — общий отказ и короткую причину без призыва загрузить файл. Отказ без известной причины — общий текст. Область —
  * role=status: смена состояния читается программой чтения с экрана.
  */
 function LatestUpload({
@@ -243,7 +242,7 @@ function LatestUpload({
   canManage: boolean;
 }) {
   const t = useTranslations("references.sample");
-  const reasonText = useRejectionReasonMessage();
+  const reasonText = useRejectionReasonMessage(!canManage);
   const pending = file.scanState === "pending";
   const reason = pending ? null : reasonText(file.rejectionReason);
   return (
@@ -268,6 +267,7 @@ function LatestUpload({
           </>
         ) : reason ? (
           <>
+            {!canManage && <p>{t("rejectedPlain")}</p>}
             <p>{reason}</p>
             {hasCurrent && <p>{t("keptCurrent")}</p>}
           </>

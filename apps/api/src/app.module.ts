@@ -31,6 +31,7 @@ import { FilesController } from './modules/files/files.controller.js';
 import { FilesService } from './modules/files/files.service.js';
 import { OrgChartSampleController } from './modules/files/org-chart-sample.controller.js';
 import { OrgChartSampleService } from './modules/files/org-chart-sample.service.js';
+import { UPLOAD_SLOTS, UploadSlots } from './modules/files/upload-slots.js';
 import { HealthController } from './modules/health/health.controller.js';
 import { ProfilesController } from './modules/profiles/profiles.controller.js';
 import { ProfilesService } from './modules/profiles/profiles.service.js';
@@ -78,6 +79,12 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     DictionariesService,
     FilesService,
     OrgChartSampleService,
+    {
+      provide: UPLOAD_SLOTS,
+      inject: [ENV],
+      useFactory: (env: Env) =>
+        new UploadSlots({ process: env.UPLOAD_CONCURRENCY, account: env.UPLOAD_CONCURRENCY_PER_ACCOUNT }),
+    },
     MailService,
     AdataScheduler,
     IdentityProvisioningService,

@@ -1228,7 +1228,7 @@ describe("образец оргструктуры (ADM-11)", () => {
     }
   });
 
-  it("причина отказа видна и директору (загрузки нет); каждая причина — свой текст; отказ без причины (этап 2) — прежний общий текст", async () => {
+  it("директор видит короткую причину отказа без призыва загрузить файл; отказ без причины (этап 2) — прежний общий текст", async () => {
     for (const reason of FILE_REJECTION_REASONS) {
       stubBackend({
         me: DIRECTOR,
@@ -1237,8 +1237,9 @@ describe("образец оргструктуры (ADM-11)", () => {
       renderRoute("/references", { locale: "ru" });
       const t = ru.references.sample;
       const status = (await screen.findByText(t.rejected)).closest<HTMLElement>('[role="status"]')!;
-      expect(within(status).getByText(t.rejectionReason[reason]), reason).toBeTruthy();
-      expect(within(status).queryByText(t.rejectedPlain)).toBeNull();
+      expect(within(status).getByText(t.rejectionReasonShort[reason]), reason).toBeTruthy();
+      expect(within(status).getByText(t.rejectedPlain)).toBeTruthy();
+      expect(status.textContent).not.toMatch(/загрузите|загрузить/i);
       cleanup();
     }
     stubBackend({ sample: { current: null, latest: sampleFile("rejected", "Отказ.pdf") as never } });
@@ -1249,6 +1250,28 @@ describe("образец оргструктуры (ADM-11)", () => {
     for (const reason of FILE_REJECTION_REASONS)
       expect(within(status).queryByText(t.rejectionReason[reason])).toBeNull();
   });
+
+  it.each([ADMIN, DIRECTOR])(
+    "неизвестная причина из новой версии API показывает общий отказ без ключа перевода (DATA-07)",
+    async (me) => {
+      stubBackend({
+        me,
+        sample: {
+          current: null,
+          // Следующая версия API может назвать причину, которой клиент ещё не знает.
+          latest: { ...sampleFile("rejected", "Отказ.pdf"), rejectionReason: "new_scan_reason" } as never,
+        },
+      });
+      renderRoute("/references", { locale: "ru" });
+      const t = ru.references.sample;
+      const status = (await screen.findByText(t.rejected)).closest<HTMLElement>('[role="status"]')!;
+      expect(
+        within(status).getByText(me.user.role === "administrator" ? t.rejectedHint : t.rejectedPlain),
+      ).toBeTruthy();
+      expect(status.textContent).not.toContain("new_scan_reason");
+      expect(status.textContent).not.toContain("rejectionReason");
+    },
+  );
 
   it("413, 415 и прочие отказы загрузки — переведённые сообщения в карточке; следующая загрузка убирает прежнее", async () => {
     let reply: Response = problemResponse(413, "file_too_large");
@@ -1359,6 +1382,13 @@ describe("тексты ошибок и языки (LANG-01, LANG-02)", () => {
       }
     // Ключи причин не повисают.
     expect(Object.keys(en.references.sample.rejectionReason).sort()).toEqual([...FILE_REJECTION_REASONS].sort());
+    for (const messages of [en, ru, kk]) {
+      expect(Object.keys(messages.references.sample.rejectionReasonShort).sort()).toEqual(
+        [...FILE_REJECTION_REASONS].sort(),
+      );
+      for (const reason of FILE_REJECTION_REASONS)
+        expect(messages.references.sample.rejectionReasonShort[reason].trim()).not.toBe("");
+    }
     expect(en.references.sample.rejectionReason).toEqual({
       malware: "The antivirus found a threat in the file.",
       encrypted: "The file is password-protected: remove the password and upload it again.",

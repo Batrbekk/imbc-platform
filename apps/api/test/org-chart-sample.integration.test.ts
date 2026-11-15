@@ -298,6 +298,23 @@ describe.skipIf(!databaseUrl)(
       expect(workerScanHooks()).toEqual({ organisation_chart_sample: orgChartSamplePassed });
     });
 
+    it('PDF с ограничениями правки/печати — 415 file_encrypted до хранилища и записи образца, без имени в ответе', async () => {
+      const form = new FormData();
+      form.append(
+        'file',
+        new Blob([new Uint8Array(fixture('owner-password.pdf'))], { type: 'application/pdf' }),
+        'Секретный образец.pdf',
+      );
+      const res = await http.upload(ORG_CHART_SAMPLE_ROUTES.sample, 'administrator', form);
+      expect(res.status).toBe(415);
+      const text = await res.text();
+      expect(JSON.parse(text)).toMatchObject({ code: 'file_encrypted' });
+      expect(text).not.toContain('Секретный');
+      expect(await rows()).toEqual([]);
+      expect(storage.objects.size).toBe(0);
+      expect((await pool.query('select count(*)::int as n from file_object')).rows).toEqual([{ n: 0 }]);
+    });
+
     it('загрузка: file_object класса e_administration организации IMBC, строка org_chart_sample не текущая, 202 pending; аудит org_chart_sample.uploaded без имени файла (ADM-11)', async () => {
       const bytes = fixture('sample.pdf');
       const form = new FormData();
@@ -793,10 +810,11 @@ describe.skipIf(!databaseUrl)(
       expect(await samples.state()).toEqual({ current: null, latest: rejectedWith(infected, 'malware') });
     });
 
-    it('state: latest rejected несёт причину отказа (PDF под паролем — encrypted), сигнатуры в ответе нет; у current причина null; rejected без причины (этап 2, worker R1 в окне выката) — rejectionReason null (ADM-11, DATA-07, NFR-06)', async () => {
+    it('state: latest rejected несёт причину отказа (сигнатура шифрования — encrypted), сигнатуры в ответе нет; у current причина null; rejected без причины (этап 2, worker R1 в окне выката) — rejectionReason null (ADM-11, DATA-07, NFR-06)', async () => {
       const first = await upload('Бірінші.pdf');
       expect(await scanAs(first.fileId)).toBe('passed');
-      const locked = await upload('Құпиясөзбен.pdf');
+      // Обычный принятый PDF и подставленная сигнатура: отказ worker остаётся вторым уровнем проверки.
+      const locked = await upload('Тексерілетін.pdf');
       expect(await scanAs(locked.fileId, { clean: false, signature: 'Heuristics.Encrypted.PDF' })).toBe('rejected');
       const state = await samples.state();
       expect(state).toEqual({ current: passed(first), latest: rejectedWith(locked, 'encrypted') });

@@ -563,7 +563,13 @@
       "uploaded": "The sample has been uploaded and is being scanned.",
       "checkPassed": "The sample passed the scan and is now the current one.",
       "checkRejected": "The file failed the scan.",
-      "loadError": "Could not load the sample."
+      "loadError": "Could not load the sample.",
+      "rejectionReasonShort": {
+        "malware": "Reason: the antivirus found a threat.",
+        "encrypted": "Reason: the file is password-protected.",
+        "scan_limits": "Reason: the file is too complex to be checked.",
+        "unverifiable": "Reason: the file could not be checked."
+      }
     },
     "errors": {
       "validation": "Check the entered data and try again.",
@@ -586,12 +592,14 @@
       "file_type_not_allowed": "Allowed types: PDF, JPG, PNG, DOCX, XLSX.",
       "file_type_mismatch": "The file content does not match its extension.",
       "file_structure_unsupported": "The file could not be checked: save the document again in Word or Excel and upload it once more.",
-      "file_encrypted": "The document is password-protected. Remove the password and upload it again.",
+      "file_encrypted": "The document is protected with a password or editing restrictions. Remove the protection and upload it again.",
       "file_too_complex": "The file is too complex to be checked: it has too many embedded documents or parts. Save it without embedded objects or split it.",
       "file_has_attachments": "The file contains embedded or attached files that cannot be checked. Save it without them (a PDF can be printed to PDF again) and upload it again; upload those files separately.",
       "file_pending_scan": "The file is still being scanned. Try again in a moment.",
       "file_rejected": "The file failed the virus scan.",
-      "storage_unavailable": "File storage is unavailable. Try again in a few minutes."
+      "storage_unavailable": "File storage is unavailable. Try again in a few minutes.",
+      "upload_busy": "Too many files are being uploaded right now. Try again in a few seconds.",
+      "upload_parallel_limit": "Wait until your other uploads finish, then try again."
     }
   },
   "notFound": {

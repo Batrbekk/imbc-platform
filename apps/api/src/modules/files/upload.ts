@@ -4,6 +4,7 @@ import {
   type CallHandler,
   type ExecutionContext,
   HttpException,
+  Inject,
   Injectable,
   Logger,
   mixin,
@@ -12,12 +13,13 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
-import type { Request } from 'express';
-import type { Observable } from 'rxjs';
+import type { Request, Response } from 'express';
+import { finalize, type Observable } from 'rxjs';
 import { ProblemException } from '../../common/problem.js';
 import { isEncryptedOfficeDocument } from './cfb.js';
 import { detectMediaType } from './file-type.js';
 import { type PdfStructureIssue, pdfStructureIssue } from './pdf-structure.js';
+import { UPLOAD_SLOTS, UploadSlots } from './upload-slots.js';
 import { createInflateBudget, type ZipStructureIssue, zipStructureIssue } from './zip-structure.js';
 
 /** Длина имени файла в символах (кодовых точках), как её хранит `file_version.original_name`. */
@@ -40,7 +42,12 @@ const structureUnsupported = () =>
 const typeMismatch = () =>
   new ProblemException(415, 'file_type_mismatch', 'Расширение имени не соответствует содержимому файла');
 const fileEncrypted = () =>
-  new ProblemException(415, 'file_encrypted', 'Документ защищён паролем', 'Снимите пароль и загрузите документ снова');
+  new ProblemException(
+    415,
+    'file_encrypted',
+    'Документ защищён паролем или ограничениями',
+    'Документ защищён паролем или ограничениями (например, запретом правки или печати). Снимите защиту и загрузите документ снова',
+  );
 const tooComplex = () =>
   new ProblemException(
     415,
@@ -57,6 +64,15 @@ const hasAttachments = () =>
   );
 const malformedUpload = () =>
   new ProblemException(400, 'validation', 'Запрос с файлом не разобран', 'Ожидается один файл в поле file');
+const uploadBusy = () =>
+  new ProblemException(
+    503,
+    'upload_busy',
+    'Сейчас загружается слишком много файлов',
+    'Повторите через несколько секунд',
+  );
+const uploadParallelLimit = () =>
+  new ProblemException(429, 'upload_parallel_limit', 'Дождитесь завершения других загрузок и повторите');
 
 const logger = new Logger('FileUpload');
 
@@ -97,6 +113,9 @@ export function uploadFailure(error: unknown, clientAborted = false): Error {
  * не больше одного файла и четырёх полей. Ошибки multer — `uploadFailure`: problem+json без имени файла
  * (MulterError несёт его в `filename`, исходная ошибка не уходит ни в ответ, ни в журнал). Имя части заголовка
  * читается как UTF-8: иначе busboy читает его как latin1 и портит кириллицу.
+ * Общее место на процесс и аккаунт занимается до multer (NFR-09). Отмена во время чтения тела освобождает
+ * его; после чтения место держится до завершения обработчика, который может ещё удерживать файл в памяти,
+ * даже если клиент уже отключился. Лишний запрос получает 503/429 с Retry-After, его тело не читается.
  */
 export function uploadInterceptor(): Type<NestInterceptor> {
   const Multer = FileInterceptor('file', {
@@ -109,12 +128,43 @@ export function uploadInterceptor(): Type<NestInterceptor> {
   class UploadInterceptor implements NestInterceptor {
     private readonly multer = new Multer();
 
+    constructor(@Inject(UPLOAD_SLOTS) private readonly slots: UploadSlots) {}
+
     async intercept(context: ExecutionContext, next: CallHandler): Promise<Observable<unknown>> {
+      const http = context.switchToHttp();
+      const req = http.getRequest<Request>();
+      const res = http.getResponse<Response>();
+      const accountId = req.auth?.user.id;
+      // SessionGuard уже проверил сеанс; при ошибочном подключении к публичному маршруту тело тоже не читается.
+      if (!accountId) throw new ProblemException(401, 'unauthenticated', 'Требуется вход');
+      // Клиент мог уйти, пока SessionGuard ждал БД: событие close уже прошло, место занимать нельзя.
+      if (req.readableAborted || res.destroyed) throw malformedUpload();
+      const slot = this.slots.tryAcquire(accountId);
+      if (typeof slot === 'string') {
+        res.setHeader('Retry-After', '5');
+        throw slot === 'account_limit' ? uploadParallelLimit() : uploadBusy();
+      }
+      let parsing = true;
+      const release = () => {
+        req.off('aborted', onDisconnect);
+        req.off('error', onDisconnect);
+        res.off('close', onDisconnect);
+        slot.release();
+      };
+      const onDisconnect = () => {
+        if (parsing) release();
+      };
+      res.once('close', onDisconnect);
+      req.once('aborted', onDisconnect);
+      req.once('error', onDisconnect);
       try {
         // Ошибки самого маршрута идут через Observable и сюда не попадают.
-        return await this.multer.intercept(context, next);
+        const handled = await this.multer.intercept(context, next);
+        parsing = false;
+        return handled.pipe(finalize(release));
       } catch (error) {
-        throw uploadFailure(error, context.switchToHttp().getRequest<Request>().readableAborted === true);
+        release();
+        throw uploadFailure(error, Boolean(req.readableAborted));
       }
     }
   }
@@ -188,6 +238,7 @@ const TOO_COMPLEX: ReadonlySet<ZipStructureIssue> = new Set<ZipStructureIssue>([
 ]);
 
 const PDF_REFUSALS: Record<PdfStructureIssue, InspectRefusal> = {
+  encrypted: 'file_encrypted',
   attachments: 'file_has_attachments',
   inflate_limit: 'file_too_complex',
 };
@@ -209,8 +260,9 @@ const refusalFor = (issue: ZipStructureIssue): InspectRefusal =>
  * структура ZIP с новым бюджетом на файл (`zipStructureIssue`): шифрование записей или внедрённый документ под
  * паролем — `file_encrypted`, объект OLE с внедрённым файлом — `file_has_attachments`, пределы вложенных пакетов —
  * `file_too_complex`, прочее — `file_structure_unsupported`; PDF — вложения с новым бюджетом на файл
- * (`pdfStructureIssue`): вложенные файлы — `file_has_attachments`, потоки объектов сверх бюджета — `file_too_complex`.
- * PDF под паролем на открытие здесь принимается: его отклоняет ClamAV (`AlertEncryptedDoc`, причина `encrypted`).
+ * (`pdfStructureIssue`): любое шифрование, включая ограничения правки и печати без пароля на открытие, —
+ * `file_encrypted`; вложенные файлы — `file_has_attachments`, потоки объектов сверх бюджета — `file_too_complex`.
+ * ClamAV (`AlertEncryptedDoc`, причина `encrypted`) остаётся вторым уровнем проверки.
  * `originalName` — для расширения.
  */
 export async function inspectFile(bytes: Buffer, originalName: string): Promise<InspectResult> {
@@ -256,7 +308,7 @@ const cleanDeclaredType = (value: string | undefined) =>
 /**
  * Проверка загруженного файла до хранилища и БД (DATA-06): нет файла — 400 `file_missing`; 0 байт — 400
  * `file_empty`; больше 25 МБ — 413 `file_too_large`; содержимое (`inspectFile`) — 415 с кодом отказа: тип не из
- * пяти допустимых, расширение не по типу, DOCX или XLSX под паролем (`file_encrypted`), со структурой ZIP, которую
+ * пяти допустимых, расширение не по типу, DOCX или XLSX под паролем либо PDF с защитой (`file_encrypted`), со структурой ZIP, которую
  * антивирус проверил бы не целиком (`file_structure_unsupported`), со вложенными пакетами или потоками объектов PDF
  * сверх пределов (`file_too_complex`), с внедрённым файлом в объекте OLE или PDF с вложениями
  * (`file_has_attachments`) (DATA-07). Причина структуры — строка журнала `{ reason }` (`File upload: ZIP structure

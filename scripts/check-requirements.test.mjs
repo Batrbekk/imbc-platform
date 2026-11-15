@@ -9,6 +9,7 @@ import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+  DEFAULT_SPEC,
   checkMap,
   checkReferences,
   collectReferences,
@@ -23,6 +24,7 @@ import {
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const script = join(root, 'scripts/check-requirements.mjs');
 const spec = readFileSync(join(root, 'docs/analyst/2026-11-11/specification-v1.3.md'), 'utf8');
+const currentSpec = readFileSync(join(root, DEFAULT_SPEC), 'utf8');
 const ids = (text) => expandReferences(text).map((ref) => ref.id);
 
 const tempDirs = [];
@@ -69,6 +71,31 @@ test('в спецификации v1.3 ровно 272 требования', () 
     NFR: 15,
     ACC: 5,
   });
+});
+
+test('текущая спецификация v1.4 содержит 288 уникальных требований, включая LPS и новые критерии приёмки', () => {
+  const currentIds = parseSpecIds(currentSpec);
+  assert.equal(currentIds.length, 288);
+  assert.equal(new Set(currentIds).size, 288);
+  const previous = new Set(parseSpecIds(spec));
+  assert.deepEqual(currentIds.filter((id) => !previous.has(id)).sort(), [
+    'ACC-06',
+    'ACC-07',
+    'LPS-01',
+    'LPS-02',
+    'LPS-03',
+    'LPS-04',
+    'LPS-05',
+    'LPS-06',
+    'LPS-07',
+    'LPS-08',
+    'MIG-16',
+    'OPR-39',
+    'OPR-40',
+    'OPR-41',
+    'OPR-42',
+    'OPR-43',
+  ]);
 });
 
 test('требования в строках таблицы тоже считаются, упоминания в тексте — нет', () => {
@@ -406,7 +433,7 @@ test('скрипт: код возврата 1 на несуществующем 
 test('скрипт: из подкаталога — тот же корень, те же ошибки', () => {
   const dir = tempRepo(
     {
-      'docs/analyst/2026-11-11/specification-v1.3.md': '- **GEN-01.** Первое.\n',
+      [DEFAULT_SPEC]: '- **GEN-01.** Первое.\n',
       'apps/api/src/a.ts': '// GEN-01\n// GEN-99\n',
     },
     ['docs', 'apps'],

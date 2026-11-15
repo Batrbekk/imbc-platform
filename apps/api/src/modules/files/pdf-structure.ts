@@ -2,33 +2,40 @@ import { constants as zlib, inflateRawSync } from 'node:zlib';
 import type { InflateBudget } from './zip-structure.js';
 
 /**
- * Вложения PDF до хранилища (DATA-06, DATA-07; расхождение 5 плана этапа 3а). Файл, вложенный в PDF, антивирус может
- * не проверить: архив с ZIP64 во вложении clamd 1.4 признаёт чистым. Поэтому PDF с вложениями не принимается — по
- * именам PDF (ISO 32000-1, 7.3.5: `/` и обычные символы до пробельного или разделителя, коды `#xx` раскрываются)
- * `EmbeddedFile`, `EmbeddedFiles` (дерево вложений документа) и `FileAttachment` (вложение в пометке страницы):
+ * Зашифрованные PDF и вложения PDF до хранилища (DATA-06, DATA-07; расхождения 4 и 5 плана этапа 3а), по именам PDF
+ * (ISO 32000-1, 7.3.5: `/` и обычные символы до пробельного или разделителя, коды `#xx` раскрываются).
  *
- * - в байтах файла — где угодно, в том числе в несжатых данных потоков;
- * - если в файле нет имени `Encrypt`, — ещё и в распакованных потоках объектов: словарь потока содержит
- *   `/Type /ObjStm` и единственный фильтр `/FlateDecode` (так Acrobat и другие писатели PDF 1.5+ сжимают каталог
- *   и дерево имён). Распаковка — с пределом вывода из бюджета файла; превышение — `inflate_limit`.
+ * - **Зашифрованный PDF — отказ** (`encrypted`, проверка первой): имя `Encrypt` в байтах файла, где угодно. Внутри
+ *   зашифрованного PDF антивирус видит не всё даже без пароля на открытие: clamd 1.4.6 считает PDF с паролем только
+ *   владельца расшифровываемым, но поток без `/Filter` перед проверкой не расшифровывает (`pdf_decodestream: no
+ *   non-forced filters decoded, returning raw stream`) — вложение с EICAR без фильтра в таком PDF дало «OK». Потоки
+ *   объектов зашифрованного PDF не читает и платформа. Правило намеренно широкое: имя в комментарии, строке или чужом
+ *   словаре тоже даёт отказ — ложный отказ безопаснее пропуска; пользователю — «снимите защиту».
+ * - **Вложения — отказ** (`attachments`): имена `EmbeddedFile`, `EmbeddedFiles` (дерево вложений документа) и
+ *   `FileAttachment` (вложение в пометке страницы) в байтах файла — где угодно, в том числе в несжатых данных потоков, —
+ *   и в распакованных потоках объектов: словарь потока содержит `/Type /ObjStm` и единственный фильтр `/FlateDecode`
+ *   (так Acrobat и другие писатели PDF 1.5+ сжимают каталог и дерево имён). Файл, вложенный в PDF, антивирус может не
+ *   проверить: архив с ZIP64 во вложении clamd 1.4 признаёт чистым. Распаковка — с пределом вывода из бюджета файла;
+ *   превышение — `inflate_limit`.
  *
  * Пределы проверки. Это гигиеническое правило, а не граница безопасности и не разбор PDF: вложение, спрятанное в
- * потоке объектов без `/Type /ObjStm`, под фильтром не `FlateDecode` (или с цепочкой фильтров) или в зашифрованном
- * PDF, платформа не увидит — в зашифрованном PDF потоки объектов не читаются, вложения там проверяет только ClamAV
- * (он расшифровывает PDF с пустым паролем пользователя, а документ под паролем на открытие отклоняет:
- * `AlertEncryptedDoc`). Подтверждённый класс обхода — ZIP64 во вложении — закрывает своя сигнатура clamd
- * (`infrastructure/clamav/imbc.ndb`). Словарь потока ищется по `<< … >>` прямо перед ключевым словом `stream`, данные —
- * до `endstream` (нет — до конца файла): нестандартно записанный файл может пройти мимо правила.
+ * потоке объектов без `/Type /ObjStm` или под фильтром не `FlateDecode` (или с цепочкой фильтров), платформа не увидит.
+ * Подтверждённый класс обхода — ZIP64 во вложении — закрывает своя сигнатура clamd (`infrastructure/clamav/imbc.ndb`),
+ * документ под паролем, который проверка по именам пропустила, отклоняет clamd (`AlertEncryptedDoc`). Словарь потока
+ * ищется по `<< … >>` прямо перед ключевым словом `stream`, данные — до `endstream` (нет — до конца файла), синтаксис
+ * вне словарей не разбирается: нестандартно записанный файл может пройти мимо правила. Например, комментарий
+ * `%<<>>stream` перед потоком объектов читается как начало потока до следующего `endstream` и «проглатывает» сам поток
+ * объектов — проверка возвращает null.
  *
  * Время и память ограничены на любом файле до 25 МБ (NFR-09): байты файла просматриваются за линейное время, данные
  * потоков объектов распаковываются один раз и вместе не больше остатка бюджета (`remainingBytes`), потоков объектов —
  * не больше `MAX_OBJECT_STREAMS`. Поток, который не распаковывается, пропускается: с неверным заголовком zlib — сразу,
- * с испорченными данными deflate — списав весь остаток бюджета (сколько он успел распаковать до ошибки, не узнать),
- * так что следующий поток объектов того же файла — уже `inflate_limit`.
+ * с испорченными данными deflate — списав с бюджета верхнюю границу его вывода (сколько он успел распаковать до
+ * ошибки, синхронный zlib не сообщает): `1032 × длина сжатых данных + 258`, но не больше остатка.
  */
 
-/** Почему PDF не принят: вложенные файлы или распакованные потоки объектов сверх бюджета. */
-export type PdfStructureIssue = 'attachments' | 'inflate_limit';
+/** Почему PDF не принят: зашифрован, вложенные файлы или распакованные потоки объектов сверх бюджета. */
+export type PdfStructureIssue = 'encrypted' | 'attachments' | 'inflate_limit';
 
 /**
  * Потоков объектов (`/Type /ObjStm` с `FlateDecode`) на файл; больше — `inflate_limit`. Писатели кладут в поток по
@@ -58,7 +65,7 @@ const TYPE = 4;
 const OBJSTM = 5;
 const FILTER = 6;
 const FLATE_DECODE = 7;
-/** Коды, которые ищутся в байтах файла и в потоках объектов: вложения и `Encrypt`. */
+/** Коды, которые ищутся в байтах файла и в потоках объектов: `Encrypt` и вложения. */
 const FILE_NAMES = [EMBEDDED_FILE, EMBEDDED_FILES, FILE_ATTACHMENT, ENCRYPT] as const;
 /** Коды, которые нужны в словаре потока. */
 const DICT_NAMES = [TYPE, OBJSTM, FILTER, FLATE_DECODE] as const;
@@ -156,11 +163,12 @@ function nameCode(bytes: Buffer, from: number, to: number, hash: boolean, codes:
 }
 
 /**
- * Имена вложений и `Encrypt` в байтах. Сравниваются только имена, начатые с `E`, `F` или `#`; просмотр идёт от имени
- * к концу имени — каждый байт один раз.
+ * Имена `Encrypt` и вложений в байтах: `encrypted` главнее — при нём просмотр сразу кончается, а найденное вложение
+ * просмотр не прерывает. Сравниваются только имена, начатые с `E`, `F` или `#`; просмотр идёт от имени к концу имени —
+ * каждый байт один раз.
  */
-function scanNames(bytes: Buffer): { attachments: boolean; encrypt: boolean } {
-  let encrypt = false;
+function scanNames(bytes: Buffer, checkEncryption = true): 'encrypted' | 'attachments' | null {
+  let attachments = false;
   const end = bytes.length;
   for (let i = 0; i < end; i++) {
     if (bytes[i] !== SLASH) continue;
@@ -168,12 +176,13 @@ function scanNames(bytes: Buffer): { attachments: boolean; encrypt: boolean } {
     const first = bytes[i + 1];
     if (first === UPPER_E || first === UPPER_F || first === HASH) {
       const code = nameCode(bytes, i + 1, to, hash, FILE_NAMES);
-      if (code === ENCRYPT) encrypt = true;
-      else if (code !== -1) return { attachments: true, encrypt };
+      if (code === ENCRYPT) {
+        if (checkEncryption) return 'encrypted';
+      } else if (code !== -1) attachments = true;
     }
     i = to - 1;
   }
-  return { attachments: false, encrypt };
+  return attachments ? 'attachments' : null;
 }
 
 /** Поток файла: словарь `[dictStart, dictEnd)` (от `<<` до `>>` включительно) и данные `[dataStart, dataEnd)`. */
@@ -334,6 +343,10 @@ function zlibHeader(bytes: Buffer, at: number, end: number): boolean {
   return (cmf & 0x0f) === 8 && cmf >> 4 <= 7 && ((cmf << 8) | flg) % 31 === 0 && (flg & 0x20) === 0;
 }
 
+/** Верхняя граница вывода deflate: 1032 байта на байт сжатых данных (предел сжатия zlib) и одно совпадение 258 байт. */
+const MAX_DEFLATE_RATIO = 1032;
+const MAX_DEFLATE_MATCH = 258;
+
 /** Предел вывода `maxOutputLength` превышен (`ERR_BUFFER_TOO_LARGE`). */
 const isOutputLimit = (error: unknown) =>
   error instanceof RangeError && (error as { code?: unknown }).code === 'ERR_BUFFER_TOO_LARGE';
@@ -342,7 +355,7 @@ const isOutputLimit = (error: unknown) =>
  * Данные потока объектов, распакованные с пределом вывода — остатком бюджета, который уменьшается на распакованное.
  * Данные deflate идут за двухбайтовым заголовком zlib; контрольная сумма Adler-32 не проверяется, оборванный поток
  * даёт распакованное начало (`Z_SYNC_FLUSH`) — как читают PDF Acrobat и pdf.js. Остатка нет или вывод больше него —
- * `inflate_limit`; заголовок не zlib — null; данные испорчены — null и весь остаток бюджета списан.
+ * `inflate_limit`; заголовок не zlib — null; данные испорчены — null и списана верхняя граница вывода.
  */
 function inflateObjectStream(bytes: Buffer, part: StreamPart, budget: InflateBudget): Buffer | 'inflate_limit' | null {
   if (budget.remainingBytes < 1) return 'inflate_limit';
@@ -356,29 +369,31 @@ function inflateObjectStream(bytes: Buffer, part: StreamPart, budget: InflateBud
     return data;
   } catch (error) {
     if (isOutputLimit(error)) return 'inflate_limit';
-    // Сколько распаковано до ошибки, синхронный zlib не сообщает: иначе файл из многих таких потоков распаковывал бы
-    // по остатку бюджета на каждый.
-    budget.remainingBytes = 0;
+    // Сколько распаковано до ошибки, синхронный zlib не сообщает: списывается верхняя граница вывода deflate — иначе
+    // файл из многих таких потоков распаковывал бы по остатку бюджета на каждый.
+    const compressed = part.dataEnd - part.dataStart - 2;
+    budget.remainingBytes -= Math.min(budget.remainingBytes, MAX_DEFLATE_RATIO * compressed + MAX_DEFLATE_MATCH);
     return null;
   }
 }
 
 /**
- * Вложения PDF (DATA-06, DATA-07): имя вложения в байтах файла или, если в файле нет имени `Encrypt`, в распакованном
- * потоке объектов — `attachments`; распакованные потоки объектов сверх остатка `budget.remainingBytes` или больше
- * `MAX_OBJECT_STREAMS` потоков — `inflate_limit`; иначе null. Бюджет — на файл (`createInflateBudget`), уменьшается.
+ * Зашифрованный PDF и вложения (DATA-06, DATA-07): имя `Encrypt` в байтах файла — `encrypted` (первым); имя вложения в
+ * байтах файла или в распакованном потоке объектов — `attachments`; распакованные потоки объектов сверх остатка
+ * `budget.remainingBytes` или больше `MAX_OBJECT_STREAMS` потоков — `inflate_limit`; иначе null. Бюджет — на файл
+ * (`createInflateBudget`), уменьшается.
  */
 export function pdfStructureIssue(bytes: Buffer, budget: InflateBudget): PdfStructureIssue | null {
-  const names = scanNames(bytes);
-  if (names.attachments) return 'attachments';
-  if (names.encrypt) return null;
+  const named = scanNames(bytes);
+  if (named) return named;
   let objectStreams = 0;
   for (const part of streams(bytes)) {
     if (!isFlateObjectStream(bytes, part.dictStart, part.dictEnd)) continue;
     if (++objectStreams > MAX_OBJECT_STREAMS) return 'inflate_limit';
     const data = inflateObjectStream(bytes, part, budget);
     if (data === 'inflate_limit') return data;
-    if (data && scanNames(data).attachments) return 'attachments';
+    // В распакованном потоке объектов ищутся только вложения: словарь шифрования в поток объектов не кладут.
+    if (data && scanNames(data, false) === 'attachments') return 'attachments';
   }
   return null;
 }

@@ -40,8 +40,20 @@ const streamObject = (
 const objStm = (num: number, content: string, options?: Parameters<typeof streamObject>[2]) =>
   streamObject(num, deflateSync(latin1(content)), options);
 
+describe('pdfStructureIssue: имена в распакованном потоке объектов (DATA-06, DATA-07)', () => {
+  it('упоминание Encrypt в сжатой строке без вложений не становится причиной attachments', () => {
+    const content = '1 0 << /Title (Using /Encrypt in PDFs) >>';
+    expect(issue(pdf(objStm(5, content)))).toBeNull();
+  });
+
+  it('упоминание Encrypt в сжатой строке не скрывает вложение в том же потоке', () => {
+    const content = '1 0 << /Title (Using /Encrypt in PDFs) /Names << /EmbeddedFiles 3 0 R >> >>';
+    expect(issue(pdf(objStm(5, content)))).toBe('attachments');
+  });
+});
+
 describe('pdfStructureIssue: фикстуры (DATA-06, DATA-07)', () => {
-  it('sample.pdf — null; attachment.pdf, attachment-objstm.pdf, attachment-escaped.pdf, attachment-annotation.pdf — attachments; owner-password.pdf — null (потоки зашифрованного PDF не читаются, вложений в несжатой части нет)', () => {
+  it('sample.pdf — null; PDF с вложениями — attachments; owner-password.pdf — encrypted, даже без пароля на открытие', () => {
     expect(issue(fixture('sample.pdf'))).toBeNull();
     for (const name of [
       'attachment.pdf',
@@ -50,7 +62,7 @@ describe('pdfStructureIssue: фикстуры (DATA-06, DATA-07)', () => {
       'attachment-annotation.pdf',
     ])
       expect(issue(fixture(name)), name).toBe<PdfStructureIssue>('attachments');
-    expect(issue(fixture('owner-password.pdf'))).toBeNull();
+    expect(issue(fixture('owner-password.pdf'))).toBe('encrypted');
   });
 
   it('attachment-objstm.pdf: имя вложения есть только в распакованном потоке объектов; распакованное списано с бюджета', () => {
@@ -187,15 +199,26 @@ describe('pdfStructureIssue: потоки объектов /Type /ObjStm с Flat
     expect(budget.remainingBytes).toBe(MAX_INFLATED_BYTES - CATALOG.length);
   });
 
-  it('поток с испорченными данными deflate — пропускается, но списывает весь остаток бюджета: следующий поток объектов — inflate_limit (NFR-09)', () => {
+  it('маленький испорченный deflate не исчерпывает бюджет: вложение в следующем потоке объектов обнаруживается (NFR-09)', () => {
     // Заголовок zlib верный, затем блок с недопустимым типом 11.
     const corrupt = Buffer.from([0x78, 0x9c, 0x07, 0xff, 0xff]);
     const alone = createInflateBudget();
     expect(issue(pdf(streamObject(5, corrupt)), alone)).toBeNull();
-    expect(alone.remainingBytes).toBe(0);
-    expect(issue(pdf(streamObject(5, corrupt), objStm(6, CATALOG)))).toBe('inflate_limit');
+    expect(alone.remainingBytes).toBeLessThan(MAX_INFLATED_BYTES);
+    expect(alone.remainingBytes).toBeGreaterThan(MAX_INFLATED_BYTES - 8192);
+    expect(issue(pdf(streamObject(5, corrupt), objStm(6, CATALOG_WITH_FILES)))).toBe('attachments');
+    expect(issue(pdf(streamObject(5, corrupt), objStm(6, CATALOG)))).toBeNull();
     // Имя вложения в несжатой части проверяется раньше потоков.
     expect(issue(pdf(streamObject(5, corrupt), '\n/EmbeddedFiles\n', objStm(6, CATALOG)))).toBe('attachments');
+  });
+
+  it('большой испорченный deflate исчерпывает бюджет по границе возможного вывода: следующий поток — inflate_limit (NFR-09)', () => {
+    const corrupt = Buffer.alloc(128 * 1024, 0xff);
+    corrupt.set([0x78, 0x9c, 0x07]);
+    const alone = createInflateBudget();
+    expect(issue(pdf(streamObject(5, corrupt)), alone)).toBeNull();
+    expect(alone.remainingBytes).toBe(0);
+    expect(issue(pdf(streamObject(5, corrupt), objStm(6, CATALOG_WITH_FILES)))).toBe('inflate_limit');
   });
 });
 
@@ -237,12 +260,22 @@ describe('pdfStructureIssue: бюджет распаковки (DATA-07, NFR-09)
   });
 });
 
-describe('pdfStructureIssue: зашифрованный PDF — потоки объектов не читаются (расхождение 5)', () => {
-  it('в файле есть имя Encrypt — несжатая часть проверяется, потоки объектов нет (их проверяет ClamAV)', () => {
+describe('pdfStructureIssue: любой зашифрованный PDF отклоняется до распаковки (DATA-07)', () => {
+  it('Encrypt в trailer или XRef и экранированное имя — encrypted; шифрование главнее вложений и бюджета', () => {
     const trailer = 'trailer\n<< /Size 9 /Root 1 0 R /Encrypt 8 0 R >>';
-    expect(issue(pdf(objStm(5, CATALOG_WITH_FILES), trailer))).toBeNull();
-    expect(issue(pdf(objStm(5, CATALOG_WITH_FILES), '<< /Encr#79pt 8 0 R >>'))).toBeNull();
-    expect(issue(pdf(objStm(5, CATALOG), trailer, '/EmbeddedFiles'))).toBe('attachments');
+    const budget = { ...createInflateBudget(), remainingBytes: 0 };
+    expect(issue(pdf(objStm(5, CATALOG_WITH_FILES), trailer), budget)).toBe('encrypted');
+    expect(budget.remainingBytes).toBe(0);
+    expect(issue(pdf(streamObject(9, Buffer.from([0]), { dict: '<< /Type /XRef /Encrypt 8 0 R >>' })))).toBe(
+      'encrypted',
+    );
+    expect(issue(pdf(objStm(5, CATALOG_WITH_FILES), '<< /Enc#72ypt 8 0 R >>'))).toBe('encrypted');
+    expect(issue(pdf(objStm(5, CATALOG), '/EmbeddedFiles', trailer))).toBe('encrypted');
+  });
+
+  it('имя Encrypt в комментарии или строке тоже вызывает консервативный отказ; похожее имя не совпадает', () => {
+    expect(issue(pdf('% /Encrypt is a comment\n'))).toBe('encrypted');
+    expect(issue(pdf('<< /Title (mentions /Encrypt) >>'))).toBe('encrypted');
     // Похожее имя — не Encrypt.
     expect(issue(pdf(objStm(5, CATALOG_WITH_FILES), '<< /EncryptMetadata false >>'))).toBe('attachments');
   });

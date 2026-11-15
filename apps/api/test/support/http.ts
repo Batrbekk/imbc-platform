@@ -12,6 +12,7 @@ import { ENV } from '../../src/config/env.js';
 import type { AuthContext } from '../../src/modules/auth/auth.types.js';
 import { SessionGuard } from '../../src/modules/auth/guards.js';
 import { SessionService } from '../../src/modules/auth/session.service.js';
+import { UPLOAD_SLOTS, UploadSlots } from '../../src/modules/files/upload-slots.js';
 import { ORGANIZATION_TYPE } from './organization-type.js';
 
 const COOKIE = 'imbc-session';
@@ -47,6 +48,8 @@ export async function startHttp(options: {
   providers?: Provider[];
   /** Организация пользователя сеанса; по умолчанию одна на все роли. */
   organizationId?: string;
+  /** Разные аккаунты для сценария параллельных загрузок; остальные роли используют прежний общий UUID. */
+  accountIds?: Partial<Record<Role, string>>;
 }): Promise<HttpStand> {
   const audit = { record: vi.fn().mockResolvedValue(undefined) };
   const organizationId = options.organizationId ?? '00000000-0000-4000-8000-0000000000aa';
@@ -59,7 +62,7 @@ export async function startHttp(options: {
       mfaPassed: true,
       responsibilityAccepted: true,
       user: {
-        id: '00000000-0000-4000-8000-0000000000a2',
+        id: options.accountIds?.[role] ?? '00000000-0000-4000-8000-0000000000a2',
         email: `${role}@test.local`,
         fullName: null,
         role,
@@ -74,6 +77,7 @@ export async function startHttp(options: {
   Module({
     controllers: options.controllers,
     providers: [
+      { provide: UPLOAD_SLOTS, useValue: new UploadSlots({ process: 4, account: 2 }) },
       ...(options.providers ?? []),
       { provide: SessionService, useValue: { resolve } },
       { provide: AuditService, useValue: audit },

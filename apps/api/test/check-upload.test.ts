@@ -47,8 +47,8 @@ describe('check-upload: проверка каталога файлов', () => {
         'ole-native.docx\tfile_has_attachments\tembedded_file',
         'ole-package-zip64.docx\tfile_has_attachments\tembedded_file',
         'ole-zip-stream.docx\tfile_has_attachments\tembedded_file',
-        // Пароль только на права: открывается без пароля, проверка вложений — у ClamAV (расхождение 5).
-        'owner-password.pdf\taccepted\t-',
+        // Защита правки/печати тоже шифрует PDF: отказ до хранилища, даже без пароля на открытие.
+        'owner-password.pdf\tfile_encrypted\tencrypted',
         'plain.zip\tfile_type_not_allowed\t-',
         'program.exe\tfile_type_not_allowed\t-',
         'sample-deflated.docx\taccepted\t-',

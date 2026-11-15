@@ -87,6 +87,10 @@ const envSchema = z
     CLAMAV_HOST: z.string().default('clamav'),
     CLAMAV_PORT: z.coerce.number().int().default(3310),
 
+    /** Места занимаются до чтения файла в память: максимум 25 МБ на загрузку (DATA-06, NFR-09). */
+    UPLOAD_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(4),
+    UPLOAD_CONCURRENCY_PER_ACCOUNT: z.coerce.number().int().min(1).max(8).default(2),
+
     SMTP_URL: z.string().default('smtp://mailpit:1025'),
     MAIL_FROM: z.string().default('IMBC Platform <no-reply@imbc.local>'),
 

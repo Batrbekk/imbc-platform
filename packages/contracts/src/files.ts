@@ -175,6 +175,8 @@ export type OrgChartSampleCurrent = z.infer<typeof orgChartSampleCurrentSchema>;
  * `file_encrypted` — документ под паролем на открытие: антивирус не видит содержимого, «снимите пароль».
  * `file_too_complex` — файл слишком сложен для проверки: вложенных документов или частей больше пределов на файл.
  * `file_has_attachments` — в документе внедрённые файлы (объект OLE с файлом; PDF с вложениями): проверить их нельзя.
+ * `upload_busy` — заняты все места процесса (503); `upload_parallel_limit` — места аккаунта (429),
+ * оба отказа до чтения тела с `Retry-After: 5` (DATA-06, NFR-09).
  */
 export const FILE_PROBLEM_CODES = [
   'validation',
@@ -193,6 +195,8 @@ export const FILE_PROBLEM_CODES = [
   'file_encrypted',
   'file_too_complex',
   'file_has_attachments',
+  'upload_busy',
+  'upload_parallel_limit',
   'file_pending_scan',
   'file_rejected',
   'storage_unavailable',

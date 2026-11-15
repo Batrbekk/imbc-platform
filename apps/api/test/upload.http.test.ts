@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
+import { request } from 'node:http';
 import { inspect } from 'node:util';
 import { deflateSync } from 'node:zlib';
 import { FILE_PROBLEM_CODES, MAX_FILE_BYTES } from '@imbc/contracts';
@@ -9,20 +10,23 @@ import {
   Controller,
   type ExecutionContext,
   HttpCode,
+  Inject,
   Injectable,
   Logger,
   type NestInterceptor,
   PayloadTooLargeException,
   Post,
+  Res,
   UnsupportedMediaTypeException,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { MulterError } from 'multer';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ProblemException } from '../src/common/problem.js';
 import { acceptUpload, uploadFailure, uploadInterceptor } from '../src/modules/files/upload.js';
+import { UPLOAD_SLOTS, UploadSlots } from '../src/modules/files/upload-slots.js';
 import { MAX_INFLATED_BYTES } from '../src/modules/files/zip-structure.js';
 import { type HttpStand, startHttp } from './support/http.js';
 
@@ -67,6 +71,30 @@ class UploadTestController {
   async broken(@UploadedFile() file: Express.Multer.File | undefined) {
     await acceptUpload(file);
     return {};
+  }
+}
+
+const UPLOAD_REPLY_GATE = Symbol('UPLOAD_REPLY_GATE');
+interface UploadReplyGate {
+  entered(): void;
+  closed?(): void;
+  pending: Promise<void>;
+}
+
+/** Тело уже прочитано, но запись файла или другой обработчик ещё не завершился. */
+@Controller('test')
+class DelayedUploadTestController {
+  constructor(@Inject(UPLOAD_REPLY_GATE) private readonly gate: UploadReplyGate) {}
+
+  @Post('upload-held-reply')
+  @HttpCode(200)
+  @UseInterceptors(uploadInterceptor())
+  async upload(@UploadedFile() file: Express.Multer.File | undefined, @Res({ passthrough: true }) res: Response) {
+    res.once('close', () => this.gate.closed?.());
+    this.gate.entered();
+    await this.gate.pending;
+    const accepted = await acceptUpload(file);
+    return { byteSize: accepted.bytes.length };
   }
 }
 
@@ -263,7 +291,7 @@ describe('загрузка файла: предел, тип по содержи�
     expect(await upload(form(['file', fixture('ole-equation.docx'), 'Формула.docx']))).toMatchObject({ status: 200 });
   });
 
-  it('PDF с вложением — 415 file_has_attachments; поток объектов больше бюджета распаковки — 415 file_too_complex; в журнале причина без имени файла; PDF под паролем прав и обычный — 200 (DATA-06, DATA-07)', async () => {
+  it('PDF с защитой — 415 file_encrypted; с вложением — 415 file_has_attachments; поток объектов больше бюджета — 415 file_too_complex; в журнале причина без имени файла; обычный PDF — 200 (DATA-06, DATA-07)', async () => {
     const log = vi.spyOn(Logger.prototype, 'log');
     // Поток объектов, который распаковывается больше чем в 64 МиБ.
     const oversized = Buffer.concat([
@@ -272,6 +300,7 @@ describe('загрузка файла: предел, тип по содержи�
       Buffer.from('\nendstream\nendobj\n%%EOF\n'),
     ]);
     for (const [label, bytes, code, reason] of [
+      ['owner-password.pdf', fixture('owner-password.pdf'), 'file_encrypted', 'encrypted'],
       ['attachment.pdf', fixture('attachment.pdf'), 'file_has_attachments', 'attachments'],
       ['attachment-annotation.pdf', fixture('attachment-annotation.pdf'), 'file_has_attachments', 'attachments'],
       ['attachment-escaped.pdf', fixture('attachment-escaped.pdf'), 'file_has_attachments', 'attachments'],
@@ -281,17 +310,21 @@ describe('загрузка файла: предел, тип по содержи�
       log.mockClear();
       const res = await upload(form(['file', bytes, 'Секретный план.pdf', 'application/pdf']));
       expect(res, label).toMatchObject({ status: 415, body: { status: 415, code } });
+      if (code === 'file_encrypted')
+        expect(res.body).toMatchObject({
+          title: 'Документ защищён паролем или ограничениями',
+          detail: expect.stringContaining('запретом правки или печати'),
+        });
       expect(JSON.stringify(res.body)).not.toContain('Секретный');
       expect(log).toHaveBeenCalledWith({ reason }, 'File upload: PDF not accepted');
       expect(log).not.toHaveBeenCalledWith(expect.anything(), 'File upload: ZIP structure not accepted');
       expect(inspect(log.mock.calls, { depth: 10 })).not.toContain('Секретный');
     }
     log.mockClear();
-    for (const name of ['owner-password.pdf', 'sample.pdf'])
-      expect(await upload(form(['file', fixture(name), name])), name).toMatchObject({
-        status: 200,
-        body: { mediaType: 'application/pdf' },
-      });
+    expect(await upload(form(['file', fixture('sample.pdf'), 'sample.pdf']))).toMatchObject({
+      status: 200,
+      body: { mediaType: 'application/pdf' },
+    });
     expect(log).not.toHaveBeenCalledWith(expect.anything(), 'File upload: PDF not accepted');
     log.mockRestore();
   });
@@ -374,6 +407,278 @@ describe('uploadFailure: ошибка клиента — 413/400 без журн
     uploadFailure('строка');
     expect(log).toHaveBeenLastCalledWith({ code: undefined, name: 'string' }, 'File upload: multipart parsing failed');
     expect(inspect(log.mock.calls, { depth: 10 })).not.toContain('Секретный');
+  });
+});
+
+interface HeldReply {
+  status: number;
+  retryAfter: string | undefined;
+  body: Record<string, unknown>;
+}
+
+/** Настоящее chunked multipart-тело: файл начат, но закрывающая граница ждёт команды теста. */
+function holdUpload(base: string, role: 'manufacturer' | 'administrator', path = '/api/test/upload') {
+  const abort = new AbortController();
+  const boundary = 'imbc-held-upload';
+  let settle!: (reply: HeldReply | Error) => void;
+  const reply = new Promise<HeldReply | Error>((resolve) => {
+    settle = resolve;
+  });
+  const req = request(
+    `${base}${path}`,
+    {
+      method: 'POST',
+      signal: abort.signal,
+      headers: {
+        origin: 'https://imbc.example.kz',
+        cookie: `imbc-session=${role}`,
+        'content-type': `multipart/form-data; boundary=${boundary}`,
+        'transfer-encoding': 'chunked',
+      },
+    },
+    (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('error', (error) => settle(error));
+      res.on('end', () => {
+        try {
+          settle({
+            status: res.statusCode ?? 0,
+            retryAfter: res.headers['retry-after'],
+            body: JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>,
+          });
+        } catch (error) {
+          settle(error instanceof Error ? error : new Error('Ответ загрузки не разобран'));
+        }
+      });
+    },
+  );
+  req.on('error', (error) => settle(error));
+  req.write(
+    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${SECRET_NAME}"\r\nContent-Type: application/pdf\r\n\r\n`,
+  );
+  req.write(fixture('sample.pdf'));
+  return {
+    abort: () => abort.abort(),
+    finish: () => req.end(`\r\n--${boundary}--\r\n`),
+    async response(): Promise<HeldReply> {
+      const result = await reply;
+      if (result instanceof Error) throw result;
+      return result;
+    },
+  };
+}
+
+describe('место загрузки до multer и до завершения обработки (DATA-06, NFR-09)', () => {
+  let http: HttpStand;
+  let slots: UploadSlots;
+  const held: ReturnType<typeof holdUpload>[] = [];
+
+  const start = async (process: number, account: number, gate?: UploadReplyGate) => {
+    slots = new UploadSlots({ process, account });
+    http = await startHttp({
+      controllers: [UploadTestController, ...(gate ? [DelayedUploadTestController] : [])],
+      providers: [
+        { provide: UPLOAD_SLOTS, useValue: slots },
+        ...(gate ? [{ provide: UPLOAD_REPLY_GATE, useValue: gate }] : []),
+      ],
+      accountIds: { administrator: '00000000-0000-4000-8000-0000000000a3' },
+    });
+  };
+  const hold = (role: 'manufacturer' | 'administrator' = 'manufacturer', path?: string) => {
+    const pending = holdUpload(http.base, role, path);
+    held.push(pending);
+    return pending;
+  };
+
+  afterEach(async () => {
+    for (const pending of held.splice(0)) pending.abort();
+    if (slots) await vi.waitFor(() => expect(slots.inUse).toBe(0));
+    await http?.close();
+    vi.restoreAllMocks();
+  });
+
+  it('занят общий предел: 503 upload_busy и Retry-After 5, незавершённое тело не читается', async () => {
+    await start(1, 2);
+    const first = hold();
+    await vi.waitFor(() => expect(slots.inUse).toBe(1));
+    // Этот маршрут ломает req.pipe: если multer начнёт читать тело, получим 500 вместо немедленного 503.
+    const refused = hold('manufacturer', '/api/test/upload-broken');
+    expect(await refused.response()).toMatchObject({
+      status: 503,
+      retryAfter: '5',
+      body: { code: 'upload_busy' },
+    });
+    expect(slots.inUse).toBe(1);
+    first.finish();
+    expect((await first.response()).status).toBe(200);
+    await vi.waitFor(() => expect(slots.inUse).toBe(0));
+  });
+
+  it('AbortController отменяет незавершённую загрузку и освобождает оба предела', async () => {
+    await start(1, 1);
+    const first = hold();
+    await vi.waitFor(() => expect(slots.inUse).toBe(1));
+    first.abort();
+    await vi.waitFor(() => expect(slots.inUse).toBe(0));
+    const next = await http.upload(
+      '/api/test/upload',
+      'manufacturer',
+      form(['file', fixture('sample.pdf'), 'next.pdf']),
+    );
+    expect(next.status).toBe(200);
+    await vi.waitFor(() => expect(slots.inUse).toBe(0));
+  });
+
+  it('полностью прочитанный файл занимает место, пока обработчик не завершился', async () => {
+    let finish!: () => void;
+    const gate = {
+      entered: vi.fn(),
+      pending: new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+    };
+    await start(1, 2, gate);
+    const first = hold('manufacturer', '/api/test/upload-held-reply');
+    first.finish();
+    try {
+      await vi.waitFor(() => expect(gate.entered).toHaveBeenCalledOnce());
+      expect(slots.inUse).toBe(1);
+      const refused = await http.upload(
+        '/api/test/upload',
+        'manufacturer',
+        form(['file', fixture('sample.pdf'), 'next.pdf']),
+      );
+      expect(refused.status).toBe(503);
+      expect(refused.headers.get('retry-after')).toBe('5');
+      expect(await refused.json()).toMatchObject({ code: 'upload_busy' });
+    } finally {
+      finish();
+    }
+    expect((await first.response()).status).toBe(200);
+    await vi.waitFor(() => expect(slots.inUse).toBe(0));
+  });
+
+  it('отмена после чтения тела не освобождает место, пока обработчик удерживает файл', async () => {
+    let finish!: () => void;
+    const gate = {
+      entered: vi.fn(),
+      closed: vi.fn(),
+      pending: new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+    };
+    await start(1, 2, gate);
+    const first = hold('manufacturer', '/api/test/upload-held-reply');
+    first.finish();
+    try {
+      await vi.waitFor(() => expect(gate.entered).toHaveBeenCalledOnce());
+      first.abort();
+      // Ждём server-side close, чтобы тест не прошёл до обработки отмены соединения.
+      await vi.waitFor(() => expect(gate.closed).toHaveBeenCalledOnce());
+      expect(slots.inUse).toBe(1);
+      const refused = await http.upload(
+        '/api/test/upload',
+        'manufacturer',
+        form(['file', fixture('sample.pdf'), 'next.pdf']),
+      );
+      expect(refused.status).toBe(503);
+      expect(refused.headers.get('retry-after')).toBe('5');
+      expect(await refused.json()).toMatchObject({ code: 'upload_busy' });
+    } finally {
+      finish();
+    }
+    await vi.waitFor(() => expect(slots.inUse).toBe(0));
+    const next = await http.upload(
+      '/api/test/upload',
+      'manufacturer',
+      form(['file', fixture('sample.pdf'), 'next.pdf']),
+    );
+    expect(next.status).toBe(200);
+  });
+
+  it('ошибка обработчика после чтения файла освобождает место', async () => {
+    let fail!: (error: Error) => void;
+    const gate = {
+      entered: vi.fn(),
+      pending: new Promise<void>((_resolve, reject) => {
+        fail = reject;
+      }),
+    };
+    await start(1, 1, gate);
+    const first = hold('manufacturer', '/api/test/upload-held-reply');
+    first.finish();
+    try {
+      await vi.waitFor(() => expect(gate.entered).toHaveBeenCalledOnce());
+      expect(slots.inUse).toBe(1);
+    } finally {
+      fail(new ProblemException(503, 'storage_unavailable', 'Хранилище недоступно'));
+    }
+    expect(await first.response()).toMatchObject({ status: 503, body: { code: 'storage_unavailable' } });
+    await vi.waitFor(() => expect(slots.inUse).toBe(0));
+    const next = await http.upload(
+      '/api/test/upload',
+      'manufacturer',
+      form(['file', fixture('sample.pdf'), 'next.pdf']),
+    );
+    expect(next.status).toBe(200);
+  });
+
+  it('третья загрузка аккаунта получает 429; другой аккаунт загружает через тот же ограничитель', async () => {
+    await start(4, 2);
+    const first = hold();
+    const second = hold();
+    await vi.waitFor(() => expect(slots.inUse).toBe(2));
+    const refused = hold('manufacturer', '/api/test/upload-broken');
+    expect(await refused.response()).toMatchObject({
+      status: 429,
+      retryAfter: '5',
+      body: { code: 'upload_parallel_limit' },
+    });
+    const other = hold('administrator');
+    await vi.waitFor(() => expect(slots.inUse).toBe(3));
+    other.finish();
+    expect((await other.response()).status).toBe(200);
+    first.finish();
+    second.finish();
+    expect((await first.response()).status).toBe(200);
+    expect((await second.response()).status).toBe(200);
+    await vi.waitFor(() => expect(slots.inUse).toBe(0));
+  });
+
+  it('ошибка multipart освобождает место, следующий файл принимается', async () => {
+    await start(1, 1);
+    vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const broken = await http.upload(
+      '/api/test/upload-broken',
+      'manufacturer',
+      form(['file', fixture('sample.pdf'), SECRET_NAME]),
+    );
+    expect(broken.status).toBe(500);
+    await vi.waitFor(() => expect(slots.inUse).toBe(0));
+    const next = await http.upload(
+      '/api/test/upload',
+      'manufacturer',
+      form(['file', fixture('sample.pdf'), 'next.pdf']),
+    );
+    expect(next.status).toBe(200);
+  });
+});
+
+describe('соединение закрыто до перехватчика загрузки (DATA-06, NFR-09)', () => {
+  it.each([
+    { readableAborted: true, destroyed: false },
+    { readableAborted: false, destroyed: true },
+  ])('клиент ушёл во время проверки сеанса: место не занимается %#', async (closed) => {
+    const slots = new UploadSlots({ process: 1, account: 1 });
+    const interceptor = new (uploadInterceptor())(slots);
+    const req = { auth: { user: { id: 'account-a' } }, readableAborted: closed.readableAborted, pipe: vi.fn() };
+    const context = {
+      switchToHttp: () => ({ getRequest: () => req, getResponse: () => ({ destroyed: closed.destroyed }) }),
+    } as unknown as ExecutionContext;
+    await expect(interceptor.intercept(context, { handle: vi.fn() })).rejects.toMatchObject({ code: 'validation' });
+    expect(req.pipe).not.toHaveBeenCalled();
+    expect(slots.inUse).toBe(0);
   });
 });
 

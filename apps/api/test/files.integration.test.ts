@@ -505,6 +505,7 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
       ['Eicar-Signature', 'malware'],
       ['Win.Test.EICAR_HDB-1', 'malware'],
     ] as const) {
+      // Принят обычный PDF; сигнатура шифрования подставлена для второго уровня и окна выката с worker R1.
       const file = await createFile();
       expect(await scanAs(file.versionId, { clean: false, signature }), signature).toBe('rejected');
       expect(await version(file.versionId), signature).toMatchObject({
@@ -714,16 +715,10 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
         ip: expect.stringMatching(/127\.0\.0\.1/),
       },
     ]);
-    // Записи об этом файле: в сигнатурах отказов других файлов бывает «IMBC» (своя база сигнатур clamd).
-    const auditText = JSON.stringify(
-      (
-        await pool.query("select * from audit_entries where action like 'file.%' and object_id = any($1)", [
-          [file.versionId, file.fileObjectId],
-        ])
-      ).rows,
-    );
+    const auditText = JSON.stringify((await pool.query("select * from audit_entries where action like 'file.%'")).rows);
     expect(auditText).toContain('file.downloaded');
-    for (const part of ['Құрылым', 'IMBC', 'v1.pdf', (await version(file.versionId)).storage_key])
+    // Сигнатура IMBC допустима, а буквальная часть имени с кавычками — нет.
+    for (const part of ['Құрылым', '"IMBC"', 'v1.pdf', (await version(file.versionId)).storage_key])
       expect(auditText).not.toContain(part);
   });
 
@@ -740,6 +735,7 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
       [fixture('sample.png'), 'схема.pdf', 415, 'file_type_mismatch'],
       [fixture('program.exe'), 'устав.pdf', 415, 'file_type_not_allowed'],
       [fixture('plain.zip'), 'устав.docx', 415, 'file_type_not_allowed'],
+      [fixture('owner-password.pdf'), 'защищённый.pdf', 415, 'file_encrypted'],
       // DOCX и XLSX, которые антивирус не проверил бы целиком (ZIP64), и усечённый архив (DATA-07).
       [fixture('zip64-local.docx'), 'устав.docx', 415, 'file_structure_unsupported'],
       [fixture('zip64-local.xlsx'), 'мощности.xlsx', 415, 'file_structure_unsupported'],

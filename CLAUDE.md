@@ -14,9 +14,9 @@
 
 По убыванию авторитета:
 
-1. `docs/analyst/2026-11-11/specification-v1.3.md` — что строим. Требование читать в тексте, а не по памяти.
-2. Глоссарий и остальные документы аналитика — `AZhunis/imbc-prototype` (см. `docs/analyst/README.md`).
-3. `docs/analyst/2026-11-11/imbc-platform.dbml` — модель данных аналитика.
+1. `docs/analyst/2026-11-13/specification-v1.4.md` — что строим. Требование читать в тексте, а не по памяти.
+2. `docs/analyst/2026-11-13/GLOSSARY.md` и ответы аналитика от 13 ноября; остальные материалы — `AZhunis/imbc-prototype` (см. `docs/analyst/README.md`).
+3. `docs/analyst/2026-11-13/imbc-platform.dbml` — модель данных аналитика.
 4. `docs/analyst/2026-11-11/v0.5-architecture-update-brief.md` и архитектура v0.4.
 
 Снимки в `docs/analyst/<дата>/` не редактировать: новая редакция — новая папка.

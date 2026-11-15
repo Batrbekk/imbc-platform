@@ -202,7 +202,7 @@ export const worksWithMarks = pgTable(
   (t) => [index('works_with_marks_idx').on(t.profileId, t.operatorOrgId)],
 );
 
-/** Отметка визита оператора; решение видит только IMBC (OPR-40, IMBC-04). */
+/** Отметка визита оператора; решение видит только IMBC (OPR-21, IMBC-04 по v1.4). */
 export const operatorVisitMarks = pgTable('operator_visit_marks', {
   id: id(),
   operatorOrgId: uuid('operator_org_id')

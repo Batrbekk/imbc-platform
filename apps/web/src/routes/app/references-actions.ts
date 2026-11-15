@@ -3,6 +3,7 @@ import {
   type DictionaryEntry,
   entryDisplayName,
   FILE_PROBLEM_CODES,
+  FILE_REJECTION_REASONS,
   type FileProblemCode,
   type FileRejectionReason,
   type Locale,
@@ -59,12 +60,15 @@ export const REFERENCE_PROBLEM_MESSAGES: Record<ReferenceProblemCode | FileProbl
   file_encrypted: "file_encrypted",
   file_too_complex: "file_too_complex",
   file_has_attachments: "file_has_attachments",
+  upload_busy: "upload_busy",
+  upload_parallel_limit: "upload_parallel_limit",
   file_pending_scan: "file_pending_scan",
   file_rejected: "file_rejected",
   storage_unavailable: "storage_unavailable",
 };
 
 const KNOWN_CODES = new Set<string>([...REFERENCE_PROBLEM_CODES, ...FILE_PROBLEM_CODES]);
+const KNOWN_REJECTION_REASONS = new Set<string>(FILE_REJECTION_REASONS);
 
 /** Код ответа, если он из списков справочников и файлов; `http_*`, сбой сети и прочее — undefined. */
 export function problemCode(error: unknown): (ReferenceProblemCode | FileProblemCode) | undefined {
@@ -94,12 +98,18 @@ export function useReferenceProblemMessage() {
 /**
  * Текст причины, по которой файл не прошёл проверку антивирусом (DATA-07): «найдена угроза», «защищён паролем»,
  * «слишком сложен для проверки», «не удалось проверить». Причины нет (отказ этапа 2, ответ прежней версии API) —
- * null: экран показывает общий текст. Ключ — значение `FILE_REJECTION_REASONS`: новое значение без текста в en.json
+ * null: экран показывает общий текст. Неизвестная причина новой версии API тоже даёт общий текст. Ключ — значение `FILE_REJECTION_REASONS`: новое значение без текста в en.json
  * не скомпилируется (те же ключи в kk и ru проверяет messages.test.ts).
  */
-export function useRejectionReasonMessage() {
-  const t = useTranslations("references.sample.rejectionReason");
-  return useCallback((reason: FileRejectionReason | null | undefined) => (reason ? t(reason) : null), [t]);
+export function useRejectionReasonMessage(short = false) {
+  const t = useTranslations("references.sample");
+  return useCallback(
+    (reason: FileRejectionReason | null | undefined) =>
+      reason && KNOWN_REJECTION_REASONS.has(reason)
+        ? t(`${short ? "rejectionReasonShort" : "rejectionReason"}.${reason}`)
+        : null,
+    [t, short],
+  );
 }
 
 const isEntryResult = (value: unknown): value is { entry: DictionaryEntry } =>

@@ -1,0 +1,15 @@
+{
+  "repository": "AZhunis/imbc-prototype",
+  "revision": "8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6",
+  "capturedOn": "2026-11-16",
+  "specificationVersion": "1.4",
+  "sha256": {
+    "specification-v1.4.md": "8e8da9f0906db32d0e5595253abf64b48f5e03140ca63660040a5de5c536a809",
+    "imbc-platform.dbml": "18b4b1f0460b157f82db3ebf8bad06619913ea10e55db8ffa38af86579c7f4e2",
+    "imbc-platform.sql": "f98af9a7d068ddc0508d55fd965254ee8f1f2d6350139c54dcc8c3f36cafe3f3",
+    "GLOSSARY.md": "8ce51a8be74b811f7c623e1f6ec0aa49babcbc576a9274b11b10f3ba8d9c01f7",
+    "2026-11-12-replies.md": "6978187c7e35f66be23de4946b293efd6d1a62132d0259bc56079f52c15cde37",
+    "2026-11-13-replies.md": "16362f2aa47e90793f4b69fdd7daf079f8521a91579c3c72f609c0a8070e0176",
+    "data-model-README.md": "49916ba29080a01e70898bd9c8fc65f4f7fcf3f0fe85482deca14e76fb5b93c1"
+  }
+}

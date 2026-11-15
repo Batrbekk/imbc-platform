@@ -1,0 +1,2497 @@
+// Logical schema and field catalogue for the IMBC platform, Phase 1.
+//
+// Document responsibilities:
+// - docs/technical-specification/specification.md defines functional requirements,
+//   ownership, visibility, validation, and acceptance. It does not repeat this catalogue.
+// - This DBML owns the complete backend field inventory, relationships, source-column
+//   mapping, reference dictionaries, and the standard export contract below.
+// - The signed-off workbooks are docs/initial-data/IMBC_Manufacturers_Database.xlsx
+//   and docs/initial-data/demand_forecast_detailed_under_NDA.xlsx. The additional LPS
+//   source is docs/initial-data/LC LPS table for Platform.xlsx; its value mappings
+//   require IMBC review before loading. Spreadsheet columns describe source data,
+//   not a requirement for one editable database field per cell.
+// - Confirmed field decisions in the 13 November 2026 design review are incorporated.
+//   Earlier presentations and architecture field inventories are superseded where
+//   they conflict. Section revisions, ownership boundaries, files, and catalog
+//   projection follow the architecture unless a newer functional rule requires change.
+//
+// Storage rules:
+// - Primary keys are UUIDv7. Submitted and verified revisions are immutable.
+// - profile_section.verified_revision_id is what operators, observers, exports,
+//   and the pull API read. pending_revision_id is awaiting SME review.
+// - Profile rows carry organization_id. Composite references prevent cross-company
+//   relationships. Application validation also checks dictionary kinds, parent-child
+//   classifications, same-profile identities, conditional requirements, and ranges.
+// - Source refreshes create revisions or audited source snapshots; they never mutate
+//   a submitted or verified revision. Manufacturer-owned values remain separate from
+//   source-owned legal data. No manufacturer confirmation is required for Adata data.
+// - Files are versioned outside domain rows and cannot be opened before scan success.
+// - catalog_profile and its facets are rebuilt projections, not sources of truth.
+// - LPS is a separate SME-maintained register. Operators and the director read saved,
+//   non-deleted entries without manufacturer verification or NDA conditions. No LPS
+//   record changes manufacturer data, tiers, due diligence, forecasts, or workflows.
+// - Tier, site surveyed, completeness, total headcount, and works-with count are derived.
+//   Tier 3 requires an identified product with an AGAR/CDP report-issued-or-later status.
+// - Audit, submitted revisions, review decisions, NDA acceptances, confirmations,
+//   and works-with changes are append-only. Dates and schedules use Asia/Almaty.
+// - The configured identity provider (Keycloak or IMBC OIDC provider) holds credentials
+//   and is authoritative for failed sign-ins and temporary lockouts; account columns
+//   only mirror its state. Queue internals are outside this schema.
+// - Source refreshes and due-diligence replacement atomically append complete before/after
+//   record and checklist values to audit_entry; current-state rows never replace history.
+//
+// Signed-off manufacturer source mapping
+// Sheet: 1. IMBC Manufacturers' Data; header row 1; columns A:AL.
+// Every original cell, Excel comment, and hyperlink target remains in the restricted
+// migration journal. A normalized field is populated only when the meaning and target
+// are known. Conflicts and incomplete mappings are import_resolution items, not new
+// editable legacy columns. Repeated company values are reconciled once per BIN.
+// A  No. / row-number formula -> import_row.excel_row_number; never a business ID.
+// B  Manufacturer Name in English -> main_information.name_en (optional supplied alias).
+// C  Company name -> main_information.legal_name as migration seed; Adata is authoritative.
+// D  BIN -> organization.bin; text, one profile per BIN; invalid values are flagged.
+// E  Commodity type -> product_line.commodity_type_id via approved dictionary aliases.
+// F  Commodity group -> derived parent of that type; OUT OF / N/A remain flagged raw
+//    values and do not become valid A-E categories or cause a row to be discarded.
+// G  Region -> production_site.region_id after confirming that it describes production.
+// H  Company email -> main_information.contact_email; choose a usable company login
+//    separately. Multiple addresses are reviewed; never infer focal-point identity.
+// I  Company phone -> main_information.company_phone after format normalization.
+// J  Company address -> production_site.address only when its purpose is confirmed.
+//    Do not copy an ambiguous address into both legal and production addresses.
+// K  Website -> main_information.website.
+// L  Company focal point -> contact rows + is_focal_point; parse combined names/details
+//    only where unambiguous. Missing roles/phones/emails stay incomplete for review.
+// M  TN VED code -> product_line.tn_ved_code; split multiple product/code combinations
+//    only with an approved association. Do not assign every code to every product.
+// N  Product Classification by Economic Activities (KPVED RK) -> product_line_kpved
+//    rows; split valid codes, preserve leading zeros and source names where supplied.
+// O  Manufactured goods -> product_line.name_en.
+// P  Manufactured goods Rus -> product_line.name_ru.
+// Q  Supply to Operators -> validated works_with_mark for explicit NCOC/TCO/KPO names.
+//    Other counterparties, contractor claims, and unnamed counts remain IMBC notes;
+//    an unnamed count never creates named operator relationships.
+// R  Expression of interest (EoI) email sent/resent -> imbc_eoi_email_event.sent_on.
+// S  Confirmation of receipt -> imbc_engagement.receipt_confirmed (nullable boolean).
+// T  Source -> imbc_engagement_source rows referencing the acquisition_source dictionary.
+// U  Response to EoI Email -> imbc_engagement.response (interested / not_interested).
+// V  Summary of response to EoI -> imbc_engagement.response_summary.
+// W  Ready for site visit? -> imbc_engagement.ready_for_site_visit (nullable boolean).
+//    R:W are yellow and annotated Review only. Keep them as internal historical
+//    context; they do not create an EOI campaign, account invitation, or visit request.
+// X  Site visit conducted -> site_survey_record.result.
+// Y  Site visit dates -> visit_started_on / visit_ended_on; separate distinct visits.
+//    A yes without a usable date is unresolved. A visit without a signed report does
+//    not confer site-surveyed status or tier 2.
+// Z  Certificates -> certificate records by normalized type; bare type names are
+//    incomplete claims, not verified certificates. Obtain details/files on completion.
+// AA Overall ranking -> imbc_note with kind legacy_ranking; no platform rank or score.
+// AB Shortlisted for CDP / AGAR + AF Status CDP / AGAR -> agar_cdp_record.status.
+//    Yes with no later known stage maps to shortlisted. No/blank is not a workflow
+//    stage. A later stage supersedes a shortlist marker; contradictions are flagged.
+// AC LC/LPS -> imbc_product_context.programme_id (historical programme labels: LC, LPS).
+//    This internal manufacturer context does not create or populate an LPS entry.
+// AD Priority commodity for IMBC -> imbc_product_context.priority_id (priority list).
+//    Non-priority text such as Internal link stays unresolved; it is not a rank.
+// AE Year Added to IMBC Database -> imbc_engagement.added_to_imbc_year; not registration.
+// AF Status mapping: Completed - Implementation in Progress -> recommendations_in_progress;
+//    Completed - Recommended -> recommendation_issued; Shortlisted - Pre-CDP Stage
+//    -> shortlisted. Narrative disengagement / unavailable-SME values require review,
+//    with explanation in comment. Do not invent a new achieved milestone from prose.
+// AG CDP / AGAR execution (%) -> agar_cdp_record.execution_percent, only after approved
+//    scale conversion to 0..100. The source stores 0/1 with General formatting; 1 is
+//    ambiguous and must not silently become 1% or 100%. It never determines tier.
+//    AB/AF/AG are two platform business values: status and execution percentage.
+//    Kind, report, and comment remain part of the same product-specific record.
+//    If the assessed product or AGAR/CDP kind is unknown, preserve the source in the
+//    import journal until IMBC resolves it. Never mark all company products tier 3.
+// AH General comments -> imbc_note with kind general.
+// AI Manufacturer folder link -> imbc_engagement.folder_url from the hyperlink target,
+//    not the display label Open folder. It is internal and not a platform attachment.
+// AJ E-ondiris registration -> main_information.unified_register_registered seed.
+// AK E-ondiris first inclusion -> main_information.unified_register_first_inclusion_on seed.
+// AL E-ondiris note -> imbc_note with kind registry_review; internal, not a registry field.
+//
+// Signed-off forecast source mapping and import contract
+// Sheet: consolidated; header row 1; columns A:J. Header labels are trimmed.
+// A id -> forecast_line.source_id (optional source identifier; generated UUID is separate).
+// B KPVED_code -> forecast_line.kpved_code (optional text).
+// C KPVED_name -> forecast_line.kpved_name (optional source label; dictionary resolves code).
+// D TNVED_code -> forecast_line.tn_ved_code (text, complete code or supplied prefix).
+// E FPAL Code -> excluded. Do not persist in forecast data, publish, or use as an identity.
+// F Commodity name -> forecast_commodity dictionary entry.
+// G sub_commodity_name -> forecast_subcommodity dictionary entry under that commodity.
+// H Full Description -> forecast_line.description; IMBC removes operators/projects/brands.
+// I Unit of Measure -> forecast_line.unit_id through approved unit aliases.
+// J Total Estimated until 2031 -> forecast_line.total_quantity and version.horizon_end_year=2031.
+//   A later agreed horizon changes version metadata and the matching import heading,
+//   not the quantity field. No annual or operator split is introduced.
+// Required source headers: B, C, D, F, G, H, I, and the declared horizon quantity header.
+// A may be omitted; E and any other extra fields are ignored. B/C values may be blank.
+// Required usable row values: TN VED, commodity, subcommodity, description, unit, quantity.
+// A-C are blank in the supplied workbook; do not fabricate source IDs or KPVED values.
+// dict_commodity!A:B contains blank commodity IDs and repeated commodity names. Deduplicate
+// names into the forecast dictionary; do not create 77,000 dictionary entries or reuse FPAL.
+// Forecast commodity/subcommodity is a different hierarchy from manufacturer A-E/type.
+// Optional approved forecast_classification rows support A-E/type filters; no crosswalk
+// is guessed from spelling, FPAL, or row order. Unmapped rows remain usable in the
+// forecast's own hierarchy and are marked unclassified for the optional A-E view.
+// Unit aliases are approved explicitly (for example case variants). Ambiguous MT, ST,
+// dimensions, and packaging units are never guessed or numerically converted on import.
+// Blank required values, unknown codes/units, nonnumeric or negative quantities are
+// reported before that row is published. A negative requires correction or explicit
+// IMBC acceptance with its source meaning recorded; preserve allowed source values
+// in forecast_import_issue.source_values. Zero is a valid explicit quantity; blank is not.
+// Do not collapse rows solely because their TN VED code, description, or source ID agrees.
+//
+// LPS source mapping and one-time migration contract
+// Source: docs/initial-data/LC LPS table for Platform.xlsx, Sheet1!A1:S58.
+// Header row 1; 57 populated source rows and 57 distinct company labels. Company labels
+// are not verified legal identities. The existing source combines some partners, local
+// ventures, products, services, and phases; SME review determines identities and scopes.
+// A  # -> import_row.raw; Excel row is import_row.excel_row_number. Neither is a business ID.
+// B  Company -> lps_company.name. Reuse a company only after identity is established;
+//    a local venture can be recorded under its supplied name. No BIN/account is required.
+// C  Type -> lps_entry.source_type_id, reusing programme entries LC and LPS. Source counts
+//    are LC=41 and LPS=16. LC remains a historical label; the feature and new entries use
+//    LPS. These labels do not create separate processes or change status/access rules.
+// D  Country -> lps_company_country.country_id, using the country dictionary. Six rows
+//    list two countries; Kazakhstan is valid, including 33 Kazakhstan-only rows. Do not
+//    infer incorporation, ownership, foreign parent, or partner relationships from this cell.
+// E  Commodity -> lps_entry_commodity.commodity_type_id via approved aliases.
+// F  Commodity group -> derived A-E parents of those types, checked against the source.
+//    Multiple types are allowed; source order is not a crosswalk. Row 29 lists groups C,E
+//    in an order that cannot be paired with its types. Conflicts remain migration issues.
+//    Services without a matching type remain unclassified until IMBC supplies a valid one.
+// G  Product -> lps_entry.scope_description, displayed as Product / service. Preserve the
+//    full scope. Split independently managed scopes only after SME confirmation, never
+//    by punctuation alone. Do not copy investment or jobs to every resulting entry.
+// H  Status -> lps_status dictionary: planning (Planning, 16), in_process (In process, 21),
+//    localized (Localized, 14), on_hold (On hold, 6). Counts describe this source only.
+//    SME selects any current status directly; there is no transition engine or approval.
+// I  Planned launch -> lps_entry.planned_launch. Source has 39 quarters, 5 years,
+//    one range (I32: Q4 2027 / Q1 2028), 11 TBD, and one blank (I58). Keep that precision.
+// J  Comment -> lps_entry.comment; operator-visible LPS context, not a class C IMBC note.
+// K  Investment (USD) -> lps_entry.investment_usd. Store source decimal precision; display
+//    two decimals without rounding the stored value. Blank is unknown, not zero.
+// L  New jobs -> lps_entry.new_jobs; optional nonnegative integer, blank is not zero.
+// M  City + N Region -> paired lps_location rows; region uses the existing dictionary.
+//    Rows 4 and 38 each list two city/region pairs. Pair only when confirmed; 13 rows
+//    have no location. Never assign every city to every region or infer from name alone.
+// O  Focal point(s) + P Role / title -> lps_contact name/title records for this entry.
+// Q  Email(s) + R Phone(s) -> lps_contact_email / lps_contact_phone. A contact may have
+//    several methods. Source counts differ (row 4: 5 names/5 roles/4 emails/5 phones;
+//    row 12: 2/2/5/3). Never zip by position. SME confirms each association, including
+//    an explicitly general company contact; unresolved methods stay in the source journal.
+//    These people are neither accounts nor the manufacturer profile's single focal point.
+// S  Last updated -> lps_entry.last_updated_on, an SME-maintained business date. Preserve
+//    source dates (17 September to 6 November 2026), separately from platform updated_at.
+//
+// Use import_batch.source_kind=lps and the existing restricted import_row/import_resolution
+// journal for raw cells and unresolved mappings. Every source row remains accounted for.
+// lps_entry.migration_key is a stable dataset/sheet/row/resolved-scope key across trial runs;
+// reuse accepted company/entry mappings rather than deduplicating by name or scope text.
+// Load only after SME reconciliation; this is migration, not a recurring import/publish UI.
+// Missing optional values do not prevent entry creation. Missing company/scope/status or
+// ambiguous identity/scope is resolved before loading; other unresolved cells can remain
+// blank in the entry while their original text and issue remain available to the SME.
+// No entry, account, invitation, review, or notification is created from manufacturer LC flags.
+//
+// LPS table projection (view only for operators; no export or pull-API contract)
+// One row per non-deleted lps_entry joined to its company. Preserve workbook column order
+// A:S above, using a display row number for #, Product / service for Product, and LC
+// (legacy) for the historical LC Type. Join multi-values within a cell in stable display
+// order without multiplying entry rows; show contacts and their methods as aligned groups.
+// Dictionary values order by sort_order, then translated label, then code. Locations and
+// contacts order by their sort_order then ID; contact methods by sort_order then value.
+// Sorting a multi-value column compares its ordered list of scalar sort keys
+// lexicographically, retaining the aligned contact/location groups in the displayed row.
+// Planned-launch ordering uses earliest then latest possible quarter from parsed bounds
+// (a year spans Q1..Q4), not lexical order or a claimed exact launch date. Numbers use
+// numeric order, Last updated uses date order, and free text uses displayed text order.
+// TBD follows known launch periods; null follows TBD in either direction. Other missing
+// values also sort last in either direction. The entry ID is the final tie breaker.
+// Dashboard: count distinct entry IDs by status/region/commodity, and distinct company IDs
+// overall, using the same filters and deletion rules as the list. An entry with no resolved
+// region or commodity group has an Unknown bucket in that dimension. Multi-category
+// entries count once per applicable category; category totals are not added to obtain an
+// overall count. City/region filters match one location pair; type/group filters match one
+// classification. No financial totals.
+//
+// Standard export contract (logical projection, not a separately editable table)
+// Contract version: 2. One row per verified product line; search export and subscription
+// use the same order and field set. Dictionaries supply display labels. Multiple values
+// use the format in DATA-10; join rows before export so codes/certificates do not multiply
+// product rows. A product's selected production site supplies region/city/address.
+// 01 bin: organization.bin
+// 02 company_name_en: main_information.name_en (blank when no supplied English name)
+// 03 company_legal_name: main_information.legal_name (source spelling, no translation)
+// 04 production_region: selected production_site.region_id label
+// 05 production_city: selected production_site.city
+// 06 legal_address: main_information.legal_address
+// 07 production_address: selected production_site.address
+// 08 website: main_information.website
+// 09 company_contact_email: main_information.contact_email (never an account credential)
+// 10 company_phone: main_information.company_phone
+// 11 focal_point_name; 12 focal_point_position; 13 focal_point_email; 14 focal_point_phone:
+//    the verified contact with is_focal_point, from full_name/position/email/phone
+// 15 oked_codes: main_information_oked.code (all codes returned by Adata)
+// 16 commodity_group: parent of product_line.commodity_type_id
+// 17 commodity_type: product_line.commodity_type_id label
+// 18 product_name_en: product_line.name_en; 19 product_name_ru: product_line.name_ru
+// 20 tn_ved_code: product_line.tn_ved_code
+// 21 kpved_codes: product_line_kpved.code, one value per code
+// 22 production_capacity: capacity_quantity + capacity_unit_id label, or capacity_text
+//    from e-Ondiris; the display does not silently convert source units
+// 23 workshop_count: production.workshop_count; 24 utilisation_percent: production.utilisation_percent
+// 25 total_headcount: sum of personnel.managers_count/engineers_count/production_workers_count
+// 26 certificates: valid verified held certificate type + expiry date pairs; absence
+//    declarations and missing/unverified claims are not reported as held certificates
+// 27 site_surveyed; 28 last_site_visit_on; 29 profile_tier; 30 product_tier_3;
+// 31 unified_register_registered; 32 works_with_major_count; 33 verified_at;
+// 34 due_diligence_checked_on; 35 pending_changes: corresponding catalog projections
+// The API exposes the wider authorized company-page model, including product details,
+// sites, held certificates and their files; this compact file contract does not define
+// the API response shape. IMBC-only context, operator names/notes, pending values, and
+// confidential AGAR reports are excluded from every operator data channel.
+
+Project imbc_platform {
+  database_type: 'PostgreSQL'
+  Note: 'Authoritative Phase 1 backend field catalogue, reconciled with the signed-off manufacturer and detailed-demand workbooks, the additional LPS source workbook, and confirmed field decisions of 13 November 2026. Functional behavior and access remain governed by specification.md. Source mappings and standard export contract are documented above; Excel column count does not dictate database column count.'
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+Enum organization_type {
+  manufacturer
+  operator
+  observer
+  imbc
+}
+
+Enum account_role {
+  manufacturer
+  expert
+  administrator
+  director
+  operator
+  observer
+}
+
+Enum account_state {
+  invited
+  active
+  inactive
+  blocked
+}
+
+Enum language_code {
+  kk
+  en
+  ru
+}
+
+Enum profile_status {
+  draft
+  submitted
+  under_review
+  verified
+  returned
+}
+
+Enum section_kind {
+  main_information
+  contacts
+  personnel
+  products
+  production
+  certificates
+  documents
+}
+
+Enum revision_state {
+  working
+  submitted
+  verified
+  rejected
+}
+
+Enum revision_origin {
+  manufacturer
+  migration
+  source_refresh
+}
+
+Enum record_status {
+  uploaded
+  under_review
+  verified
+  rejected
+  expired
+  missing
+}
+
+Enum scan_state {
+  pending
+  passed
+  rejected
+}
+
+Enum product_line_source {
+  manual
+  e_ondiris
+  migration
+}
+
+Enum update_freshness {
+  active
+  outdated
+  unresponsive
+}
+
+Enum confirmation_kind {
+  quarter
+  section
+}
+
+Enum update_event_kind {
+  quarter_notice
+  second_notice
+  unresponsive_notice
+}
+
+Enum certificate_schedule_state {
+  active
+  stopped
+}
+
+Enum survey_result {
+  yes
+  no
+}
+
+Enum survey_source {
+  migration
+  expert
+}
+
+Enum diligence_result {
+  green
+  amber
+  red
+}
+
+Enum diligence_mark {
+  clear
+  finding
+  shown_only
+  no_answer
+}
+
+Enum enhanced_diligence {
+  done
+  not_done
+}
+
+Enum mark_state {
+  waiting
+  validated
+  rejected
+}
+
+Enum request_status {
+  open
+  closed
+}
+
+Enum subscription_period {
+  daily
+  weekly
+  monthly
+}
+
+Enum export_format {
+  xlsx
+  csv
+}
+
+Enum run_result {
+  success
+  failure
+}
+
+Enum subscription_state {
+  active
+  paused
+}
+
+Enum pause_reason {
+  user
+  inactive_account
+}
+
+Enum data_class {
+  a_register
+  b_manufacturer
+  c_imbc
+  d_operator
+  e_administration
+  f_forecast
+  g_lps
+}
+
+Enum file_purpose {
+  organisation_chart
+  cv
+  unified_register_extract
+  conformity_certificate
+  production_photo
+  certificate_file
+  document_file
+  site_survey_report
+  due_diligence_report
+  enhanced_due_diligence_report
+  operator_visit_file
+  technical_requirements
+  agar_cdp_report
+  organisation_chart_sample
+  export
+}
+
+Enum technical_requirements_kind {
+  str
+  ktre
+}
+
+Enum profile_tier {
+  tier_1
+  tier_2
+}
+
+Enum agar_cdp_kind {
+  agar
+  cdp
+}
+
+Enum agar_cdp_status {
+  requested
+  shortlisted
+  visit_done
+  technical_assessment_done
+  report_issued
+  recommendations_in_progress
+  recommendation_issued
+  paused
+  discontinued
+}
+
+Enum snapshot_period {
+  week
+  month
+}
+
+Enum snapshot_dimension {
+  profile_status
+  update_status
+  region
+  commodity_group
+}
+
+Enum catalog_facet {
+  production_region
+  commodity_group
+  commodity_type
+  certificate_type
+  tn_ved
+  kpved
+  oked
+}
+
+Enum import_outcome {
+  imported
+  flagged
+  rejected
+}
+
+Enum import_source_kind {
+  manufacturer
+  lps
+}
+
+Enum connector_code {
+  adata
+  e_ondiris
+  accounting
+  legal_entity_registry
+}
+
+// ---------------------------------------------------------------------------
+// Identity and organisations
+// ---------------------------------------------------------------------------
+
+Enum certificate_group {
+  company
+  product
+  other
+}
+
+Enum eoi_response {
+  interested
+  not_interested
+}
+
+Enum imbc_note_kind {
+  general
+  legacy_ranking
+  registry_review
+  migration_context
+}
+
+Table organization {
+  id uuid [pk, note: 'UUIDv7']
+  type organization_type [not null]
+  name text [not null, note: 'Registration name, or the name the administrator gives an operator, an observer, or IMBC. Operators read the manufacturer names from main_information.']
+  bin text [note: '12 digits. Required for a manufacturer, empty otherwise. Immutable. One BIN is one manufacturer organisation.']
+  is_major_operator boolean [not null, default: false, note: 'Phase 1 marks exactly NCOC, TCO, and KPO. Other operator organisations can be added but do not enter the count out of three. Changing this counting set requires a business-rule change, not merely setting this flag on another organisation.']
+  notification_mailbox text [note: 'Set on the IMBC organisation. IMBC emails go here.']
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    bin [unique, note: 'Empty for every organisation that is not a manufacturer. PostgreSQL unique allows many empty values.']
+  }
+
+  Note: 'A manufacturer organisation has one profile and one account. An operator, observer, or IMBC organisation has one account per person.'
+}
+
+Table user_account {
+  id uuid [pk]
+  organization_id uuid [not null]
+  email text [not null, unique, note: 'Login. For a manufacturer this is the company mailbox. Only an administrator changes it.']
+  name text [note: 'The person, for every account except the manufacturer account.']
+  role account_role [not null]
+  state account_state [not null, default: 'invited']
+  language language_code [not null, default: 'kk']
+  idp_subject text [unique, note: 'Subject in the OpenID Connect provider. Credentials stay there.']
+  auth_version int [not null, default: 1, note: 'Incremented when the account is blocked or its role changes, which ends open sessions.']
+  last_sign_in_at timestamptz
+  failed_attempt_count int [not null, default: 0, note: 'Read model of the configured identity provider counter (Keycloak or IMBC OIDC provider), never an independently incremented application counter. Refresh from provider events or queries; the provider is authoritative.']
+  locked_until timestamptz [note: 'Read model of the identity provider temporary lock: fifteen minutes after ten failed sign-ins. The provider enforces and clears it; stale mirrors cannot override it. This is not the administrator-set state blocked.']
+  responsibility_accepted_at timestamptz [note: 'Latest acceptance. Empty until the first sign-in dialog is accepted.']
+  platform_terms_accepted_at timestamptz [note: 'Manufacturer registration.']
+  personal_data_accepted_at timestamptz [note: 'Manufacturer registration.']
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    organization_id [note: 'Partial unique index: one row where the organisation type is manufacturer.']
+    (id, organization_id) [unique]
+  }
+
+  Note: 'Inactive means no sign-in for three months and is unrelated to profile update status. A blocked account is an administrator action.'
+}
+
+Table user_session {
+  id uuid [pk]
+  user_account_id uuid [not null]
+  auth_version int [not null]
+  created_at timestamptz [not null, default: `now()`]
+  last_seen_at timestamptz [not null]
+  idle_expires_at timestamptz [not null, note: '30 minutes without activity.']
+  absolute_expires_at timestamptz [not null, note: '12 hours after sign-in.']
+  ended_at timestamptz
+
+  Note: 'BFF session. The browser holds the cookie. Tokens do not leave the server.'
+}
+
+Table trusted_device {
+  id uuid [pk]
+  user_account_id uuid [not null]
+  identifier_hash text [not null]
+  expires_at timestamptz [not null, note: '30 days, after which the email code is required again.']
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (user_account_id, identifier_hash) [unique]
+  }
+}
+
+Table responsibility_acceptance {
+  id uuid [pk]
+  user_account_id uuid [not null]
+  text_version text [not null]
+  accepted_at timestamptz [not null]
+
+  Note: 'Append-only. Who accepted responsibility for their credentials, which text, and when. No signature image.'
+}
+
+Table api_access {
+  id uuid [pk]
+  organization_id uuid [not null, note: 'An operator organisation.']
+  key_hash text [not null]
+  key_prefix text [not null]
+  issued_by uuid [not null]
+  issued_at timestamptz [not null]
+  revoked_by uuid
+  revoked_at timestamptz
+
+  indexes {
+    organization_id [note: 'Partial unique index: revoked_at is null. One live key per operator organisation.']
+  }
+
+  Note: 'Pull API credential. Read-only, same field set for every operator, no push.'
+}
+
+// ---------------------------------------------------------------------------
+// Manufacturer profile and section revisions
+// ---------------------------------------------------------------------------
+
+Table manufacturer_profile {
+  id uuid [pk]
+  organization_id uuid [not null, unique]
+  status profile_status [not null, default: 'draft']
+  assigned_expert_id uuid [note: 'Mirrors the open review assignment.']
+  registered_at timestamptz [note: 'Set when the password is set and the profile is created.']
+  verified_at timestamptz
+  completeness_percent numeric(5, 2) [note: 'Computed. Average of the six sections other than production; source-only legal data and declared missing ISO types do not add manufacturer completion requirements. Send for review needs 100.']
+  heard_about_us text [note: 'Class B. IMBC only. Never shown to operators or observers.']
+  migrated boolean [not null, default: false]
+  bin_check_digit_valid boolean [not null, default: true, note: 'A migrated BIN that fails the check digit is flagged, not rejected.']
+  migration_flags jsonb [note: 'OUT OF, N/A, unmapped values, duplicate candidates. Kept for IMBC.']
+  accuracy_confirmed_at timestamptz [note: 'Last time the manufacturer confirmed the data is accurate, on send.']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (id, organization_id) [unique]
+  }
+
+  Note: 'One profile per manufacturer organisation. Created at registration once the password is set, or by migration, as Draft. Pending changes are not a status: the profile stays verified while a section has a pending revision.'
+}
+
+Table profile_section {
+  id uuid [pk]
+  profile_id uuid [not null]
+  organization_id uuid [not null]
+  kind section_kind [not null]
+  verified_revision_id uuid [note: 'What operators, observers, exports, and the pull API read.']
+  pending_revision_id uuid [note: 'Submitted revision waiting for the expert.']
+  completeness_percent numeric(5, 2) [note: 'Computed from the working revision. Production is stored and then left out of the profile average.']
+
+  indexes {
+    (profile_id, kind) [unique]
+    (id, organization_id) [unique]
+  }
+
+  Note: 'Seven sections; shareholder entry was removed. The working revision is the section_revision of this section whose state is working. At most one.'
+}
+
+Table section_revision {
+  id uuid [pk]
+  profile_section_id uuid [not null]
+  organization_id uuid [not null]
+  revision_number int [not null]
+  state revision_state [not null]
+  origin revision_origin [not null, default: 'manufacturer']
+  author_id uuid
+  completeness_percent numeric(5, 2)
+  created_at timestamptz [not null, default: `now()`]
+  submitted_at timestamptz [note: 'Set when the revision is frozen. A submitted or verified revision is never overwritten.']
+
+  indexes {
+    (profile_section_id, revision_number) [unique]
+    (id, organization_id) [unique]
+    profile_section_id [note: 'Partial unique index: state = working. One working revision per section.']
+  }
+
+  Note: 'Copy-on-write. The next edit copies rows into a new working revision. A verified revision stays as history when a newer one replaces it. Class A while it is the verified revision, class B while it is working, pending, or rejected.'
+}
+
+Table submission_requirement {
+  id uuid [pk]
+  section_revision_id uuid [not null]
+  organization_id uuid [not null]
+  dictionary_entry_id uuid [not null]
+  captured_at timestamptz [not null]
+
+  indexes {
+    (section_revision_id, dictionary_entry_id) [unique]
+  }
+
+  Note: 'Mandatory certificate and document types, copied from the reference lists at the moment of send, so a later change to those lists does not rewrite a frozen revision.'
+}
+
+Table main_information {
+  id uuid [pk]
+  section_revision_id uuid [not null, unique]
+  organization_id uuid [not null]
+  legal_name text [note: 'Company name. Adata source value, read-only; preserve its spelling. Migration supplies the initial company name until the source is available.']
+  name_en text [note: 'Optional English name supplied in the migration workbook. Not an automatically translated or separately required legal name.']
+  legal_form_id uuid [note: 'Adata legal form, normalized to legal_form. Read-only.']
+  director_full_name text [note: 'Adata source value. Read-only.']
+  state_registered_on date [note: 'Adata state registration date. Read-only.']
+  legal_address text [note: 'Adata source value. Read-only. This is separate from editable production sites.']
+  legal_data_checked_at timestamptz
+  website text
+  company_phone text [note: 'Required before submission. e-Ondiris, then Adata, then manufacturer; editable. International phone formats accepted.']
+  contact_email text [note: 'Company contact email, not the login. e-Ondiris, then Adata, then manufacturer; editable.']
+  unified_register_registered boolean [note: 'Yes when the local e-Ondiris read returns at least one product; migration seed until refreshed.']
+  unified_register_first_inclusion_on date [note: 'Earliest registry inclusion date among products; migration seed until refreshed.']
+
+  indexes {
+    (id, organization_id) [unique]
+    (section_revision_id, organization_id) [unique]
+  }
+
+  Note: 'BIN and login email are owned by organization and user_account. Adata legal data and its complete OKED list are read-only and do not require manufacturer confirmation. Missing source values remain unavailable, not fabricated or turned into new required manual fields. Source refreshes follow immutable revision history. The manufacturer maintains production sites and company contact data. Registry diagnostic details remain available to IMBC; no separate legal/e-Ondiris completion tab is required from the manufacturer.'
+}
+
+Table main_information_oked {
+  id uuid [pk]
+  main_information_id uuid [not null]
+  organization_id uuid [not null]
+  code text [not null, note: 'Full OKED list from Adata. Text preserves leading zeros.']
+  source_name text [note: 'Name as returned by Adata; shown with its code.']
+  oked_entry_id uuid [note: 'Normalized dictionary match when available; an unmatched source code is shown as returned and flagged for IMBC.']
+  position int [not null, note: 'Source order. No manufacturer-selected main OKED.']
+
+  indexes {
+    (main_information_id, code) [unique]
+  }
+
+  Note: 'Read-only source rows. No second e-Ondiris OKED pair and no manual OKED selection.'
+}
+
+Table company_founder {
+  id uuid [pk]
+  main_information_id uuid [not null]
+  organization_id uuid [not null]
+  name text [not null]
+  position_in_list int [not null]
+
+  Note: 'Only founders actually returned by Adata. Read-only legal information. No ownership-percentage entry, manual shareholder section, or 100-percent share validation.'
+}
+
+Table production_site_identity {
+  id uuid [pk]
+  profile_id uuid [not null]
+  organization_id uuid [not null]
+
+  indexes {
+    (id, organization_id) [unique]
+  }
+
+  Note: 'Stable identity of a site across main-information revisions. Product links use this identity, so an address correction is shared by all linked products.'
+}
+
+Table production_site {
+  id uuid [pk]
+  main_information_id uuid [not null]
+  organization_id uuid [not null]
+  identity_id uuid [not null]
+  address text [note: 'One text address. Required for a completed site. Prefilled from e-Ondiris when available, editable by the manufacturer.']
+  region_id uuid [note: 'Region dictionary, for this production site, not the legal address. Required for a completed site.']
+  city text [note: 'Required for a completed site. Do not infer an ambiguous locality from region_kato.']
+  position_in_list int [not null]
+
+  indexes {
+    (main_information_id, identity_id) [unique]
+    (id, organization_id) [unique]
+  }
+
+  Note: 'At least one production site before initial submission. Added and corrected in main information, selected from that list on a product; no inline site creation on the product. Correcting a site updates the address shown for all linked products without per-product confirmation. Operators still read the verified main-information revision until the correction is verified. A referenced site must not be physically deleted.'
+}
+
+Table contact {
+  id uuid [pk]
+  section_revision_id uuid [not null]
+  organization_id uuid [not null]
+  full_name text [not null]
+  position text [not null]
+  email text [not null]
+  phone text [not null]
+  role_id uuid [not null, note: 'management, technical, or commercial. A role may be used more than once. The three contacts do not have to cover all three roles.']
+  is_focal_point boolean [not null, default: false]
+  position_in_list int [not null]
+
+  indexes {
+    (section_revision_id, email) [unique, note: 'Email is stored in one case. A match with another contact on this revision is rejected and not saved.']
+    (section_revision_id, phone) [unique, note: 'A matching phone on this revision is rejected and not saved.']
+    section_revision_id [note: 'Partial unique index: is_focal_point. Exactly one focal point per revision.']
+  }
+
+  Note: 'A contact is not an account. A revision needs at least three. The focal point is the contact IMBC and operators deal with first. An observer does not see the focal point.'
+}
+
+Table personnel {
+  id uuid [pk]
+  section_revision_id uuid [not null, unique]
+  organization_id uuid [not null]
+  managers_count int [note: 'Required before submission; nonnegative.']
+  engineers_count int [note: 'Required before submission; nonnegative.']
+  production_workers_count int [note: 'Required before submission; nonnegative.']
+  nonresident_count int [note: 'Required before submission. Whole-workforce non-resident count, not only managers. Between zero and total headcount.']
+
+  indexes {
+    (id, organization_id) [unique]
+  }
+
+  Note: 'Manufacturer-entered counts. Adata does not prefill headcount. Total is the sum of the three categories and is not stored. The separate non-resident count is a subset and is not added again. No automatic local-staff threshold or score.'
+}
+
+Table personnel_org_chart {
+  id uuid [pk]
+  personnel_id uuid [not null]
+  organization_id uuid [not null]
+  file_object_id uuid [not null]
+  position_in_list int [not null]
+
+  Note: 'At least one organisation-chart file before submission; multiple files are supported. No fixed maximum was confirmed. org_chart_sample supplies an optional sample.'
+}
+
+Table personnel_cv {
+  id uuid [pk]
+  personnel_id uuid [not null]
+  organization_id uuid [not null]
+  file_object_id uuid [not null]
+  position_in_list int [not null]
+
+  Note: 'Optional. One or more CV files.'
+}
+
+
+
+Table product_line_identity {
+  id uuid [pk]
+  profile_id uuid [not null]
+  organization_id uuid [not null]
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (id, organization_id) [unique]
+  }
+
+  Note: 'Stable identity of one product line across copy-on-write revisions. Equipment links point here.'
+}
+
+Table product_line {
+  id uuid [pk]
+  section_revision_id uuid [not null]
+  organization_id uuid [not null]
+  identity_id uuid [not null]
+  name_en text [note: 'Required on a completed manually added line. Registry names are not translated.']
+  name_ru text [note: 'Required on a completed manually added line. On a pulled line, stores the product name in the source spelling.']
+  commodity_type_id uuid [note: 'IMBC commodity_type dictionary. Manufacturer selects the descriptive type; A-E group is its parent, not a second independent input. Required for a completed manual line.']
+  tn_ved_code text [note: 'Text preserves leading zeros. Required on a completed manual line and chosen from TN VED reference data. Ten digits on a registry line; migration may require code/product resolution.']
+  production_site_identity_id uuid [note: 'Select an existing site from this profile. Required for a completed manually added line. For a pulled line, associate the registry address only when unambiguous.']
+  capacity_quantity numeric [note: 'Required with capacity_unit_id on a completed manually added line. Nonnegative annual quantity.']
+  capacity_unit_id uuid [note: 'unit dictionary. Allowed manual capacity units: pieces, tonnes, metres, sets, per year.']
+  capacity_text text [note: 'e-Ondiris capacity as returned, e.g. 8600.00 kg/year. No forced conversion into numeric/manual fields.']
+  in_country_value_share numeric(5, 2) [note: 'Percent from e-Ondiris. A non-registry line always shows 0 and has no manufacturer input for this value.']
+  enstru_code text [note: 'Registry procurement item code, shown with its name. No tender matching.']
+  enstru_name text
+  e_ondiris_record_id uuid
+  unified_register_registration_number text [note: 'Stable registry entry number for synchronization, not a separate manufacturer table column.']
+  unified_register_active boolean [note: 'Excluded/expired registry records remain visible as not active. Null for a manually added line.']
+  unified_register_included_on date
+  note text [note: 'Optional manufacturer product note. Separate from confidential IMBC notes.']
+  source product_line_source [not null, default: 'manual']
+  position_in_list int [not null]
+
+  indexes {
+    (id, organization_id) [unique]
+    (id, identity_id, organization_id) [unique, note: 'Allows an approved STR mapping to name a product revision while enforcing its stable identity and tenant.']
+    (section_revision_id, identity_id) [unique]
+    (organization_id, unified_register_registration_number)
+    (organization_id, tn_ved_code)
+  }
+
+  Note: 'At least one product before submission. Source-owned registry product facts cannot be edited or deleted by the manufacturer; local site and certificate associations remain editable under review. An added line matching an existing product name and TN VED is a duplicate; code alone is not a product identity. When a pull replaces an added duplicate, preserve its stable identity and local associations. Registry details not needed on the product card are read from the immutable e_ondiris_record snapshot referenced by this revision, not the latest unverified source row. Localization-level fields are neither fetched nor stored. Product certificates are reusable records linked below, not a single conformity file on this row.'
+}
+
+Table product_line_kpved {
+  id uuid [pk]
+  product_line_id uuid [not null]
+  organization_id uuid [not null]
+  code text [not null, note: 'KPVED code, text with leading zeros preserved. One code per row.']
+  source_name text [note: 'Registry or migration label as supplied, displayed with the code.']
+  kpved_entry_id uuid [note: 'Resolved kpved dictionary entry. Required for manually selected codes; source mismatches are flagged, not silently renamed.']
+  position_in_list int [not null]
+
+  indexes {
+    (product_line_id, code) [unique]
+  }
+}
+
+Table products_section {
+  id uuid [pk]
+  section_revision_id uuid [not null, unique]
+  organization_id uuid [not null]
+  unified_register_extract_id uuid [note: 'One extract covering the company product list. Optional upload; attached in products, not main information or once per product.']
+}
+
+Table production {
+  id uuid [pk]
+  section_revision_id uuid [not null, unique]
+  organization_id uuid [not null]
+  area_sqm numeric
+  workshop_count int
+  utilisation_percent numeric(5, 2) [note: '0 to 100.']
+
+  indexes {
+    (id, organization_id) [unique]
+  }
+
+  Note: 'The whole section is optional and is excluded from profile completeness. An empty section has no row.'
+}
+
+Table production_process {
+  production_id uuid [not null]
+  organization_id uuid [not null]
+  process_entry_id uuid [not null]
+
+  indexes {
+    (production_id, process_entry_id) [pk]
+  }
+}
+
+Table production_photo {
+  id uuid [pk]
+  production_id uuid [not null]
+  organization_id uuid [not null]
+  file_object_id uuid [not null]
+  position_in_list int [not null]
+}
+
+Table equipment_item {
+  id uuid [pk]
+  section_revision_id uuid [not null, note: 'The production section revision.']
+  organization_id uuid [not null]
+  name text [not null]
+  equipment_type_id uuid [not null]
+  quantity int [not null]
+  position_in_list int [not null]
+
+  indexes {
+    (id, organization_id) [unique]
+  }
+
+  photo_file_id uuid [note: 'Photo of this equipment item. Equipment details and attachments remain optional with the production section.']
+
+  Note: 'No equipment year. Equipment photos are linked to their own item; process photos use production_photo.'
+}
+
+Table equipment_product_line {
+  equipment_item_id uuid [not null]
+  product_line_identity_id uuid [not null]
+  organization_id uuid [not null]
+
+  indexes {
+    (equipment_item_id, product_line_identity_id) [pk]
+  }
+
+  Note: 'Optional link to one or more product lines of the same manufacturer.'
+}
+
+Table certificate_identity {
+  id uuid [pk]
+  profile_id uuid [not null]
+  organization_id uuid [not null]
+  current_expiry_schedule_id uuid [note: 'Current notification generation, independently of the verified certificate revision. Changed atomically with the new immutable schedule; null before the first saved schedule.']
+
+  indexes {
+    (id, organization_id) [unique]
+  }
+
+  Note: 'Stable identity across certificate-section revisions, allowing several product lines to reuse one certificate and its replacement file. The notification pointer does not select certificate content for operators: they continue to read only the verified section revision and its permitted file.'
+}
+
+Table certificate {
+  id uuid [pk]
+  section_revision_id uuid [not null]
+  organization_id uuid [not null]
+  identity_id uuid [not null]
+  group certificate_group [not null]
+  certificate_type_id uuid [not null]
+  custom_type_name text [note: 'Required for an Other type.']
+  not_held boolean [not null, default: false, note: 'I do not have this certificate. Allowed for the three go-live ISO types only. Excludes that type from completeness; it does not create a held certificate.']
+  number text [note: 'Required when entering a held certificate. Empty for an absence declaration.']
+  issuing_body text [note: 'Free text, required for a held certificate; no issuing-body dictionary.']
+  issued_on date [note: 'Required for a held certificate.']
+  expires_on date [note: 'Optional for a certificate that does not expire.']
+  status record_status [not null]
+  file_object_id uuid [note: 'One file per held certificate. Required before submission. Renewal replaces the file while retaining file versions. Empty for not_held.']
+
+  indexes {
+    (id, organization_id) [unique]
+    (section_revision_id, identity_id) [unique]
+  }
+
+  Note: 'Groups are company, product, other. ISO 9001, ISO 14001, and ISO 45001 are the go-live company requirements, each satisfied for completeness by a held certificate or explicit absence declaration. Product and other certificates are optional. A bare migrated certificate name is an incomplete claim, not not_held and not verified evidence. CT-KZ and the industrial certificate for internal circulation are not new certificate types. A registry extract is owned by products_section. Expired held certificates stay on the profile; active update status becomes outdated on expiry, not automatically unresponsive. Absence declarations never match the valid-held-certificate filter.'
+}
+
+Table product_line_certificate {
+  product_line_id uuid [not null]
+  organization_id uuid [not null]
+  certificate_identity_id uuid [not null]
+
+  indexes {
+    (product_line_id, certificate_identity_id) [pk]
+  }
+
+  Note: 'Many product lines can reference the same uploaded product certificate; one product can reference several. Only a held certificate in the product group may be linked. The SME verifies applicability. Resolve certificate content from the appropriate section revision; pending certificate replacements do not leak into the operator view.'
+}
+
+Table document {
+  id uuid [pk]
+  section_revision_id uuid [not null]
+  organization_id uuid [not null]
+  document_type_id uuid [not null]
+  custom_name text [note: 'Required for an additional document whose type allows a custom name.']
+  status record_status [not null]
+  file_object_id uuid
+
+  Note: 'Registration certificate and charter are mandatory; other documents follow administrator-set requirements. The licence block and licence-not-required declaration were removed. Additional documents can have a manufacturer-supplied name and file.'
+}
+
+// ---------------------------------------------------------------------------
+// Files
+// ---------------------------------------------------------------------------
+
+Table file_object {
+  id uuid [pk]
+  organization_id uuid [note: 'Owning organisation. Empty only for a survey PDF not yet matched to a BIN.']
+  purpose file_purpose [not null]
+  data_class data_class [not null]
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (id, organization_id) [unique]
+  }
+
+  Note: 'The domain row points here. Bytes live in object storage, quarantine first, then the live bucket after the scan.'
+}
+
+Table file_version {
+  id uuid [pk]
+  file_object_id uuid [not null]
+  version_number int [not null]
+  original_name text [not null]
+  byte_size bigint [not null, note: 'Up to 25 MB.']
+  declared_media_type text [not null]
+  detected_media_type text [note: 'From content, not from the file name. Allowed: PDF, JPG, PNG, DOCX, XLSX.']
+  checksum text [not null]
+  scan_state scan_state [not null, default: 'pending']
+  scanned_at timestamptz
+  uploaded_at timestamptz [not null, default: `now()`]
+  uploaded_by uuid
+  storage_key text [not null]
+
+  indexes {
+    (file_object_id, version_number) [unique]
+    (id, file_object_id) [unique, note: 'A schedule snapshot names a version belonging to its captured file object.']
+  }
+
+  Note: 'Nobody can open, download, verify, or publish a version until scan_state is passed. Earlier versions stay.'
+}
+
+Table org_chart_sample {
+  id uuid [pk]
+  file_object_id uuid [not null]
+  uploaded_by uuid [not null]
+  uploaded_at timestamptz [not null]
+  is_current boolean [not null, default: true]
+
+  indexes {
+    is_current [note: 'Partial unique index: is_current. One current sample.']
+  }
+
+  Note: 'The file manufacturers may download. It is not a required template.'
+}
+
+// ---------------------------------------------------------------------------
+// Review
+// ---------------------------------------------------------------------------
+
+Table review_assignment {
+  id uuid [pk]
+  profile_id uuid [not null]
+  organization_id uuid [not null]
+  expert_id uuid [note: 'Empty while the profile sits in the unassigned queue.']
+  assigned_by uuid [note: 'The expert who took it, or the administrator who assigned it.']
+  received_at timestamptz [not null]
+  assigned_at timestamptz
+  closed_at timestamptz [note: 'Set on submit result or on unlock.']
+
+  Note: 'An administrator who assigns sees the manufacturer name and the profile status only. A profile sent again returns to the same expert. Unlock closes the assignment and keeps decisions on sections the manufacturer does not change.'
+}
+
+Table review_decision {
+  id uuid [pk]
+  review_assignment_id uuid [not null]
+  organization_id uuid [not null]
+  expert_id uuid [not null]
+  section_revision_id uuid
+  certificate_id uuid
+  document_id uuid
+  file_version_id uuid
+  outcome record_status [not null, note: 'verified or rejected.']
+  comment text [note: 'Required when the outcome is rejected.']
+  decided_at timestamptz [not null]
+
+  Note: 'Append-only. Exactly one subject. The expert does not edit manufacturer data. A section whose mandatory file is not verified cannot itself be verified. Submit result verifies the profile only when every section is verified. Otherwise the profile is returned.'
+}
+
+// ---------------------------------------------------------------------------
+// Update status
+// ---------------------------------------------------------------------------
+
+Table update_status {
+  profile_id uuid [pk]
+  organization_id uuid [not null]
+  state update_freshness [not null, default: 'active']
+  anchor_on date [not null, note: 'The date that belongs to this profile. Starts as the day the profile was created. Moves when the manufacturer confirms, and when an SME accepts a change to the verified profile.']
+  current_quarter_on date [not null, note: 'Three calendar months from anchor_on, the same day, or the last day of that month. Asia/Almaty. Not one calendar date for every profile.']
+  missed_quarters int [not null, default: 0]
+  response_due_on date [note: 'Seven days after NOT-12 or NOT-15 was sent. Empty when no notice is waiting. The seven days start on the day the notice is sent.']
+  outdated_by_certificate boolean [not null, default: false, note: 'True only when a certificate expiry is the sole reason the status is outdated. Replacing that certificate sets the status back to active. A missed quarter clears this.']
+  updated_at timestamptz [not null, default: `now()`]
+
+  Note: 'Created with the profile. No update-status email goes out until the profile is verified. One ignored notice, plus seven days, makes the profile outdated. A second makes it unresponsive. Unresponsive stays visible to operators, observers, and the map, and sorts below active and outdated profiles. It is not deleted and the account is not blocked. Passing time does not remove Verified. Signing in does not move the clock. At most 50 of NOT-12, NOT-15, and NOT-16 go out in a day. Three months without sign-in does not move this clock.'
+}
+
+Table update_confirmation {
+  id uuid [pk]
+  profile_id uuid [not null]
+  organization_id uuid [not null]
+  kind confirmation_kind [not null, note: 'While active or outdated, one confirmation is enough. Coming back from unresponsive confirms each section. Only the last of those sets the status back to active.']
+  section_kind section_kind
+  confirmed_by uuid [not null]
+  confirmed_at timestamptz [not null]
+
+  Note: 'Append-only. Saving a section, sending changes, and accepting the NDA are not confirmations. Each confirmation is also an audit entry.'
+}
+
+Table update_status_event {
+  id uuid [pk]
+  profile_id uuid [not null]
+  organization_id uuid [not null]
+  quarter_on date [not null]
+  kind update_event_kind [not null]
+  occurred_at timestamptz [not null]
+
+  indexes {
+    (profile_id, quarter_on, kind) [unique]
+  }
+
+  Note: 'Idempotency of the daily job. One NOT-12, one NOT-15, or one NOT-16 per profile and quarter date. A notice that would pass the daily cap of 50 is not written until the day it is sent.'
+}
+
+Table certificate_expiry_schedule {
+  id uuid [pk]
+  certificate_identity_id uuid [not null]
+  organization_id uuid [not null]
+  generation int [not null, note: 'Positive, increasing per stable certificate identity. Never reuse a generation, including when an expiry date changes back to an earlier value.']
+  state certificate_schedule_state [not null, note: 'active when a held certificate has an expiry date, including an incomplete draft without a file; stopped when reminders cease, including absent, removed, or non-expiring certificates. Historical active generations are not current.']
+  file_object_id uuid
+  file_version_id uuid [note: 'Exact file version at the time of saving. Both file IDs are null when no file has been uploaded; a later upload creates a new generation.']
+  expires_on date [note: 'Expiry-date snapshot, independent of later changes to certificate rows. Null for a stopped non-expiring certificate.']
+  created_at timestamptz [not null, default: `now()`, note: 'Schedule start. Never backfill thresholds already passed at this time, including the expiry-day email for an already expired saved certificate. Asia/Almaty.']
+  created_by uuid
+
+  indexes {
+    (certificate_identity_id, generation) [unique]
+    (id, certificate_identity_id, organization_id) [unique]
+  }
+
+  checks {
+    `generation > 0` [name: 'certificate_expiry_schedule_positive_generation']
+    `(file_object_id IS NULL) = (file_version_id IS NULL)` [name: 'certificate_expiry_schedule_file_pair']
+    `state <> 'active' OR expires_on IS NOT NULL` [name: 'certificate_expiry_schedule_active_snapshot']
+  }
+
+  Note: 'Immutable generations anchored to the stable certificate identity, not to a deletable working certificate row. On a saved change to the file version, expiry date, or eligibility, lock certificate_identity, append the next generation, and replace its current_expiry_schedule_id in the same transaction. A retry with the same current snapshot is a no-op; a reverted date is a new generation. Only the pointed-to active generation may send, rechecked when dispatching, so superseded jobs cannot send stale reminders. Removing a certificate or discarding a draft stops or restores its current schedule as applicable through a new generation; old working rows may be deleted while identity and snapshots remain. Saving a stopped generation cancels old reminders without deleting history. Notices are independent of profile visibility and SME verification; operators never receive them or use this pointer to read pending certificate content. Preserve the before/after pointer and the triggering certificate values in audit.'
+}
+
+Table certificate_expiry_notice {
+  id uuid [pk]
+  schedule_id uuid [not null]
+  threshold_days int [not null, note: '60, 30, 7, or 0.']
+  sent_at timestamptz [not null]
+
+  indexes {
+    (schedule_id, threshold_days) [unique]
+  }
+
+  checks {
+    `threshold_days IN (60, 30, 7, 0)` [name: 'certificate_expiry_notice_threshold']
+  }
+
+  Note: 'Append-only delivery fact for one generation and threshold. Replacement of either the file or the expiry date creates a different generation and can send that threshold again. Claim/deliver idempotently with notification.dedup_key; recipient deduplication and daily batching remain separate. The dispatcher checks that this is still the current active generation. Earlier reminders and late expiry-day emails are never backfilled.'
+}
+
+// ---------------------------------------------------------------------------
+// IMBC records
+// ---------------------------------------------------------------------------
+
+Table site_survey_record {
+  id uuid [pk]
+  profile_id uuid [not null]
+  organization_id uuid [not null]
+  visit_started_on date [not null]
+  visit_ended_on date
+  result survey_result [not null]
+  file_object_id uuid [note: 'The signed report. A migrated visit may have none, and then the profile is not site surveyed.']
+  expires_on date [note: 'Set by the person who records the survey.']
+  comment text [note: 'Class C. Operators see the report and the dates, not this comment.']
+  source survey_source [not null]
+  recorded_by uuid
+  recorded_at timestamptz [not null, default: `now()`]
+
+  Note: 'A profile is site surveyed while some record has result yes, a signed file, and, when an expiry date is set, that date is still in the future. A record with no expiry date stays site surveyed until IMBC sets a date that has passed. There is no automatic one-year or two-year term. The mark is derived, not stored on the profile. Site surveyed is tier 2. Several records over time.'
+}
+
+Table due_diligence_record {
+  profile_id uuid [pk]
+  organization_id uuid [not null]
+  checked_on date [not null, note: 'Class A. Operators and observers see this date.']
+  adata_result diligence_result [note: 'The value the automatic scoring returned, before an SME change.']
+  result diligence_result [not null, note: 'Class C. The stored result, after any SME change. Green, amber, or red. Operators and observers do not see it.']
+  comment text
+  report_file_id uuid
+  overridden_by uuid
+  overridden_at timestamptz
+  enhanced enhanced_diligence [not null, default: 'not_done', note: 'Class A. Operators and observers see whether this was done, not the comment or the report.']
+  enhanced_comment text
+  enhanced_report_file_id uuid
+  updated_at timestamptz [not null, default: `now()`]
+
+  Note: 'One current record per manufacturer. Every automatic replacement and SME override atomically appends complete before/after record values and the complete ordered before/after due_diligence_check arrays to audit_entry.diff, with author or system actor, time, and a shared operation ID. Record creation has an empty before value. Keep enough information to reconstruct every earlier result, source value, mark, subject, comment, report reference, and override; a generic changed message is insufficient. Audit history, not extra current-state rows, retains earlier runs. The check runs when the profile is created, on the same Adata read as the prefill, and again once a quarter from the last check. A BIN in a registration that never becomes a profile is not queried. Red keeps the profile off operator and observer views until an SME sets green or amber. Green and amber do not. Political-exposure lists are not used. The parts of the extended report that are not checks are not stored.'
+}
+
+Table due_diligence_check {
+  id uuid [pk]
+  profile_id uuid [not null]
+  organization_id uuid [not null]
+  group_name text [not null, note: 'Company enterprise, finance, procurement, or tax payments; the director; or a founder or beneficiary.']
+  subject_name text [not null, note: 'The company or the person this line is about.']
+  check_name text [not null]
+  adata_value text [note: 'Empty when the mark is no answer.']
+  mark diligence_mark [not null]
+  position int [not null]
+
+  indexes {
+    (profile_id, position) [unique]
+  }
+
+  Note: 'The lines of the current run. A scored yes is a finding. A shown-only yes is attention. No answer is not scored. A line Adata does not return is absent, not a row marked clear. Replacing the run replaces these current rows only after capturing their complete ordered values with the record in the same atomic audit operation; deleting previous results without reconstructable history is forbidden. Class C.'
+}
+
+Table external_check {
+  id uuid [pk]
+  profile_id uuid [not null]
+  organization_id uuid [not null]
+  connector connector_code [not null]
+  is_mock boolean [not null, note: 'Phase 1: Adata is the real service. e-Ondiris is the local copy in e_ondiris_record, not a call when a section opens. Every other connector is a mock.']
+  latest_attempt_id uuid
+
+  indexes {
+    (profile_id, connector) [unique]
+  }
+
+  Note: 'Class C. Not read by the catalog, exports, or the pull API.'
+}
+
+Table external_check_attempt {
+  id uuid [pk]
+  external_check_id uuid [not null]
+  requested_at timestamptz [not null]
+  value text
+  status text [not null]
+  source text
+  is_test_data boolean [not null, default: false]
+  unavailable boolean [not null, default: false, note: 'Unavailability is never stored as a negative finding.']
+
+  Note: 'A connector takes a BIN and returns a value, a status, a date, and a source. The Adata allowance is 3,000 BIN a month. One BIN is one request. A rate limit is not a finding.'
+}
+
+Table e_ondiris_record {
+  id uuid [pk]
+  bin text [not null]
+  registration_number text [not null]
+  legal_name text
+  place_name text [note: 'region_kato as returned. A place name, not a KATO code.']
+  production_address text
+  website text
+  phone text
+  email text
+  product_name text
+  production_capacity text
+  tn_ved_code text
+  kpved_code text
+  kpved_name text
+  enstru_code text
+  enstru_name text
+  in_country_value_share numeric(5, 2)
+  included_on date
+  active boolean
+  content_hash text [not null, note: 'Detects a change. The daily pull writes new and changed rows.']
+  pulled_at timestamptz [not null]
+  is_current boolean [not null, default: true, note: 'Synchronization pointer only. Publishing a newer source snapshot clears this flag on the previous snapshot without rewriting its source facts.']
+
+  indexes {
+    (bin, registration_number, content_hash) [unique]
+    (bin, registration_number) [note: 'Partial unique index: is_current. A profile pull reads the latest snapshot for each registry record.']
+    bin
+  }
+
+  Note: 'Versioned local copy of e-Ondiris. Changed source facts create an immutable snapshot; product revisions keep their snapshot ID so verified readers cannot see a later unverified pull through a join. There is no published API and opening a section does not call e-Ondiris. The barcode, AGSK-3, NTIN, the registry comment, the data source, and localization-level data are not fetched or stored. A failed daily pull is not a due-diligence finding.'
+}
+
+Table imbc_note {
+  id uuid [pk]
+  profile_id uuid [not null]
+  organization_id uuid [not null]
+  author_id uuid
+  kind imbc_note_kind [not null, default: 'general']
+  body text [not null]
+  created_at timestamptz [not null, default: `now()`]
+
+  Note: 'Class C. SMEs and the IMBC general director. Never an operator, an observer, a manufacturer, or an administrator.'
+}
+
+Table imbc_engagement {
+  profile_id uuid [pk]
+  organization_id uuid [not null]
+  receipt_confirmed boolean [note: 'Historical EOI receipt. Null means unknown, not no.']
+  response eoi_response
+  response_summary text
+  ready_for_site_visit boolean [note: 'Historical readiness, not a survey or request. Null means unresolved/unknown.']
+  added_to_imbc_year int [note: 'Historical year in the Excel database; not platform registration.']
+  folder_url text [note: 'SharePoint/folder hyperlink target. Internal reference, not an uploaded attachment.']
+
+  Note: 'Class C historical company context for SMEs and IMBC GD. Yellow Review only fields are retained for review without creating a new EOI workflow. No duplicate operational AGAR, ranking, site-survey, or free-form source columns.'
+}
+
+Table imbc_eoi_email_event {
+  id uuid [pk]
+  profile_id uuid [not null]
+  organization_id uuid [not null]
+  sent_on date [not null]
+
+  indexes {
+    (profile_id, sent_on) [unique]
+  }
+
+  Note: 'Historical sent/resent dates from Excel. Ambiguous date strings remain in import_resolution. Recording one never sends an email.'
+}
+
+Table imbc_engagement_source {
+  profile_id uuid [not null]
+  organization_id uuid [not null]
+  source_entry_id uuid [not null]
+
+  indexes {
+    (profile_id, source_entry_id) [pk]
+  }
+
+  Note: 'Acquisition-source dictionary. A composite source cell becomes several rows only after approved splitting and alias normalization. Independent of the manufacturer registration answer.'
+}
+
+Table imbc_product_context {
+  product_line_identity_id uuid [pk]
+  profile_id uuid [not null]
+  organization_id uuid [not null]
+  programme_id uuid [note: 'programme dictionary, historical LC and LPS labels. Internal manufacturer context only; never creates an LPS entry or localization workflow.']
+  priority_id uuid [note: 'imbc_priority dictionary, initially the approved source priorities 1 to 6. No public ranking.']
+
+  Note: 'Class C. Product-level context from the manufacturers workbook, separate from the operator-visible class G LPS register. Keep values unresolved in the migration journal when the product association is unclear; do not duplicate them across all company products.'
+}
+
+Table site_survey_request {
+  id uuid [pk]
+  profile_id uuid [not null]
+  organization_id uuid [not null]
+  requested_by uuid [not null]
+  requested_at timestamptz [not null, default: `now()`]
+
+  Note: 'A verified manufacturer asks for a site survey. The request names no product. It appears in the SME list and sends no email. It does not create a site_survey_record.'
+}
+
+Table agar_cdp_record {
+  id uuid [pk]
+  product_line_identity_id uuid [not null, unique, note: 'One record per product line. A manufacturer can have several, each on its own product.']
+  profile_id uuid [not null]
+  organization_id uuid [not null]
+  kind agar_cdp_kind [not null, note: 'A finished CDP stays a CDP. New work is recorded as an AGAR.']
+  status agar_cdp_status [not null]
+  execution_percent numeric(5, 2) [note: 'Optional 0..100 execution progress. Distinct from workflow status and never used to determine tier. Only populate from migration after the scale is confirmed.']
+  report_file_id uuid [note: 'Not shown on the company page operators and observers see. Phase 1 does not send it to operators.']
+  comment text
+  requested_by_manufacturer boolean [not null, default: false, note: 'Requested is used only when the manufacturer asked. IMBC can shortlist a product that has no request.']
+  recorded_by uuid
+  updated_at timestamptz [not null, default: `now()`]
+
+  Note: 'Tier 3 qualifying statuses are report_issued, recommendations_in_progress, and recommendation_issued. Requested, shortlisted, visit_done, technical_assessment_done, paused, and discontinued do not themselves establish tier 3. Historical statements about disengagement or missing SME require IMBC review before mapping to discontinued or paused; preserve the explanation as comment. No questionnaire. A manufacturer may request only for a product with an STR. A request sends no email and does not start a visit. Recommendations are not sent to operators.'
+}
+
+// ---------------------------------------------------------------------------
+// LPS register: company identity and product/service proposals
+// ---------------------------------------------------------------------------
+
+Table lps_company {
+  id uuid [pk]
+  name text [not null, note: 'Nonblank company or local venture name as established by the SME. Not unique: a matching name alone does not establish identity.']
+  created_by uuid [not null]
+  created_at timestamptz [not null, default: `now()`]
+  updated_by uuid [not null]
+  updated_at timestamptz [not null, default: `now()`]
+  deleted_at timestamptz
+  deleted_by uuid
+
+  Note: 'Class G. Reference identity shared by several LPS entries. Independent of organization, manufacturer_profile, BIN, and user accounts. The SME may create, edit, or soft-delete it; deletion is refused while any non-deleted entry refers to it. Countries describe the supplied association, not inferred domicile or ownership. All business edits are audited. No external company-data connector runs for this record.'
+}
+
+Table lps_company_country {
+  lps_company_id uuid [not null]
+  country_id uuid [not null, note: 'country dictionary, using ISO 3166-1 alpha-2 codes and translated labels. Kazakhstan is permitted.']
+
+  indexes {
+    (lps_company_id, country_id) [pk]
+  }
+
+  Note: 'Zero or more countries. Source spelling variants become approved dictionary aliases; no delimited country field and no assumption about foreign parent companies.'
+}
+
+Table lps_entry {
+  id uuid [pk]
+  lps_company_id uuid [not null]
+  source_type_id uuid [not null, note: 'programme dictionary: LC or LPS. Historical Type column. New entries default to LPS in the application; display LC as LC (legacy). No workflow meaning.']
+  scope_description text [not null, note: 'Nonblank product, service (including maintenance), or confirmed combined scope being localized. No manufacturer product_line or TN VED is required.']
+  status_id uuid [not null, note: 'lps_status dictionary: planning, in_process, localized, on_hold. Selected directly by SME, with no required sequence.']
+  planned_launch text [note: 'Optional YYYY, Q1..Q4 YYYY, quarter range such as Q4 2027 / Q1 2028, or TBD. Validate years, quarter numbers, and ordered range bounds on save. Canonical spacing; retain period precision. Null means not supplied; TBD means explicitly undecided. Chronological filter/sort bounds are derived, never stored as a fictitious exact launch date.']
+  comment text [note: 'Visible to operators as part of this LPS entry. Internal manufacturer notes remain separate.']
+  investment_usd numeric [note: 'Optional nonnegative USD amount. Preserve decimal precision; show two decimals in the table. Null is unknown, explicit zero is valid. Never duplicate a combined source amount across split entries.']
+  new_jobs int [note: 'Optional nonnegative count. Null is unknown, explicit zero is valid. Do not duplicate a combined source count across split entries.']
+  last_updated_on date [note: 'Optional SME-maintained date on which the business information was last updated, from source column S on migration. Does not advance merely because data was imported or saved.']
+  migration_key text [unique, note: 'Optional immutable key for the one-time source dataset, sheet, row, and SME-resolved scope. Reused across trial imports; not a company identity or user-facing number.']
+  created_by uuid [not null]
+  created_at timestamptz [not null, default: `now()`]
+  updated_by uuid [not null]
+  updated_at timestamptz [not null, default: `now()`]
+  deleted_at timestamptz
+  deleted_by uuid
+
+  indexes {
+    (lps_company_id, status_id)
+    status_id
+    last_updated_on
+  }
+
+  Note: 'Class G. SME CRUD; operator and director read-only; manufacturer, observer, and administrator have no business-record access. Saved entries are immediately visible until soft-deleted, irrespective of status, launch period, manufacturer verification, or NDA. Referenced company must not be deleted. Company/scope/status plus the default source type suffice to create an entry; other business values are optional. No uniqueness constraint on company or scope: distinct proposals can concern the same company. Save child rows atomically with the entry and audit all changes. updated_at/updated_by reflect the latest entry, child, or shared-company edit affecting this displayed row; last_updated_on remains the business date. No approval, submission action, automatic status changes, notifications, tier effects, export subscription, or operator pull API.'
+}
+
+Table lps_entry_commodity {
+  lps_entry_id uuid [not null]
+  commodity_type_id uuid [not null, note: 'Existing commodity_type dictionary; its parent must be an A-E commodity_group.']
+
+  indexes {
+    (lps_entry_id, commodity_type_id) [pk]
+  }
+
+  Note: 'Zero or more types per LPS scope, with groups derived from the selected types. Use approved aliases and parents, never positional pairing from multi-value source cells. Missing classification remains Unknown, including a service without a matching type.'
+}
+
+Table lps_entry_source {
+  lps_entry_id uuid [not null]
+  import_row_id uuid [not null]
+
+  indexes {
+    (lps_entry_id, import_row_id) [pk]
+  }
+
+  Note: 'Class C restricted migration provenance, visible only to SMEs and the director, excluded from the class G operator view. Links every contributing source row from the accepted LPS migration to the resolved entry, including approved splits or merges. The import batch must have source_kind=lps. Source measures are allocated by SME or left unresolved; never copied into every split entry. Repeated trial runs retain the stable entry migration_key and company mapping.'
+}
+
+Table lps_location {
+  id uuid [pk]
+  lps_entry_id uuid [not null]
+  city text [note: 'Free-text localization city or settlement; trimmed on save.']
+  region_id uuid [note: 'Existing Kazakhstan region dictionary, including cities with separate region status.']
+  sort_order int [not null, default: 0]
+
+  indexes {
+    (lps_entry_id, city, region_id) [unique, note: 'NULLS NOT DISTINCT. Reject a duplicate confirmed pair; at least one of city or region must be present.']
+  }
+
+  Note: 'Zero or more paired localization places. Region and city are not independent multi-value lists. No geocoding, manufacturer production site, or inferred city-to-region mapping is required.'
+}
+
+Table lps_contact {
+  id uuid [pk]
+  lps_entry_id uuid [not null]
+  full_name text [note: 'Optional for a confirmed general company contact. A supplied person name is not an account identity.']
+  role_title text [note: 'Optional free text; does not use the manufacturer management/technical/commercial role dictionary.']
+  sort_order int [not null, default: 0]
+
+  Note: 'One of any number of focal points for this LPS entry, or an explicitly confirmed general company contact with no person name. Require at least a name, an email, or a phone. Missing roles and methods do not prevent saving. Related methods belong to this contact only after their association is established. There is no single-focal-point constraint and these records never trigger invitations or emails.'
+}
+
+Table lps_contact_email {
+  lps_contact_id uuid [not null]
+  email text [not null, note: 'One address, validated on save. Trim and use case-insensitive duplicate comparison within this contact.']
+  sort_order int [not null, default: 0]
+
+  indexes {
+    (lps_contact_id, email) [pk]
+  }
+}
+
+Table lps_contact_phone {
+  lps_contact_id uuid [not null]
+  phone text [not null, note: 'One international phone number, including country code and optional extension. Text preserves + and leading zeros; normalize format without changing the number.']
+  sort_order int [not null, default: 0]
+
+  indexes {
+    (lps_contact_id, phone) [pk]
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Operator records
+// ---------------------------------------------------------------------------
+
+Table works_with_mark {
+  id uuid [pk]
+  operator_organization_id uuid [not null]
+  profile_id uuid [not null]
+  state mark_state [not null]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (operator_organization_id, profile_id) [unique]
+  }
+
+  Note: 'The current mark. Other operators see only how many of the major operators have a validated mark. A comment the operator writes is an operator note, not a column here.'
+}
+
+Table works_with_mark_change {
+  id uuid [pk]
+  works_with_mark_id uuid [not null]
+  state mark_state [not null]
+  changed_by uuid [not null]
+  changed_at timestamptz [not null]
+  decided_by uuid [note: 'The expert who validated or rejected the change.']
+  decided_at timestamptz
+
+  Note: 'Append-only history of the mark.'
+}
+
+Table operator_visit_mark {
+  id uuid [pk]
+  operator_organization_id uuid [not null]
+  profile_id uuid [not null]
+  visited_on date [not null]
+  file_object_id uuid
+  recorded_by uuid [not null]
+  recorded_at timestamptz [not null, default: `now()`]
+  decision mark_state [not null, default: 'waiting', note: 'The decision is visible to IMBC only.']
+  decided_by uuid
+  decided_at timestamptz
+
+  Note: 'The operator records that its organisation visited the manufacturer. This does not make the profile site surveyed.'
+}
+
+Table operator_note {
+  id uuid [pk]
+  operator_organization_id uuid [not null]
+  profile_id uuid [not null]
+  author_id uuid [not null]
+  body text [not null]
+  created_at timestamptz [not null, default: `now()`]
+  deleted_at timestamptz [note: 'Only the author deletes a note. Notes are not edited.']
+
+  Note: 'Class D. The same operator organisation, the expert, and the director. Absent from exports, subscriptions, the pull API, and the company-page PDF.'
+}
+
+// ---------------------------------------------------------------------------
+// Requests
+// ---------------------------------------------------------------------------
+
+Table imbc_request {
+  id uuid [pk]
+  sender_user_id uuid [not null]
+  operator_organization_id uuid [not null]
+  profile_id uuid [note: 'Optional linked manufacturer.']
+  subject text [not null]
+  message text [not null]
+  status request_status [not null, default: 'open']
+  reply text [note: 'The expert reply. Closing with no reply sends no email.']
+  replied_by uuid
+  replied_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+
+  Note: 'An operator message to IMBC staff. The manufacturer is not a party, even when a profile is linked.'
+}
+
+Table operator_request {
+  id uuid [pk]
+  profile_id uuid [not null]
+  section_kind section_kind [note: 'The ask names a section, or free_text, or both.']
+  free_text text
+  status request_status [not null, default: 'open']
+  reply text [note: 'The manufacturer writes one reply. It does not change the profile. A further ask is a new request.']
+  replied_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+
+  Note: 'The ask itself, readable by the manufacturer. The manufacturer is not told which operator asked. The operator identity is operator_request_party, so a read of this table cannot leak it.'
+}
+
+Table operator_request_party {
+  operator_request_id uuid [pk]
+  operator_organization_id uuid [not null]
+  sender_user_id uuid [not null]
+
+  Note: 'Class C and class D. IMBC and the sending operator. Never selected for the manufacturer.'
+}
+
+// ---------------------------------------------------------------------------
+// Exchange
+// ---------------------------------------------------------------------------
+
+Table export_subscription {
+  id uuid [pk]
+  owner_user_id uuid [not null, note: 'One operator user, not the organisation.']
+  name text [not null]
+  filters jsonb [not null, note: 'The saved search. Common: name or BIN, region, commodity group, commodity type, certificate type, site surveyed, tier. Extended: TN VED prefix, KPVED prefix, OKED, works-with count, headcount range, certificate valid until, Unified Register, verification date.']
+  format export_format [not null]
+  period subscription_period [not null]
+  state subscription_state [not null, default: 'active']
+  pause_reason pause_reason
+  created_at timestamptz [not null, default: `now()`]
+
+  Note: 'When the account becomes inactive, its subscriptions pause. There is no SFTP and no column picker in Phase 1.'
+}
+
+Table export_file {
+  id uuid [pk]
+  owner_user_id uuid [not null]
+  file_object_id uuid [not null]
+  row_count int
+  expires_at timestamptz [not null, note: '90 days.']
+  created_at timestamptz [not null, default: `now()`]
+
+  Note: 'Subscription output. A one-off search export is streamed and is not stored. The email carries a link, not the file. The link still requires sign-in.'
+}
+
+Table subscription_run {
+  id uuid [pk]
+  export_subscription_id uuid [not null]
+  ran_at timestamptz [not null]
+  result run_result [not null]
+  row_count int
+  export_file_id uuid
+  error text
+
+  Note: 'A failed run sends no email and stays on this list. Each run reads a repeatable snapshot of the visible register.'
+}
+
+// ---------------------------------------------------------------------------
+// Demand forecast and NDA
+// ---------------------------------------------------------------------------
+
+Table nda_version {
+  id uuid [pk]
+  version_number int [not null, unique]
+  body text [not null]
+  published_at timestamptz [not null]
+  published_by uuid [not null]
+  is_current boolean [not null, default: false]
+
+  indexes {
+    is_current [note: 'Partial unique index: is_current.']
+  }
+
+  Note: 'Earlier versions stay, with their acceptances. A new current version closes the forecast and the technical requirements until the manufacturer accepts it.'
+}
+
+Table account_nda_acceptance {
+  id uuid [pk]
+  user_account_id uuid [not null]
+  organization_id uuid [not null]
+  nda_version_id uuid [not null]
+  accepted_at timestamptz [not null, note: 'Original server-recorded time of the acceptance tick, including registration before a profile exists. Never replaced by password-setting or profile-creation time.']
+  ip_address text [not null, note: 'Address captured with the original acceptance.']
+
+  indexes {
+    (user_account_id, nda_version_id) [unique]
+    (id, organization_id, nda_version_id) [unique]
+  }
+
+  Note: 'Append-only canonical NDA evidence scoped to the manufacturer account, including before password setup. Save atomically with accepted registration; the account and organisation can exist without a manufacturer_profile. A repeated request for the same account/version reuses this row without changing its time or IP; a new NDA version creates another row. Pending registration or invitation retries reuse the existing account identity and any existing profile, without overwriting acceptance evidence or resetting the profile to Draft. Migration itself does not fabricate consent: the same table captures the migrated first-sign-in tick and later-version acceptances. Only the manufacturer account of this organisation may accept for it. One tick covers the detailed forecast, STR, and KTRE; no name, position, or signature image is required.'
+}
+
+Table nda_acceptance {
+  id uuid [pk]
+  profile_id uuid [not null]
+  organization_id uuid [not null]
+  nda_version_id uuid [not null]
+  account_nda_acceptance_id uuid [not null, unique, note: 'Canonical consent facts. The composite reference guarantees that the source acceptance has the same organisation and NDA version.']
+  linked_at timestamptz [not null, default: `now()`, note: 'Time the acceptance was linked to an existing profile, not the time of consent.']
+
+  indexes {
+    (profile_id, nda_version_id) [unique]
+  }
+
+  Note: 'Append-only profile linkage, class B. On profile creation link the durable account acceptances idempotently in the same transaction. Whenever a profile already exists, including migrated first sign-in or acceptance of a later NDA version, save the account acceptance and its profile link atomically. Join account_nda_acceptance to read the original accepted_at and ip_address; do not duplicate or rewrite those facts here. Account, profile, and source acceptance must belong to the same manufacturer organisation. A profile may retain acceptances of earlier versions, but access requires the current version and Verified status. If the NDA changes between registration and password setup, preserve the original acceptance and obtain the new version before allowing gated content. Opening a section does not ask again when the current version is already accepted.'
+}
+
+Table forecast_version {
+  id uuid [pk]
+  horizon_end_year int [not null, note: '2031 for the signed-off workbook. A later approved horizon is version metadata, not a new quantity column.']
+  imported_at timestamptz [not null]
+  imported_by uuid [not null]
+  published_at timestamptz
+  published_by uuid
+  is_current boolean [not null, default: false]
+
+  indexes {
+    is_current [note: 'Partial unique index: is_current. Explicit Publish replaces the manufacturer-visible version; earlier versions stay with IMBC.']
+  }
+
+  Note: 'Approved forecast source mapping is at the top of this DBML. No FPAL, per-operator quantities, operator names, or original operator files are retained in the forecast tables. Row count is source-dependent, not a fixed schema property.'
+}
+
+Table forecast_import_issue {
+  id uuid [pk]
+  forecast_version_id uuid [not null]
+  row_number int [not null]
+  field text
+  problem text [not null]
+  source_values jsonb [note: 'Only permitted forecast columns needed to resolve this issue; exclude FPAL and any operator-specific extra columns. Preserve original negative/ambiguous values rather than correcting them silently.']
+  resolution text [note: 'Correction, approved mapping, or explicit acceptance of a negative quantity with its source meaning. Unresolved issues continue to withhold the faulty row.']
+  resolved_by uuid
+  resolved_at timestamptz
+
+  Note: 'A faulty row is reported and withheld from publication without stopping valid rows. Missing required headers stop import before row processing. Unknown optional A-E crosswalks are informational and do not invalidate otherwise usable forecast rows.'
+}
+
+Table forecast_line {
+  id uuid [pk]
+  forecast_version_id uuid [not null]
+  row_number int [not null]
+  source_id text [note: 'Optional input id. Blank in the signed-off workbook; not a unique product identity.']
+  kpved_code text [note: 'Optional text. Blank in the signed-off workbook; preserve leading zeros when supplied.']
+  kpved_name text [note: 'Optional supplied name, shown beside the KPVED code. Do not fabricate it when both source values are empty.']
+  kpved_entry_id uuid [note: 'Resolved kpved dictionary entry when supplied code can be matched.']
+  tn_ved_code text [not null, note: 'Full code or source prefix, stored as text. Prefix search matches longer codes. Not a unique line key.']
+  commodity_id uuid [not null, note: 'forecast_commodity dictionary, distinct from manufacturer A-E commodity_group.']
+  subcommodity_id uuid [not null, note: 'forecast_subcommodity dictionary. Its parent must equal commodity_id.']
+  description text [not null]
+  unit_id uuid [not null, note: 'unit dictionary, resolved by approved aliases. No unapproved quantity conversion.']
+  total_quantity numeric [not null, note: 'Quantity through forecast_version.horizon_end_year. Preserve fractional values. Zero is valid; missing/nonnumeric values require correction. A negative is publishable only after explicit IMBC acceptance recorded in its resolved import issue; never silently take the absolute value or change its sign.']
+
+  indexes {
+    (forecast_version_id, row_number) [unique]
+    (forecast_version_id, tn_ved_code)
+    (forecast_version_id, commodity_id, subcommodity_id)
+  }
+
+  Note: 'Manufacturer view columns: optional KPVED code/name, TN VED, forecast commodity, subcommodity, full description, unit, and total through the version horizon. Source id and row number are import provenance, not manufacturer-facing columns. A-E and manufacturer commodity type are available only through approved crosswalks. NDA-gated view/search/filter; no download or print.'
+}
+
+Table forecast_classification {
+  subcommodity_id uuid [not null]
+  commodity_type_id uuid [not null]
+  approved_by uuid [not null]
+  approved_at timestamptz [not null]
+
+  indexes {
+    (subcommodity_id, commodity_type_id) [pk]
+  }
+
+  Note: 'Optional approved crosswalk from the forecast hierarchy to IMBC manufacturer commodity types; the A-E group is the type parent. Several mappings are allowed. No source workbook supplies this mapping; absence does not block publication. Crosswalk approval never edits the original forecast classification.'
+}
+
+Table technical_requirements_product {
+  id uuid [pk]
+  organization_id uuid [not null, note: 'Owning IMBC organisation; this is shared technical-requirements content, not a manufacturer product line.']
+  commodity_group_id uuid [not null, note: 'The section groups files by commodity group, then by product.']
+  product_label text [not null, note: 'The product as IMBC names it. Not a forecast line and not an operator.']
+  created_at timestamptz [not null, default: `now()`]
+  retired_at timestamptz [note: 'Retired products stay for history and cannot receive new mappings or qualify a new AGAR request.']
+
+  indexes {
+    (id, organization_id) [unique]
+    (organization_id, commodity_group_id, product_label) [unique]
+  }
+
+  Note: 'Stable IMBC content identity shared by STR and KTRE versions and approved manufacturer-product mappings. The group must be a commodity_group entry. Label changes do not change identity and are audited. Do not delete a referenced product. Content setup and maintenance use existing IMBC responsibilities; this is not a new application or approval workflow.'
+}
+
+Table technical_requirements_file {
+  id uuid [pk]
+  technical_requirements_product_id uuid [not null]
+  organization_id uuid [not null, note: 'Same IMBC owner as the technical-requirements product and the file object.']
+  kind technical_requirements_kind [not null]
+  file_object_id uuid [not null]
+  uploaded_by uuid [not null]
+  uploaded_at timestamptz [not null]
+  removed_at timestamptz
+
+  indexes {
+    (technical_requirements_product_id, kind) [note: 'Partial unique index: removed_at is null. One live STR and one live KTRE per stable technical-requirements product.']
+  }
+
+  Note: 'IMBC text for one shared technical-requirements product, either STR or KTRE; display group and label come from that product. Retire the previous file row and add its replacement atomically, retaining history. Operator names, project names, and brands are already removed. Opened from the technical-requirements section, not from a forecast line. Zoom and scroll; no download or print. The platform does not parse the PDF. A product may have neither file. A file supplied in one language is shown in Kazakh, English, and Russian without translation. Class F. Only IMBC-owned, successfully scanned content can be published or satisfy the STR gate.'
+}
+
+Table product_line_requirements_product {
+  product_line_identity_id uuid [not null]
+  organization_id uuid [not null, note: 'Manufacturer owner of the product line, not the IMBC owner of the shared technical-requirements product.']
+  technical_requirements_product_id uuid [not null]
+  approved_product_line_id uuid [not null, note: 'Product row whose description and TN VED were reviewed for this mapping. Composite FK enforces the same stable identity and manufacturer tenant.']
+  approved_by uuid [not null, note: 'IMBC SME acting within the existing product review/content setup responsibilities.']
+  approved_at timestamptz [not null]
+  revoked_by uuid
+  revoked_at timestamptz
+
+  indexes {
+    (product_line_identity_id, technical_requirements_product_id) [pk]
+  }
+
+  Note: 'Explicit approved applicability, never inferred from label, group, or TN VED alone. This is review/setup metadata, not a new end-user approval screen or workflow. The manufacturer cannot approve mappings. A new AGAR request requires a non-revoked mapping to the currently verified product row, a non-retired requirements product, and its live successfully scanned STR file; KTRE alone is insufficient. SME review revalidates applicability when product description or TN VED materially changes. An unchanged copy-on-write product may carry the approval to its new verified row only after confirming those values are unchanged and auditing the carry-forward. Every approval, revocation, and reapproval keeps its previous values in audit. Later removal of STR prevents new requests but does not erase an existing AGAR/CDP record or its history.'
+}
+
+// ---------------------------------------------------------------------------
+// Audit and the catalog projection
+// ---------------------------------------------------------------------------
+
+Table audit_entry {
+  id uuid [pk]
+  occurred_at timestamptz [not null, default: `now()`]
+  user_account_id uuid
+  organization_id uuid
+  object_type text [not null]
+  object_id uuid
+  action text [not null, note: 'Includes sign-in, sign-out, refused requests, status changes, decisions, NDA acceptances, exports, downloads, company-page opens, and LPS create/update/soft-delete including company and child-record changes.']
+  diff jsonb [note: 'Structured before/after values and operation_id for correlated changes. A due-diligence replacement contains the full record and ordered check arrays before and after the operation, so earlier results can be reconstructed. System actions retain an explicit system actor in the event payload when user_account_id is null.']
+  refused boolean [not null, default: false]
+
+  Note: 'Append-only, partitioned by month, kept for 5 years. The director reads all of it. The administrator reads account events only. No update and no delete.'
+}
+
+Table activity_snapshot {
+  id uuid [pk]
+  period snapshot_period [not null]
+  period_start date [not null]
+  period_end date [not null]
+  new_registrations int [not null]
+  taken_at timestamptz [not null]
+
+  indexes {
+    (period, period_start) [unique]
+  }
+
+  Note: 'Week and month counts of the register. Which company pages an operator opened stays in audit_entry, action company_page_opened. Contracts are not recorded.'
+}
+
+Table activity_snapshot_count {
+  id uuid [pk]
+  activity_snapshot_id uuid [not null]
+  dimension snapshot_dimension [not null]
+  dimension_key text [not null]
+  manufacturer_count int [not null]
+
+  indexes {
+    (activity_snapshot_id, dimension, dimension_key) [unique]
+  }
+}
+
+Table catalog_profile {
+  profile_id uuid [pk]
+  organization_id uuid [not null]
+  bin text [not null]
+  legal_name text
+  name_en text
+  headcount int
+  workshop_count int
+  utilisation_percent numeric(5, 2)
+  unified_register_registered boolean
+  site_surveyed boolean [not null]
+  site_surveyed_on date
+  current_site_survey_id uuid
+  update_status update_freshness [not null]
+  tier profile_tier [not null, note: 'Derived: verified is tier 1, site surveyed is tier 2. Tier 3 is recorded per product in catalog_tier3_product.']
+  verified_at timestamptz
+  registered_at timestamptz
+  pending_changes boolean [not null]
+  main_tn_ved_code text [note: 'Derived from the current verified products revision: take the first nonblank product_line.tn_ved_code ordered by position_in_list ascending, then stable identity_id ascending. Null when no verified line has a code. Independent of active search filters; no manufacturer main-code input and no numerical sorting of codes.']
+  works_with_major_count int [not null, note: 'Validated count out of three; never identifies other operators.']
+  due_diligence_checked_on date
+  enhanced_due_diligence_done boolean [not null]
+  visible boolean [not null, note: 'Verified and due diligence green/amber; unresponsive remains visible.']
+  refreshed_at timestamptz [not null]
+
+  Note: 'Rebuilt from verified revisions and authorized class A facts. Geography comes from production_site through production_region facets, not a single legal-region field. A regional count counts distinct manufacturers once in each applicable production region; the overall manufacturer total remains distinct by profile. The operator API is wider than the export contract above. Observers do not receive the focal point or the tier-3 product list; neither role receives confidential IMBC data.'
+}
+
+Table catalog_tier3_product {
+  profile_id uuid [not null]
+  product_line_identity_id uuid [not null]
+
+  indexes {
+    (profile_id, product_line_identity_id) [pk]
+  }
+
+  Note: 'A product whose AGAR/CDP has status report_issued, recommendations_in_progress, or recommendation_issued. Operators see which products qualify. Observers see the profile tier only. Rebuilt with catalog_profile.'
+}
+
+Table catalog_profile_facet {
+  id uuid [pk]
+  profile_id uuid [not null]
+  facet catalog_facet [not null]
+  code text [not null]
+  dictionary_entry_id uuid
+
+  indexes {
+    (profile_id, facet, code) [unique]
+  }
+
+  Note: 'Denormalised filter values for the visible profile. Rebuilt with catalog_profile.'
+}
+
+// ---------------------------------------------------------------------------
+// Reference data
+// ---------------------------------------------------------------------------
+
+Table dictionary {
+  id uuid [pk]
+  code text [not null, unique, note: 'country, region, legal_form, oked, tn_ved, kpved, commodity_group, commodity_type, forecast_commodity, forecast_subcommodity, unit, acquisition_source, programme, lps_status, imbc_priority, process, equipment_type, contact_role, certificate_type, document_type.']
+  name text [not null]
+
+  Note: 'LPS reuses region, commodity_type with commodity_group parents, and historical programme labels LC/LPS. country uses ISO 3166-1 alpha-2 codes. lps_status starts with planning (Planning), in_process (In process), localized (Localized), and on_hold (On hold). Administrators maintain dictionaries and approved aliases under ADM-08; SMEs select values while editing entries. Status sort_order is presentation order, not a transition sequence. These lists do not grant the administrator access to LPS business records.'
+}
+
+Table dictionary_entry {
+  id uuid [pk]
+  dictionary_id uuid [not null]
+  code text [not null, note: 'Official code where supplied, stored as text with leading zeros preserved. Named source lists without codes receive stable platform codes; forecast taxonomy codes are not copied from FPAL.']
+  parent_entry_id uuid [note: 'commodity_type points to an A-E commodity_group; forecast_subcommodity points to forecast_commodity. They are separate hierarchies. Other lists use a parent only where defined.']
+  mandatory boolean [note: 'Certificate types and document types only. The administrator sets it. The change applies to profiles submitted afterwards.']
+  custom_name_allowed boolean [not null, default: false, note: 'Other certificate and additional-document types.']
+  sort_order int [not null, default: 0]
+  retired_at timestamptz [note: 'A value in use is not deleted. Retiring hides it from new choices.']
+
+  indexes {
+    (dictionary_id, code) [unique]
+  }
+}
+
+Table dictionary_alias {
+  id uuid [pk]
+  dictionary_id uuid [not null]
+  alias text [not null, note: 'Trimmed source spelling, with case normalized for lookup only where approved.']
+  parent_entry_id uuid [note: 'Scopes an alias to a parent when a subcategory name is reused.']
+  dictionary_entry_id uuid [not null]
+  approved_by uuid [not null]
+  approved_at timestamptz [not null]
+
+  indexes {
+    (dictionary_id, parent_entry_id, alias) [unique, note: 'Use NULLS NOT DISTINCT for root aliases so duplicate unparented aliases cannot coexist.']
+  }
+
+  Note: 'Only an approved unambiguous alias maps to an entry in the same dictionary and parent. Unknown values are reviewed. Unit aliases do not carry implicit conversion factors. Dictionary entries in use are retired, never deleted.'
+}
+
+Table dictionary_entry_translation {
+  dictionary_entry_id uuid [not null]
+  language language_code [not null]
+  name text [not null]
+
+  indexes {
+    (dictionary_entry_id, language) [pk]
+  }
+
+  Note: 'Interface strings live in language files. These rows are the reference-list names only.'
+}
+
+// ---------------------------------------------------------------------------
+// Notifications, access rules, migration
+// ---------------------------------------------------------------------------
+
+Table notification_rule {
+  id uuid [pk]
+  code text [not null, unique, note: 'NOT-01 through NOT-17, plus the scenario rules that decide the recipient.']
+  event text [not null]
+  recipient_rule text [not null]
+  enabled boolean [not null, default: true]
+
+  Note: 'Rules as data. There is no notification inbox. Observers receive none of these emails.'
+}
+
+Table notification {
+  id uuid [pk]
+  rule_code text [not null]
+  recipient_email text [not null]
+  user_account_id uuid
+  language language_code [not null]
+  dedup_key text [not null, unique, note: 'One email per event and distinct address. Address match ignores case.']
+  related_object_type text
+  related_object_id uuid
+  sent_at timestamptz [not null]
+
+  Note: 'The send log. Certificate reminders and update-status emails also have their own idempotency tables.'
+}
+
+Table policy_rule {
+  id uuid [pk]
+  role account_role [not null]
+  data_class data_class [not null]
+  action text [not null]
+  condition text [not null, note: 'own_organisation, visible_profile, owner, nda_accepted, or none.']
+  effect text [not null, note: 'allow or deny.']
+
+  indexes {
+    (role, data_class, action, condition) [unique]
+  }
+
+  Note: 'Authoritative declarative policy rows, loaded into the authorisation library at startup; access tests are generated from the same rule dataset. Versioned repository data may seed or replace these rows only as a release, with no separately maintained imperative permission matrix. Nobody edits them in the interface. No role has every right. Class G LPS permits expert CRUD and list/dashboard read; operator and director list/detail/dashboard read only. All other roles and operator mutations are denied. Active reads exclude soft-deleted entries and companies; no visible_profile or nda_accepted gate applies. Dictionary administration remains class E and does not grant class G access.'
+}
+
+Table import_batch {
+  id uuid [pk]
+  source_kind import_source_kind [not null, default: 'manufacturer']
+  source_filename text [not null]
+  trial boolean [not null, default: true, note: 'A trial sends no email and can be repeated.']
+  started_at timestamptz [not null]
+  finished_at timestamptz
+  started_by uuid
+
+  Note: 'Signed-off manufacturer source: 982 data rows and 816 distinct BIN values. Exact matching BINs group into one profile. Product rows follow the approved product/code associations: a source row may split into several product lines when the association is clear, or remain flagged until IMBC resolves it. Do not deduplicate products solely by their code or pair multi-value cells by position. Additional LPS source: Sheet1, 57 rows, no BIN requirement. Reconcile companies and independently managed scopes with the SME, preserving stable migration keys across trial runs. Source kind separates the two migrations; LPS never creates profiles or invitations. The forecast retains its separate import model.'
+}
+
+Table import_row {
+  id uuid [pk]
+  import_batch_id uuid [not null]
+  bin text [note: 'Manufacturer import only. Original BIN if present; missing/invalid identifiers can still be logged for review. Null for the supplied LPS source.']
+  sheet_name text [note: 'Source sheet for reconciliation, including Sheet1 for LPS.']
+  excel_row_number int [not null]
+  outcome import_outcome [not null]
+  reason text
+  raw jsonb [not null, note: 'Original manufacturer or LPS cells, comments, formatting relevant to interpretation, and hyperlink targets. Restricted migration evidence for SMEs and the director, not operator-visible or editable platform columns.']
+  flags jsonb [note: 'Unmapped values, OUT OF, N/A, duplicate candidates, a BIN that fails the check digit.']
+
+  indexes {
+    (import_batch_id, excel_row_number) [unique]
+  }
+
+  Note: 'Journal of one run. Manufacturer trials upsert profiles by BIN and do not create a second profile. LPS trials reuse accepted company identities and entry migration keys, with each loaded entry linked to its accepted source row. Unresolved identities/scopes remain flagged, not invented. Splitting a source row never duplicates its investment or jobs. Source outcomes and resolution records account for all rows without exposing raw evidence to operators.'
+}
+
+Table import_resolution {
+  id uuid [pk]
+  import_row_id uuid
+  kind text [not null, note: 'unmapped_value, duplicate, invalid_bin, unmatched_survey_pdf, no_email; LPS also ambiguous_company, ambiguous_scope, contact_association, location_association, shared_measure.']
+  detail text [not null, note: 'Source cells and issue; after resolution, the approved value/association or reason it remains unknown.']
+  file_object_id uuid [note: 'Set for a survey PDF that had no BIN or more than one candidate.']
+  resolved_at timestamptz
+  resolved_by uuid
+
+  Note: 'Same-BIN rows are grouped by the approved mapping; conflicting repeated facts, possible duplicate companies, ambiguous code/product links, source percentage scales, and unmatched survey PDFs require resolution. Raw evidence remains in the import journal. Trial imports never create duplicate profiles or product lines.'
+}
+
+Table migration_invitation_run {
+  id uuid [pk]
+  started_by uuid [not null]
+  started_at timestamptz [not null]
+  finished_at timestamptz
+  report jsonb [not null, note: 'Profiles with no usable email, or an invalid one. Those profiles are not emailed.']
+
+  Note: 'Invite all migrated manufacturers. Runs once IMBC has accepted the migration. The five-day notice does not change a Draft profile when the five days pass.'
+}
+
+// ---------------------------------------------------------------------------
+// Relationships
+// ---------------------------------------------------------------------------
+
+Ref: user_account.organization_id > organization.id
+Ref: user_session.user_account_id > user_account.id
+Ref: trusted_device.user_account_id > user_account.id
+Ref: responsibility_acceptance.user_account_id > user_account.id
+Ref: api_access.organization_id > organization.id
+Ref: api_access.issued_by > user_account.id
+Ref: api_access.revoked_by > user_account.id
+
+Ref: manufacturer_profile.organization_id > organization.id
+Ref: manufacturer_profile.assigned_expert_id > user_account.id
+
+Ref: profile_section.(profile_id, organization_id) > manufacturer_profile.(id, organization_id)
+Ref: profile_section.verified_revision_id > section_revision.id
+Ref: profile_section.pending_revision_id > section_revision.id
+
+Ref: section_revision.(profile_section_id, organization_id) > profile_section.(id, organization_id)
+Ref: section_revision.author_id > user_account.id
+
+Ref: submission_requirement.(section_revision_id, organization_id) > section_revision.(id, organization_id)
+Ref: submission_requirement.dictionary_entry_id > dictionary_entry.id
+
+Ref: main_information.(section_revision_id, organization_id) > section_revision.(id, organization_id)
+Ref: main_information.legal_form_id > dictionary_entry.id
+
+Ref: main_information_oked.(main_information_id, organization_id) > main_information.(id, organization_id)
+Ref: main_information_oked.oked_entry_id > dictionary_entry.id
+
+Ref: contact.(section_revision_id, organization_id) > section_revision.(id, organization_id)
+Ref: contact.role_id > dictionary_entry.id
+
+Ref: personnel.(section_revision_id, organization_id) > section_revision.(id, organization_id)
+Ref: personnel_cv.(personnel_id, organization_id) > personnel.(id, organization_id)
+Ref: personnel_cv.file_object_id > file_object.id
+
+
+Ref: product_line_identity.(profile_id, organization_id) > manufacturer_profile.(id, organization_id)
+Ref: product_line.(section_revision_id, organization_id) > section_revision.(id, organization_id)
+Ref: product_line.(identity_id, organization_id) > product_line_identity.(id, organization_id)
+Ref: product_line.commodity_type_id > dictionary_entry.id
+Ref: product_line.e_ondiris_record_id > e_ondiris_record.id
+
+Ref: production.(section_revision_id, organization_id) > section_revision.(id, organization_id)
+Ref: production_process.(production_id, organization_id) > production.(id, organization_id)
+Ref: production_process.process_entry_id > dictionary_entry.id
+Ref: production_photo.(production_id, organization_id) > production.(id, organization_id)
+Ref: production_photo.file_object_id > file_object.id
+
+Ref: equipment_item.(section_revision_id, organization_id) > section_revision.(id, organization_id)
+Ref: equipment_item.equipment_type_id > dictionary_entry.id
+Ref: equipment_product_line.(equipment_item_id, organization_id) > equipment_item.(id, organization_id)
+Ref: equipment_product_line.(product_line_identity_id, organization_id) > product_line_identity.(id, organization_id)
+
+Ref: certificate.(section_revision_id, organization_id) > section_revision.(id, organization_id)
+Ref: certificate.certificate_type_id > dictionary_entry.id
+Ref: certificate.file_object_id > file_object.id
+Ref: document.(section_revision_id, organization_id) > section_revision.(id, organization_id)
+Ref: document.document_type_id > dictionary_entry.id
+Ref: document.file_object_id > file_object.id
+
+Ref: file_object.organization_id > organization.id
+Ref: file_version.file_object_id > file_object.id
+Ref: file_version.uploaded_by > user_account.id
+Ref: org_chart_sample.file_object_id > file_object.id
+Ref: org_chart_sample.uploaded_by > user_account.id
+
+Ref: review_assignment.(profile_id, organization_id) > manufacturer_profile.(id, organization_id)
+Ref: review_assignment.expert_id > user_account.id
+Ref: review_assignment.assigned_by > user_account.id
+Ref: review_decision.review_assignment_id > review_assignment.id
+Ref: review_decision.expert_id > user_account.id
+Ref: review_decision.section_revision_id > section_revision.id
+Ref: review_decision.certificate_id > certificate.id
+Ref: review_decision.document_id > document.id
+Ref: review_decision.file_version_id > file_version.id
+
+Ref: update_status.(profile_id, organization_id) > manufacturer_profile.(id, organization_id)
+Ref: update_confirmation.(profile_id, organization_id) > manufacturer_profile.(id, organization_id)
+Ref: update_confirmation.confirmed_by > user_account.id
+Ref: update_status_event.(profile_id, organization_id) > manufacturer_profile.(id, organization_id)
+Ref: certificate_expiry_schedule.(certificate_identity_id, organization_id) > certificate_identity.(id, organization_id)
+Ref: certificate_expiry_schedule.(file_object_id, organization_id) > file_object.(id, organization_id)
+Ref: certificate_expiry_schedule.(file_version_id, file_object_id) > file_version.(id, file_object_id)
+Ref: certificate_expiry_schedule.created_by > user_account.id
+Ref: certificate_identity.(current_expiry_schedule_id, id, organization_id) > certificate_expiry_schedule.(id, certificate_identity_id, organization_id)
+Ref: certificate_expiry_notice.schedule_id > certificate_expiry_schedule.id
+
+Ref: site_survey_record.(profile_id, organization_id) > manufacturer_profile.(id, organization_id)
+Ref: site_survey_record.file_object_id > file_object.id
+Ref: site_survey_record.recorded_by > user_account.id
+Ref: due_diligence_record.(profile_id, organization_id) > manufacturer_profile.(id, organization_id)
+Ref: due_diligence_record.report_file_id > file_object.id
+Ref: due_diligence_record.enhanced_report_file_id > file_object.id
+Ref: due_diligence_record.overridden_by > user_account.id
+Ref: due_diligence_check.(profile_id, organization_id) > manufacturer_profile.(id, organization_id)
+Ref: external_check.(profile_id, organization_id) > manufacturer_profile.(id, organization_id)
+Ref: external_check_attempt.external_check_id > external_check.id
+Ref: external_check.latest_attempt_id > external_check_attempt.id
+Ref: imbc_note.(profile_id, organization_id) > manufacturer_profile.(id, organization_id)
+Ref: imbc_note.author_id > user_account.id
+Ref: site_survey_request.(profile_id, organization_id) > manufacturer_profile.(id, organization_id)
+Ref: site_survey_request.requested_by > user_account.id
+Ref: agar_cdp_record.(profile_id, organization_id) > manufacturer_profile.(id, organization_id)
+Ref: agar_cdp_record.report_file_id > file_object.id
+Ref: agar_cdp_record.recorded_by > user_account.id
+
+Ref: works_with_mark.operator_organization_id > organization.id
+Ref: works_with_mark.profile_id > manufacturer_profile.id
+Ref: works_with_mark_change.works_with_mark_id > works_with_mark.id
+Ref: works_with_mark_change.changed_by > user_account.id
+Ref: works_with_mark_change.decided_by > user_account.id
+Ref: operator_visit_mark.operator_organization_id > organization.id
+Ref: operator_visit_mark.profile_id > manufacturer_profile.id
+Ref: operator_visit_mark.file_object_id > file_object.id
+Ref: operator_visit_mark.recorded_by > user_account.id
+Ref: operator_visit_mark.decided_by > user_account.id
+Ref: operator_note.operator_organization_id > organization.id
+Ref: operator_note.profile_id > manufacturer_profile.id
+Ref: operator_note.author_id > user_account.id
+
+Ref: imbc_request.sender_user_id > user_account.id
+Ref: imbc_request.operator_organization_id > organization.id
+Ref: imbc_request.profile_id > manufacturer_profile.id
+Ref: imbc_request.replied_by > user_account.id
+Ref: operator_request.profile_id > manufacturer_profile.id
+Ref: operator_request_party.operator_request_id > operator_request.id
+Ref: operator_request_party.operator_organization_id > organization.id
+Ref: operator_request_party.sender_user_id > user_account.id
+
+Ref: export_subscription.owner_user_id > user_account.id
+Ref: export_file.owner_user_id > user_account.id
+Ref: export_file.file_object_id > file_object.id
+Ref: subscription_run.export_subscription_id > export_subscription.id
+Ref: subscription_run.export_file_id > export_file.id
+
+Ref: nda_version.published_by > user_account.id
+Ref: account_nda_acceptance.(user_account_id, organization_id) > user_account.(id, organization_id)
+Ref: account_nda_acceptance.nda_version_id > nda_version.id
+Ref: nda_acceptance.(profile_id, organization_id) > manufacturer_profile.(id, organization_id)
+Ref: nda_acceptance.(account_nda_acceptance_id, organization_id, nda_version_id) > account_nda_acceptance.(id, organization_id, nda_version_id)
+Ref: forecast_version.imported_by > user_account.id
+Ref: forecast_version.published_by > user_account.id
+Ref: forecast_import_issue.forecast_version_id > forecast_version.id
+Ref: forecast_import_issue.resolved_by > user_account.id
+Ref: forecast_line.forecast_version_id > forecast_version.id
+Ref: technical_requirements_product.organization_id > organization.id
+Ref: technical_requirements_product.commodity_group_id > dictionary_entry.id
+Ref: technical_requirements_file.(technical_requirements_product_id, organization_id) > technical_requirements_product.(id, organization_id)
+Ref: technical_requirements_file.(file_object_id, organization_id) > file_object.(id, organization_id)
+Ref: technical_requirements_file.uploaded_by > user_account.id
+Ref: product_line_requirements_product.(product_line_identity_id, organization_id) > product_line_identity.(id, organization_id)
+Ref: product_line_requirements_product.(approved_product_line_id, product_line_identity_id, organization_id) > product_line.(id, identity_id, organization_id)
+Ref: product_line_requirements_product.technical_requirements_product_id > technical_requirements_product.id
+Ref: product_line_requirements_product.approved_by > user_account.id
+Ref: product_line_requirements_product.revoked_by > user_account.id
+
+Ref: audit_entry.user_account_id > user_account.id
+Ref: audit_entry.organization_id > organization.id
+Ref: activity_snapshot_count.activity_snapshot_id > activity_snapshot.id
+
+Ref: catalog_profile.profile_id > manufacturer_profile.id
+Ref: catalog_profile.current_site_survey_id > site_survey_record.id
+Ref: catalog_profile_facet.profile_id > catalog_profile.profile_id
+Ref: catalog_profile_facet.dictionary_entry_id > dictionary_entry.id
+Ref: catalog_tier3_product.profile_id > catalog_profile.profile_id
+Ref: catalog_tier3_product.product_line_identity_id > product_line_identity.id
+
+Ref: dictionary_entry.dictionary_id > dictionary.id
+Ref: dictionary_entry.parent_entry_id > dictionary_entry.id
+Ref: dictionary_entry_translation.dictionary_entry_id > dictionary_entry.id
+
+Ref: notification.user_account_id > user_account.id
+Ref: import_row.import_batch_id > import_batch.id
+Ref: import_batch.started_by > user_account.id
+Ref: import_resolution.import_row_id > import_row.id
+Ref: import_resolution.file_object_id > file_object.id
+Ref: import_resolution.resolved_by > user_account.id
+Ref: migration_invitation_run.started_by > user_account.id
+
+Ref: company_founder.(main_information_id, organization_id) > main_information.(id, organization_id)
+Ref: production_site_identity.(profile_id, organization_id) > manufacturer_profile.(id, organization_id)
+Ref: production_site.(main_information_id, organization_id) > main_information.(id, organization_id)
+Ref: production_site.(identity_id, organization_id) > production_site_identity.(id, organization_id)
+Ref: production_site.region_id > dictionary_entry.id
+Ref: personnel_org_chart.(personnel_id, organization_id) > personnel.(id, organization_id)
+Ref: personnel_org_chart.file_object_id > file_object.id
+Ref: product_line.(production_site_identity_id, organization_id) > production_site_identity.(id, organization_id)
+Ref: product_line.capacity_unit_id > dictionary_entry.id
+Ref: product_line_kpved.(product_line_id, organization_id) > product_line.(id, organization_id)
+Ref: product_line_kpved.kpved_entry_id > dictionary_entry.id
+Ref: products_section.(section_revision_id, organization_id) > section_revision.(id, organization_id)
+Ref: products_section.unified_register_extract_id > file_object.id
+Ref: equipment_item.photo_file_id > file_object.id
+Ref: certificate_identity.(profile_id, organization_id) > manufacturer_profile.(id, organization_id)
+Ref: certificate.(identity_id, organization_id) > certificate_identity.(id, organization_id)
+Ref: product_line_certificate.(product_line_id, organization_id) > product_line.(id, organization_id)
+Ref: product_line_certificate.(certificate_identity_id, organization_id) > certificate_identity.(id, organization_id)
+Ref: imbc_engagement.(profile_id, organization_id) > manufacturer_profile.(id, organization_id)
+Ref: imbc_eoi_email_event.(profile_id, organization_id) > manufacturer_profile.(id, organization_id)
+Ref: imbc_engagement_source.(profile_id, organization_id) > manufacturer_profile.(id, organization_id)
+Ref: imbc_engagement_source.source_entry_id > dictionary_entry.id
+Ref: imbc_product_context.(profile_id, organization_id) > manufacturer_profile.(id, organization_id)
+Ref: imbc_product_context.(product_line_identity_id, organization_id) > product_line_identity.(id, organization_id)
+Ref: imbc_product_context.programme_id > dictionary_entry.id
+Ref: imbc_product_context.priority_id > dictionary_entry.id
+Ref: agar_cdp_record.(product_line_identity_id, organization_id) > product_line_identity.(id, organization_id)
+Ref: forecast_line.kpved_entry_id > dictionary_entry.id
+Ref: forecast_line.commodity_id > dictionary_entry.id
+Ref: forecast_line.subcommodity_id > dictionary_entry.id
+Ref: forecast_line.unit_id > dictionary_entry.id
+Ref: forecast_classification.subcommodity_id > dictionary_entry.id
+Ref: forecast_classification.commodity_type_id > dictionary_entry.id
+Ref: forecast_classification.approved_by > user_account.id
+Ref: dictionary_alias.dictionary_id > dictionary.id
+Ref: dictionary_alias.parent_entry_id > dictionary_entry.id
+Ref: dictionary_alias.dictionary_entry_id > dictionary_entry.id
+Ref: dictionary_alias.approved_by > user_account.id
+
+Ref: lps_company.created_by > user_account.id
+Ref: lps_company.updated_by > user_account.id
+Ref: lps_company.deleted_by > user_account.id
+Ref: lps_company_country.lps_company_id > lps_company.id
+Ref: lps_company_country.country_id > dictionary_entry.id
+Ref: lps_entry.lps_company_id > lps_company.id
+Ref: lps_entry.source_type_id > dictionary_entry.id
+Ref: lps_entry.status_id > dictionary_entry.id
+Ref: lps_entry.created_by > user_account.id
+Ref: lps_entry.updated_by > user_account.id
+Ref: lps_entry.deleted_by > user_account.id
+Ref: lps_entry_commodity.lps_entry_id > lps_entry.id
+Ref: lps_entry_commodity.commodity_type_id > dictionary_entry.id
+Ref: lps_entry_source.lps_entry_id > lps_entry.id
+Ref: lps_entry_source.import_row_id > import_row.id
+Ref: lps_location.lps_entry_id > lps_entry.id
+Ref: lps_location.region_id > dictionary_entry.id
+Ref: lps_contact.lps_entry_id > lps_entry.id
+Ref: lps_contact_email.lps_contact_id > lps_contact.id
+Ref: lps_contact_phone.lps_contact_id > lps_contact.id
+
+TableGroup identity {
+  organization
+  user_account
+  user_session
+  trusted_device
+  responsibility_acceptance
+  api_access
+}
+
+TableGroup profiles {
+  manufacturer_profile
+  profile_section
+  section_revision
+  submission_requirement
+  main_information
+  main_information_oked
+  company_founder
+  production_site_identity
+  production_site
+  contact
+  personnel
+  personnel_cv
+  personnel_org_chart
+  product_line_identity
+  product_line
+  product_line_kpved
+  products_section
+  product_line_certificate
+  production
+  production_process
+  production_photo
+  equipment_item
+  equipment_product_line
+  certificate
+  certificate_identity
+  document
+}
+
+TableGroup files {
+  file_object
+  file_version
+  org_chart_sample
+}
+
+TableGroup review {
+  review_assignment
+  review_decision
+}
+
+TableGroup update_freshness_group {
+  update_status
+  update_confirmation
+  update_status_event
+  certificate_expiry_schedule
+  certificate_expiry_notice
+}
+
+TableGroup imbc_records {
+  site_survey_record
+  due_diligence_record
+  due_diligence_check
+  external_check
+  external_check_attempt
+  e_ondiris_record
+  imbc_note
+  imbc_engagement
+  imbc_eoi_email_event
+  imbc_engagement_source
+  imbc_product_context
+  site_survey_request
+  agar_cdp_record
+}
+
+TableGroup lps_register {
+  lps_company
+  lps_company_country
+  lps_entry
+  lps_entry_commodity
+  lps_entry_source
+  lps_location
+  lps_contact
+  lps_contact_email
+  lps_contact_phone
+}
+
+TableGroup operator_records {
+  works_with_mark
+  works_with_mark_change
+  operator_visit_mark
+  operator_note
+}
+
+TableGroup requests {
+  imbc_request
+  operator_request
+  operator_request_party
+}
+
+TableGroup exchange {
+  export_subscription
+  export_file
+  subscription_run
+}
+
+TableGroup demand {
+  nda_version
+  account_nda_acceptance
+  nda_acceptance
+  forecast_version
+  forecast_import_issue
+  forecast_line
+  forecast_classification
+  technical_requirements_product
+  technical_requirements_file
+  product_line_requirements_product
+}
+
+TableGroup audit_and_catalog {
+  audit_entry
+  activity_snapshot
+  activity_snapshot_count
+  catalog_profile
+  catalog_profile_facet
+  catalog_tier3_product
+}
+
+TableGroup reference_data {
+  dictionary
+  dictionary_entry
+  dictionary_entry_translation
+  dictionary_alias
+}
+
+TableGroup platform {
+  notification_rule
+  notification
+  policy_rule
+  import_batch
+  import_row
+  import_resolution
+  migration_invitation_run
+}
