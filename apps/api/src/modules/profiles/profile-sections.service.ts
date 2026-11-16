@@ -15,7 +15,7 @@ import {
   type SectionSaveInput,
 } from '@imbc/contracts';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type pg from 'pg';
 import { z, ZodError } from 'zod';
 import { actorTransaction } from '../../common/actor-transaction.js';
@@ -67,16 +67,18 @@ export class ProfileSectionsService {
   }
 
   async overview(actor: AuthUser, ip: string | null = null): Promise<OwnSectionsOverview> {
-    return this.run(actor, 'profile.read', '/api/v1/profiles/own/sections', ip, async (tx, graph) =>
-      this.overviewIn(tx, graph),
-    );
+    return this.run(actor, 'profile.read', '/api/v1/profiles/own/sections', ip, async (tx, graph) => {
+      await this.prepareInitialSources(tx, graph);
+      return this.overviewIn(tx, graph);
+    });
   }
 
   async read(actor: AuthUser, rawKind: string, ip: string | null = null): Promise<SectionRead<unknown>> {
     const kind = this.kind(rawKind);
-    return this.run(actor, 'profile.read', '/api/v1/profiles/own/sections/:kind', ip, async (tx, graph) =>
-      this.readIn(tx, graph, kind),
-    );
+    return this.run(actor, 'profile.read', '/api/v1/profiles/own/sections/:kind', ip, async (tx, graph) => {
+      await this.prepareInitialSources(tx, graph);
+      return this.readIn(tx, graph, kind);
+    });
   }
 
   async fileHistory(
@@ -107,6 +109,7 @@ export class ProfileSectionsService {
   async editorChoices(actor: AuthUser, rawKind: string, ip: string | null = null): Promise<unknown> {
     const kind = this.kind(rawKind);
     return this.run(actor, 'profile.edit', '/api/v1/profiles/own/sections/:kind/choices', ip, async (tx, graph) => {
+      await this.prepareInitialSources(tx, graph);
       if (profileIsLocked(graph.profile, graph.sections)) throw profileLocked();
       const handler = this.handlers.get(kind);
       const section = graph.sections.find((item) => item.kind === kind);
@@ -128,6 +131,8 @@ export class ProfileSectionsService {
   ): Promise<SectionRead<unknown>> {
     const kind = this.kind(rawKind);
     return this.run(actor, 'profile.edit', '/api/v1/profiles/own/sections/:kind', ip, async (tx, graph) => {
+      // A cold pre-pin editor must reload with the materialized version, never reinterpret its NULL values.
+      await this.prepareInitialSources(tx, graph);
       if (profileIsLocked(graph.profile, graph.sections)) throw profileLocked();
       const handler = this.handlers.get(kind);
       const section = graph.sections.find((row) => row.kind === kind);
@@ -213,6 +218,89 @@ export class ProfileSectionsService {
     const result = z.enum(SECTION_KINDS).safeParse(rawKind);
     if (!result.success) throw new ProblemException(404, 'not_found', 'Раздел не найден.');
     return result.data;
+  }
+
+  /** MAN-06: pin what a first editor actually sees, before completeness/metadata are returned. */
+  private async prepareInitialSources(tx: Database, graph: OwnGraph): Promise<void> {
+    if (
+      graph.profile.status !== 'draft' ||
+      graph.profile.migrated ||
+      graph.profile.source !== 'manual' ||
+      profileIsLocked(graph.profile, graph.sections) ||
+      graph.sections.some((section) => section.pendingRevisionId !== null)
+    )
+      return;
+    // Separate fresh lookup after every section lock wait, including all-retained assignments.
+    const assignment = await tx.execute(
+      sql`select id from review_assignment where profile_id=${graph.profile.id} and organization_id=${graph.profile.organizationId} and closed_at is null`,
+    );
+    if (assignment.rows.length) return;
+    let materialized = false;
+    for (const section of graph.sections) {
+      const handler = this.handlers.get(section.kind);
+      const revision = selectedRevision(section, graph.revisions);
+      if (
+        !handler?.prepareInitialSource ||
+        !revision ||
+        revision.state !== 'working' ||
+        revision.editVersion !== 0 ||
+        revision.savedAt !== null ||
+        revision.revisionNumber !== 1
+      )
+        continue;
+      const context = this.context(graph.profile, section, revision);
+      const before = await revisionContent(tx, section.kind, revision.id, graph.profile.organizationId);
+      if (!(await handler.prepareInitialSource(tx, context))) continue;
+      materialized = true;
+      const completeness = sectionCompleteness(await handler.mandatoryInputs(tx, context));
+      const savedAt = new Date();
+      const [saved] = await tx
+        .update(sectionRevision)
+        .set({
+          editVersion: revision.editVersion + 1,
+          savedAt,
+          origin: 'source_refresh',
+          completenessPct: String(completeness.percent),
+        })
+        .where(
+          and(eq(sectionRevision.id, revision.id), eq(sectionRevision.organizationId, graph.profile.organizationId)),
+        )
+        .returning();
+      if (!saved) throw new Error('Initial source revision is missing');
+      await tx
+        .update(profileSection)
+        .set({ completenessPct: String(completeness.percent), updatedAt: savedAt })
+        .where(and(eq(profileSection.id, section.id), eq(profileSection.organizationId, graph.profile.organizationId)));
+      section.completenessPct = String(completeness.percent);
+      graph.revisions = graph.revisions.filter((row) => row.id !== saved.id).concat(saved);
+      const after = await revisionContent(tx, section.kind, saved.id, graph.profile.organizationId);
+      await this.audit.record(
+        {
+          organizationId: graph.profile.organizationId,
+          action: 'profile.source.initial',
+          objectType: 'profile_section',
+          objectId: section.id,
+          diff: {
+            operationId: randomUUID(),
+            kind: section.kind,
+            sourceRevisionId: revision.id,
+            targetRevisionId: saved.id,
+            before: { editVersion: revision.editVersion, content: before },
+            after: { editVersion: saved.editVersion, content: after },
+          },
+        },
+        tx,
+      );
+    }
+    if (!materialized) return;
+    const overview = await this.overviewIn(tx, graph);
+    await tx
+      .update(manufacturerProfile)
+      .set({
+        completenessPercent: String(overview.completenessPct),
+        completenessPct: displayCompleteness(overview.completenessPct),
+      })
+      .where(eq(manufacturerProfile.id, graph.profile.id));
   }
 
   private context(profile: StoredProfile, section: StoredSection, revision: StoredRevision): SectionContext {

@@ -23,6 +23,8 @@ export interface TypedSectionHandler<Write, Read> {
   readonly readSchema: z.ZodType<Read>;
   parse(input: unknown): Write;
   editable(tx: Database, context: SectionContext): Promise<Write>;
+  /** Local initial source pin only; the section core owns profile locks, metadata and complete system audit. */
+  prepareInitialSource?(tx: Database, context: SectionContext): Promise<boolean>;
   /** An explicit clear of a first-read source prefill must be saved, even when persisted values are blank. */
   hasUnsavedPrefill?(tx: Database, context: SectionContext): Promise<boolean>;
   read(tx: Database, context: SectionContext): Promise<Read>;
@@ -42,6 +44,9 @@ export function defineSectionHandler<Write, Read>(handler: TypedSectionHandler<W
     readSchema: handler.readSchema,
     parse: (input) => handler.parse(input),
     editable: (tx, context) => handler.editable(tx, context),
+    prepareInitialSource: handler.prepareInitialSource
+      ? (tx, context) => handler.prepareInitialSource!(tx, context)
+      : undefined,
     hasUnsavedPrefill: handler.hasUnsavedPrefill ? (tx, context) => handler.hasUnsavedPrefill!(tx, context) : undefined,
     read: (tx, context) => handler.read(tx, context),
     save: (tx, context, normalized) => handler.save(tx, context, normalized as Write),

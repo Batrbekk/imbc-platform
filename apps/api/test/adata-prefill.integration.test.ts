@@ -23,7 +23,7 @@ import { ManufacturerOnboardingService } from '../src/modules/registration/onboa
 import { RegistrationController } from '../src/modules/registration/registration.controller.js';
 import { AdataPrefillJob } from '../src/worker/adata-prefill.job.js';
 import { JobHandlers } from '../src/worker/handlers.service.js';
-import { ADATA_FIXTURE, startAdataStub, type AdataScenario, type AdataStub } from './support/adata-stub.js';
+import { ADATA_FIXTURE, adataFixtureForBin, startAdataStub, type AdataScenario, type AdataStub } from './support/adata-stub.js';
 import { migrateThrough, openTestPool, resetDatabase } from './support/database.js';
 
 // Только одноразовая БД imbc_auth_test и заглушка Adata на 127.0.0.1: api.adata.kz тесты не вызывают никогда.
@@ -163,6 +163,27 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     expect(rows[0]!.latest).toBe(rows[0]!.attempt.id);
     return rows[0]!.attempt;
   }
+
+  async function mainRefreshOf(profileId: string) {
+    return (await pool.query('select * from main_source_refresh_outbox where profile_id=$1', [profileId])).rows;
+  }
+
+  async function profileContentOf(m: Awaited<ReturnType<typeof manufacturer>>) {
+    return {
+      sections: await db.select().from(schema.profileSection).where(eq(schema.profileSection.profileId, m.profileId)).orderBy(schema.profileSection.id),
+      revisions: await db.select({ revision: schema.sectionRevision }).from(schema.sectionRevision)
+        .innerJoin(schema.profileSection, eq(schema.profileSection.id, schema.sectionRevision.profileSectionId))
+        .where(eq(schema.profileSection.profileId, m.profileId)).orderBy(schema.sectionRevision.id),
+      main: await db.select().from(schema.mainInformation).where(eq(schema.mainInformation.organizationId, m.organizationId)).orderBy(schema.mainInformation.id),
+    };
+  }
+
+  const terminalCases: [string, Partial<Env>, AdataScenario][] = [
+    ['received', {}, { kind: 'ready', afterPolls: 0 }],
+    ['unavailable', {}, { kind: 'malformed' }],
+    ['not_configured', { ADATA_API_TOKEN: undefined }, { kind: 'ready', afterPolls: 0 }],
+    ['quota_exhausted', { ADATA_MONTHLY_LIMIT: 0 }, { kind: 'ready', afterPolls: 0 }],
+  ];
 
   const queuedJobs = async () =>
     (
@@ -530,7 +551,7 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     const attemptId = await schedule(m, {
       kind: 'ready',
       afterPolls: 2,
-      body: { ...ADATA_FIXTURE, data: { ...ADATA_FIXTURE.data, note: `echo ${TOKEN}` } },
+      body: { ...ADATA_FIXTURE, data: { ...adataFixtureForBin(m.bin).data, note: `echo ${TOKEN}` } },
     });
     const { output } = await captured(() => throughQueue(prefillJob()));
     const attempt = await attemptOf(m.profileId);
@@ -546,7 +567,7 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     expect(attempt.pollToken).not.toBeNull();
     expect(JSON.stringify(attempt.value)).not.toContain(TOKEN);
     expect((attempt.value as { note: string }).note).toBe('echo [redacted]');
-    expect((attempt.value as { basic: { biin: string } }).basic.biin).toBe('240100000011');
+    expect((attempt.value as { basic: { biin: string } }).basic.biin).toBe(m.bin);
     expect(stub.requests.filter((r) => r.bin === m.bin).map((r) => r.kind)).toEqual([
       'start',
       'check',
@@ -573,6 +594,78 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     });
     expect(output).toContain(`adata attempt ${attemptId}: received`);
     expect(await db.select().from(schema.dueDiligenceRecords)).toEqual([]);
+  });
+
+  it.each(terminalCases)('%s atomically requests Main recovery without changing profile content', async (state, over, scenario) => {
+    const m = await manufacturer();
+    const attemptId = await schedule(m, scenario);
+    const before = await profileContentOf(m);
+    await prefillJob(over).run({ attemptId });
+    expect((await attemptOf(m.profileId)).state).toBe(state);
+    expect(await mainRefreshOf(m.profileId)).toMatchObject([{ organization_id: m.organizationId, requested_attempt_id: attemptId, state: 'pending' }]);
+    expect(await profileContentOf(m)).toEqual(before);
+    const outbox = await mainRefreshOf(m.profileId);
+    const calls = callsFor(m.bin);
+    await prefillJob(over).run({ attemptId });
+    expect(await mainRefreshOf(m.profileId)).toEqual(outbox);
+    expect(callsFor(m.bin)).toBe(calls);
+    expect(startsFor(m.bin)).toBe(state === 'received' || state === 'unavailable' ? 1 : 0);
+  });
+
+  it.each(terminalCases)('%s rolls back its receipt, prefill and audit when the Main recovery outbox fails, then retries', async (state, over, scenario) => {
+    const m = await manufacturer();
+    const attemptId = await schedule(m, scenario);
+    const before = await profileContentOf(m);
+    try {
+      await pool.query(`create function adata_main_outbox_reject() returns trigger language plpgsql as $$
+        begin raise exception 'isolated outbox failure' using errcode='P0001'; end $$`);
+      await pool.query('create trigger adata_main_outbox_reject before insert on main_source_refresh_outbox for each row execute function adata_main_outbox_reject()');
+      const first = await captured(() => prefillJob(over).run({ attemptId }));
+      expect(first.error).toBeInstanceOf(Error);
+      expect((first.error as Error).message).toContain('(P0001)');
+      expect(await attemptOf(m.profileId)).toMatchObject({ state: state === 'received' || state === 'unavailable' ? 'polling' : 'queued', value: null, completedAt: null });
+      expect(await mainRefreshOf(m.profileId)).toEqual([]);
+      expect(await db.select().from(schema.prefilledValue).where(eq(schema.prefilledValue.attemptId, attemptId))).toEqual([]);
+      expect(await db.select().from(schema.auditEntries).where(and(eq(schema.auditEntries.action, 'adata.read_completed'), eq(schema.auditEntries.objectId, attemptId)))).toEqual([]);
+      expect(await profileContentOf(m)).toEqual(before);
+    } finally {
+      await pool.query('drop trigger if exists adata_main_outbox_reject on main_source_refresh_outbox');
+      await pool.query('drop function if exists adata_main_outbox_reject()');
+    }
+    await prefillJob(over).run({ attemptId });
+    expect((await attemptOf(m.profileId)).state).toBe(state);
+    expect(await mainRefreshOf(m.profileId)).toMatchObject([{ requested_attempt_id: attemptId, state: 'pending' }]);
+    expect(await profileContentOf(m)).toEqual(before);
+    expect(startsFor(m.bin)).toBe(state === 'received' || state === 'unavailable' ? 1 : 0);
+  });
+
+  it('an older receipt cannot request Main recovery for a different latest Adata attempt', async () => {
+    const m = await manufacturer();
+    const attemptId = await schedule(m, { kind: 'ready', afterPolls: 0 });
+    const old = await attemptOf(m.profileId);
+    const [latest] = await db.insert(schema.externalCheckAttempt).values({ externalCheckId: old.externalCheckId, trigger: 'sme_rerun', bin: m.bin }).returning();
+    await db.update(schema.externalCheck).set({ latestAttemptId: latest!.id }).where(eq(schema.externalCheck.id, old.externalCheckId));
+    await prefillJob().run({ attemptId });
+    expect((await db.select().from(schema.externalCheckAttempt).where(eq(schema.externalCheckAttempt.id, attemptId)))[0]?.state).toBe('received');
+    expect((await db.select().from(schema.externalCheck).where(eq(schema.externalCheck.id, old.externalCheckId)))[0]?.latestAttemptId).toBe(latest!.id);
+    expect(await mainRefreshOf(m.profileId)).toEqual([]);
+  });
+
+  it.each([
+    ['different company BIN', adataFixtureForBin('000000000000').data],
+    ['missing BIN with returned legal facts', { basic: { name_ru: 'Synthetic other company' }, kzCoContact: { emails: ['other@identity.local'] } }],
+    ['numeric BIN', { ...ADATA_FIXTURE.data, basic: { ...(ADATA_FIXTURE.data.basic as object), biin: Number('240100000011') } }],
+  ])('%s is unavailable, without persisting foreign facts or changing the profile', async (_name, data) => {
+    const m = await manufacturer();
+    const before = await profileContentOf(m);
+    const attemptId = await schedule(m, { kind: 'ready', afterPolls: 0, body: { success: true, message: 'ready', data } });
+    await prefillJob().run({ attemptId });
+    expect(await attemptOf(m.profileId)).toMatchObject({ state: 'unavailable', failure: 'malformed', value: null });
+    expect(await db.select().from(schema.prefilledValue).where(eq(schema.prefilledValue.attemptId, attemptId))).toEqual([]);
+    expect(await profileContentOf(m)).toEqual(before);
+    expect(await mainRefreshOf(m.profileId)).toMatchObject([{ requested_attempt_id: attemptId, state: 'pending' }]);
+    expect(startsFor(m.bin)).toBe(1);
+    expect(await db.select().from(schema.auditEntries).where(and(eq(schema.auditEntries.action, 'adata.read_completed'), eq(schema.auditEntries.objectId, attemptId)))).toMatchObject([{ outcome: 'failed', diff: { state: 'unavailable', failure: 'malformed' } }]);
   });
 
   it('один Get Request на БИН: повтор, параллель, два входа, рестарт посреди опроса (IMBC-07)', async () => {
@@ -769,6 +862,7 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     const m = await manufacturer();
     const basic = {
       ...(ADATA_FIXTURE.data.basic as object),
+      biin: m.bin,
       name_ru: 'x\u0000y',
       legal_address: 'Алматы \uD800',
     };
@@ -903,7 +997,10 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     const errors: unknown[] = [];
     for (const c of cases) {
       const m = await manufacturer();
-      const attemptId = await schedule(m, c.scenario);
+      const scenario = c.scenario?.kind === 'ready' && c.scenario.body
+        ? { ...c.scenario, body: { ...ADATA_FIXTURE, data: { ...adataFixtureForBin(m.bin).data, x: TOKEN } } }
+        : c.scenario;
+      const attemptId = await schedule(m, scenario);
       // Сбои на проверке временные и идут до срока — им короткий срок; готовому ответу — с запасом.
       const timing = c.state === 'received' ? TIMING : DEADLINE_TIMING;
       const run = await captured(() => throughQueue(prefillJob({}, c.fetch, timing)));

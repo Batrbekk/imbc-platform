@@ -26,7 +26,7 @@ import {
 import { copyRevisionContent, revisionContent } from '../profiles/revision-copy.js';
 import type { SectionContext, SectionHandler } from '../profiles/section-handler.js';
 import type { EOndirisSnapshot } from './ingestion.js';
-import { planEOndirisInitialMain } from './initial-main.js';
+import { applyMainSourcePlan, planMainSource } from '../profiles/main-source-materializer.js';
 import { planEOndirisProducts } from './reconciliation.js';
 
 export type EOndirisProfileApplyResult =
@@ -58,8 +58,14 @@ export class EOndirisProfileRefreshService {
     try {
       await client.query('BEGIN');
       const tx = drizzle(client, { schema, casing: 'snake_case' }) as Database;
-      const { rows: profiles } = await tx.execute<{ id: string; organizationId: string; status: string }>(sql`
-        select p.id,p.organization_id as "organizationId",p.status from manufacturer_profile p
+      const { rows: profiles } = await tx.execute<{
+        id: string;
+        organizationId: string;
+        status: string;
+        source: string;
+        migrated: boolean;
+      }>(sql`
+        select p.id,p.organization_id as "organizationId",p.status,p.source,p.migrated from manufacturer_profile p
         join organizations o on o.id=p.organization_id where o.bin=${bin} for no key update of p`);
       const profile = profiles[0];
       const sections = profile ? await ownSections(tx, profile.id, profile.organizationId) : [];
@@ -188,12 +194,16 @@ export class EOndirisProfileRefreshService {
         sectionId: section.id,
         revisionId: revision.id,
       });
-      const mainHandler = this.handlers.get('main_information')!;
-      const currentMain = (await mainHandler.editable(
+      const sourceMain = await planMainSource(
         tx,
         context(mainSection, mainBaseline),
-      )) as import('@imbc/contracts').MainInformationWrite;
-      const initialMain = planEOndirisInitialMain(currentMain, mainBaseline, snapshots);
+        profile.source === 'manual' &&
+          !profile.migrated &&
+          mainBaseline.state === 'working' &&
+          mainBaseline.editVersion === 0 &&
+          mainBaseline.savedAt === null &&
+          mainBaseline.revisionNumber === 1,
+      );
       const [mainRow] = await tx
         .select()
         .from(schema.mainInformation)
@@ -204,9 +214,7 @@ export class EOndirisProfileRefreshService {
         mainRow?.unifiedRegisterFirstInclusionOn ??
         null;
       const mainChanged =
-        initialMain.companyPhone !== currentMain.companyPhone ||
-        initialMain.contactEmail !== currentMain.contactEmail ||
-        initialMain.addedAddresses.length > 0 ||
+        sourceMain.changed ||
         mainRow?.unifiedRegisterRegistered !== registered ||
         mainRow?.unifiedRegisterFirstInclusionOn !== earliest;
       const productChanged = plan.candidates.some(
@@ -284,37 +292,11 @@ export class EOndirisProfileRefreshService {
           .from(schema.mainInformation)
           .where(eq(schema.mainInformation.sectionRevisionId, mainTarget.id));
         if (!targetRow) throw new Error('Missing main source container');
+        await applyMainSourcePlan(tx, context(mainSection, mainTarget), sourceMain);
         await tx
           .update(schema.mainInformation)
-          .set({
-            companyPhone: initialMain.companyPhone,
-            contactEmail: initialMain.contactEmail,
-            unifiedRegisterRegistered: registered,
-            unifiedRegisterFirstInclusionOn: earliest,
-          })
+          .set({ unifiedRegisterRegistered: registered, unifiedRegisterFirstInclusionOn: earliest })
           .where(eq(schema.mainInformation.id, targetRow.id));
-        const [lastSite] = await tx
-          .select({ position: sql<number>`coalesce(max(${schema.productionSite.positionInList}),-1)` })
-          .from(schema.productionSite)
-          .where(eq(schema.productionSite.mainInformationId, targetRow.id));
-        for (const batch of chunks(
-          initialMain.addedAddresses.map((address, index) => ({ id: randomUUID(), address, index })),
-        )) {
-          await tx
-            .insert(schema.productionSiteIdentity)
-            .values(batch.map(({ id }) => ({ id, profileId: profile.id, organizationId: profile.organizationId })));
-          await tx.insert(schema.productionSite).values(
-            batch.map(({ id, address, index }) => ({
-              mainInformationId: targetRow.id,
-              organizationId: profile.organizationId,
-              identityId: id,
-              address,
-              city: null,
-              regionId: null,
-              positionInList: (lastSite?.position ?? -1) + index + 1,
-            })),
-          );
-        }
       }
       if (productChanged) {
         const productTarget = await cow(productSection, productBaseline);
@@ -341,6 +323,10 @@ export class EOndirisProfileRefreshService {
           bucket.push(site);
           siteMap.set(site.address, bucket);
         }
+        const sourceSiteBindings = new Map(
+          sourceMain.siteBindings.map((binding) => [binding.registrationNumber, binding.identityId]),
+        );
+        const retainedSites = new Set(sites.map((site) => site.identityId));
         const exactRefs = await this.references(tx, snapshots);
         const newIdentities = new Map<string, string>();
         for (const batch of chunks(plan.candidates.filter((candidate) => candidate.identityId === null))) {
@@ -370,9 +356,13 @@ export class EOndirisProfileRefreshService {
               tnVedEntryId: source.tnVedCode === null ? null : (exactRefs.tnVed.get(source.tnVedCode) ?? null),
               productionSiteIdentityId:
                 candidate.identityId === null
-                  ? exactSites.length === 1
-                    ? exactSites[0]!.identityId
-                    : null
+                  ? sourceSiteBindings.has(source.registrationNumber)
+                    ? retainedSites.has(sourceSiteBindings.get(source.registrationNumber)!)
+                      ? sourceSiteBindings.get(source.registrationNumber)!
+                      : null
+                    : exactSites.length === 1
+                      ? exactSites[0]!.identityId
+                      : null
                   : candidate.productionSiteIdentityId,
               capacityQuantity: null,
               capacityUnitId: null,
@@ -479,7 +469,7 @@ export class EOndirisProfileRefreshService {
                   editVersion: beforeStates.get(section.kind)!.editVersion,
                   content: beforeStates.get(section.kind)!.content,
                 },
-                initialIssues: initialMain.issues,
+                sourceIssues: sourceMain.issues,
                 after: {
                   editVersion: revision.editVersion,
                   content: await revisionContent(tx, section.kind, revision.id, profile.organizationId),

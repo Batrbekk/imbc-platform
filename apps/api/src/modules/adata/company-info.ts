@@ -37,6 +37,12 @@ const MAX_ROWS = 50;
 type Item = { value: string; label: string | null };
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+/** An explicit empty source response has no identity to match. Any returned facts require the requested BIN. */
+export function companyInfoMatchesBin(value: unknown, expectedBin: string): boolean {
+  if (!isObject(value) || !/^[0-9]{12}$/.test(expectedBin)) return false;
+  if (Object.values(value).every(item => item === null)) return true;
+  return isObject(value.basic) && value.basic.biin === expectedBin;
+}
 const list = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 
 /** Длиннее одно значение не предзаполняется; исходный ответ хранит его целиком. */

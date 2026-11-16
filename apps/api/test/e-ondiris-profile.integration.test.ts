@@ -17,6 +17,10 @@ import { EOndirisProfileRefreshService } from '../src/modules/e-ondiris/profile-
 import { requestEOndirisProfileRefresh } from '../src/modules/e-ondiris/profile-outbox.js';
 import { DisabledEOndirisFeedConnector, EOndirisWorker } from '../src/modules/e-ondiris/worker.js';
 import { ProfileSectionsService } from '../src/modules/profiles/profile-sections.service.js';
+import {
+  MainSourceRefreshService,
+  requestMainSourceRefresh,
+} from '../src/modules/profiles/main-source-refresh.service.js';
 import { ProductsHandler } from '../src/modules/profiles/products.handler.js';
 import { MainInformationHandler } from '../src/modules/profiles/main-information.handler.js';
 import { ProfileSubmitService } from '../src/modules/profiles/profile-submit.service.js';
@@ -56,7 +60,7 @@ describe.skipIf(!url)('Stage 4a actual profile graph, handlers and source COW', 
       throw new Error('Isolated source test database required');
     pool = new pg.Pool({ connectionString: url, max: 8 });
     await resetDatabase(pool);
-    await migrateThrough(pool, '0024_stage4a_eondiris');
+    await migrateThrough(pool, '0026_stage4b_main_source_ownership');
     db = drizzle(pool, { schema: s, casing: 'snake_case' });
     audit = new AuditService(db);
     source = new EOndirisSnapshotStore(pool, { allowSynthetic: true });
@@ -465,8 +469,12 @@ describe.skipIf(!url)('Stage 4a actual profile graph, handlers and source COW', 
         [graph.org],
       )
     ).rows;
-    expect(audit[0].diff.initialIssues).toContain('phone_ambiguous');
-    expect(audit[0].diff.initialIssues).toContain('email_ambiguous');
+    expect(audit[0].diff.sourceIssues).toEqual(
+      expect.arrayContaining([
+        { code: 'source_contact_ambiguous', field: 'companyPhone' },
+        { code: 'source_contact_ambiguous', field: 'contactEmail' },
+      ]),
+    );
   });
   it('a configured recorded capture goes through the atomic outbox and actual local refresh worker, without network calls', async () => {
     const parsed = validateEOndirisCapture(
@@ -766,6 +774,28 @@ describe.skipIf(!url)('Stage 4a actual profile graph, handlers and source COW', 
       ),
     ).toBe(true);
     await ingest();
+    const [adataCheck] = await db
+      .insert(s.externalCheck)
+      .values({ profileId: graph.profile, organizationId: graph.org, connector: 'adata' })
+      .returning();
+    const [adataAttempt] = await db
+      .insert(s.externalCheckAttempt)
+      .values({
+        externalCheckId: adataCheck!.id,
+        trigger: 'quarterly',
+        state: 'received',
+        bin,
+        completedAt: new Date(),
+        value: { basic: { biin: bin, name_ru: 'Quarterly source legal name' } },
+      })
+      .returning();
+    await db
+      .update(s.externalCheck)
+      .set({ latestAttemptId: adataAttempt!.id })
+      .where(eq(s.externalCheck.id, adataCheck!.id));
+    await requestMainSourceRefresh(db, graph.profile, graph.org, adataAttempt!.id);
+    const mainRefresh = new MainSourceRefreshService(pool, audit, submissionHandlers());
+    expect(await mainRefresh.applyProfile(graph.profile)).toBe('deferred');
     expect(await refresh.applyBin(bin)).toEqual({ kind: 'deferred', bin });
     expect(
       (await db.select().from(s.sectionRevision).where(eq(s.sectionRevision.organizationId, graph.org))).every(
@@ -779,6 +809,7 @@ describe.skipIf(!url)('Stage 4a actual profile graph, handlers and source COW', 
       .update(s.reviewAssignment)
       .set({ closedAt: new Date(), closedBy: expert!.id, closeReason: 'review_result' })
       .where(eq(s.reviewAssignment.id, retained.assignmentId));
+    expect(await mainRefresh.applyProfile(graph.profile)).toBe('applied');
     expect(await refresh.applyBin(bin)).toMatchObject({ kind: 'applied' });
     const after = await readProducts();
     expect(after.lines.find((line) => line.identityId === String(complete.rows.product_line!.identity_id))!.note).toBe(
@@ -872,5 +903,5 @@ describe.skipIf(!url)('Stage 4a actual profile graph, handlers and source COW', 
     expect(read.lines.find((line) => line.identityId === String(graph.rows.product_line!.identity_id))!.source).toBe(
       'manual',
     );
-  });
+  }, 30000);
 });

@@ -18,6 +18,8 @@ import { SessionService } from '../modules/auth/session.service.js';
 import { ProfilesService } from '../modules/profiles/profiles.service.js';
 import { EOndirisWorkerModule } from '../modules/e-ondiris/e-ondiris-worker.module.js';
 import { EOndirisWorker } from '../modules/e-ondiris/worker.js';
+import { MainSourceWorkerModule } from '../modules/profiles/main-source-worker.module.js';
+import { MainSourceWorker } from '../modules/profiles/main-source-worker.js';
 import { ManufacturerOnboardingService } from '../modules/registration/onboarding.service.js';
 import { ANTIVIRUS, ClamdAntivirus } from '../modules/files/antivirus.js';
 import { orgChartSamplePassed } from '../modules/files/org-chart-sample.rules.js';
@@ -57,6 +59,7 @@ import { JobHandlers } from './handlers.service.js';
     InfraModule,
     AuditModule,
     EOndirisWorkerModule,
+    MainSourceWorkerModule,
   ],
   providers: [
     JobHandlers,
@@ -99,6 +102,7 @@ export class WorkerModule implements OnApplicationBootstrap {
     private readonly notifications: NotificationDispatcher,
     private readonly fileCleanup: FileCleanupJob,
     private readonly eOndiris: EOndirisWorker,
+    private readonly mainSource: MainSourceWorker,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -141,6 +145,7 @@ export class WorkerModule implements OnApplicationBootstrap {
       [QUEUES.identitySync]: (d) => h.syncIdentity(d),
       [QUEUES.eOndirisDaily]: () => this.eOndiris.daily(),
       [QUEUES.eOndirisProfileRefresh]: () => this.eOndiris.refreshPending(),
+      [QUEUES.mainSourceRefresh]: () => this.mainSource.refreshPending(),
     };
 
     for (const [queue, run] of Object.entries(routes) as [QueueName, (data: never) => Promise<unknown>][]) {
@@ -171,7 +176,10 @@ export class WorkerModule implements OnApplicationBootstrap {
           for (const job of jobs) output = await run(job.data as never);
           // pg-boss сохраняет безопасный итог уведомлений и источника (без адресов/исходных данных);
           // остальные очереди результата не отдают, как раньше.
-          return queue === QUEUES.notify || queue === QUEUES.eOndirisDaily || queue === QUEUES.eOndirisProfileRefresh
+          return queue === QUEUES.notify ||
+            queue === QUEUES.eOndirisDaily ||
+            queue === QUEUES.eOndirisProfileRefresh ||
+            queue === QUEUES.mainSourceRefresh
             ? output
             : undefined;
         } catch (error) {

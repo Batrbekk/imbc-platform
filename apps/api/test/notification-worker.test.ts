@@ -71,6 +71,7 @@ describe('worker: письма событий', () => {
         daily: async () => ({ state: 'disabled', accepted: 0, rejected: 0 }),
         refreshPending: async () => ({ processed: 0, deferred: 0, ambiguous: 0, failed: 0 }),
       } as never,
+      { refreshPending: async () => ({ processed: 0, deferred: 0, failed: 0 }) } as never,
     );
     await worker.onApplicationBootstrap();
 
@@ -93,6 +94,11 @@ describe('worker: письма событий', () => {
       processed: 0,
       deferred: 0,
       ambiguous: 0,
+      failed: 0,
+    });
+    expect(await handlers.get(QUEUES.mainSourceRefresh)!([{ data: null }])).toEqual({
+      processed: 0,
+      deferred: 0,
       failed: 0,
     });
   });

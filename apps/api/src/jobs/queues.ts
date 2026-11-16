@@ -29,6 +29,7 @@ export const QUEUES = {
   inactivityReset: 'inactivity-reset',
   eOndirisDaily: 'eondiris-daily-copy',
   eOndirisProfileRefresh: 'eondiris-profile-refresh',
+  mainSourceRefresh: 'main-source-refresh',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -110,6 +111,11 @@ export const SCHEDULES: ReadonlyArray<{ queue: QueueName; cron: string; note: st
     note: 'атомарный outbox source-COW и повтор после завершения активного рассмотрения (MAN-25)',
   },
   { queue: QUEUES.runSubscriptions, cron: '0 6 * * *', note: 'подписки на выгрузки (OPR-20)' },
+  {
+    queue: QUEUES.mainSourceRefresh,
+    cron: '* * * * *',
+    note: 'локальная source-COW ревизия Main после Adata результата, с сохранением правок производителя (MAN-06–08)',
+  },
   { queue: QUEUES.purgeSessions, cron: '15 * * * *', note: 'просроченные сеансы, коды и доверенные устройства' },
   {
     queue: QUEUES.keycloakEvents,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractPrefill, type PrefillRow } from '../src/modules/adata/company-info.js';
+import { companyInfoMatchesBin, extractPrefill, type PrefillRow } from '../src/modules/adata/company-info.js';
 import { ADATA_FIXTURE } from './support/adata-stub.js';
 
 const fixture = () => structuredClone(ADATA_FIXTURE.data) as Record<string, Record<string, unknown> | null>;
@@ -7,6 +7,16 @@ const rows = (data: unknown, field: PrefillRow['field']) => extractPrefill(data)
 const values = (data: unknown, field: PrefillRow['field']) => rows(data, field).map((r) => r.value);
 
 describe('Разбор «Полной информации» Adata (MAN-06, MAN-07)', () => {
+  it('matches returned source identity before allowing facts; an empty unknown-BIN response has no facts', () => {
+    const expected = '240100000011';
+    expect(companyInfoMatchesBin(ADATA_FIXTURE.data, expected)).toBe(true);
+    expect(companyInfoMatchesBin(ADATA_FIXTURE.data, '000000000000')).toBe(false);
+    expect(companyInfoMatchesBin({}, expected)).toBe(true);
+    expect(companyInfoMatchesBin({ basic: null, kzCoContact: null, founders: null }, expected)).toBe(true);
+    expect(companyInfoMatchesBin({ basic: { name_ru: 'Synthetic wrong company' } }, expected)).toBe(false);
+    expect(companyInfoMatchesBin({ basic: { biin: Number(expected) } }, expected)).toBe(false);
+    expect(companyInfoMatchesBin({ basic: null, riskFactor: { company: { bankrupt: true } } }, expected)).toBe(false);
+  });
   it('фикстура → девять полей по таблице', () => {
     expect(extractPrefill(ADATA_FIXTURE.data)).toEqual([
       { field: 'legal_name', position: 0, value: 'ТОО «Тест Adata»', label: null },

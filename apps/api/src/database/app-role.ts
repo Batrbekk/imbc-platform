@@ -29,12 +29,18 @@ export async function applyAppRoleGrants(pool: pg.Pool, role: string): Promise<v
     );
     // Class G supports logical deletion only: preserve company/entry facts and their audit subjects.
     const lps = await client.query<{ exists: boolean }>("SELECT to_regclass('lps_entry') IS NOT NULL AS exists");
-    if (lps.rows[0]?.exists)
-      await client.query(`REVOKE DELETE, TRUNCATE ON lps_company, lps_entry FROM ${name}`);
+    if (lps.rows[0]?.exists) await client.query(`REVOKE DELETE, TRUNCATE ON lps_company, lps_entry FROM ${name}`);
     if (registry.rows[0]?.exists) {
       await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON e_ondiris_record FROM ${name}`);
       await client.query(`GRANT UPDATE(is_current) ON e_ondiris_record TO ${name}`);
       await client.query(`REVOKE DELETE, TRUNCATE ON e_ondiris_sync_scope, e_ondiris_profile_refresh FROM ${name}`);
+    }
+    const mainSource = await client.query<{ exists: boolean }>(
+      "SELECT to_regclass('adata_main_snapshot') IS NOT NULL AS exists",
+    );
+    if (mainSource.rows[0]?.exists) {
+      await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON adata_main_snapshot FROM ${name}`);
+      await client.query(`REVOKE DELETE, TRUNCATE ON main_source_refresh_outbox FROM ${name}`);
     }
     // Журнал аудита (AUD-02) и принятия NDA (FC-02, DBML: append-only) — только добавление:
     // у роли приложения нет UPDATE/DELETE.

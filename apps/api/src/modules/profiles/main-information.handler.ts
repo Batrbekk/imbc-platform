@@ -19,11 +19,20 @@ import {
   organizations,
   productionSite,
   productionSiteIdentity,
-  sectionRevision,
   userAccounts,
 } from '../../database/schema/index.js';
 import { assertDictionaryChoice } from './dictionary-choice.js';
-import { emptyLegalInformation, storedMainSource } from './main-source.js';
+import { emptyLegalInformation, pinnedMainSource } from './main-source.js';
+import { applyMainSourcePlan, planMainSource } from './main-source-materializer.js';
+import { mainContactOwnership, mainSiteOwnership, mainSourcePin } from '../../database/schema/main-source-ownership.js';
+import {
+  initialContactOwnership,
+  recordMainContactSave,
+  recordMainSiteSave,
+  type MainContactOwnership,
+  type MainSiteOwnership,
+  type ExistingMainSite,
+} from './main-source-ownership.js';
 import { sectionFieldError } from './section-errors.js';
 import type { SectionContext, TypedSectionHandler } from './section-handler.js';
 import { profileCandidateRevisionSql } from './profile-candidate.js';
@@ -32,18 +41,15 @@ import { profileCandidateRevisionSql } from './profile-candidate.js';
 export class MainInformationHandler implements TypedSectionHandler<MainInformationWrite, MainInformationRead> {
   readonly kind = 'main_information' as const;
   readonly readSchema = mainInformationReadSchema;
-  /** MAN-06/40: clearing a first-read editable prefill is a real correction, even if storage was null. */
-  async hasUnsavedPrefill(tx: Database, context: SectionContext): Promise<boolean> {
-    const [revision] = await tx
-      .select({ state: sectionRevision.state, savedAt: sectionRevision.savedAt })
-      .from(sectionRevision)
-      .where(
-        and(eq(sectionRevision.id, context.revisionId), eq(sectionRevision.organizationId, context.organizationId)),
-      );
-    if (revision?.state !== 'working' || revision.savedAt !== null) return false;
-    if ((await this.row(tx, context))?.legalDataCheckedAt) return false;
-    const source = await storedMainSource(tx, context);
-    return source.contactDefaults.companyPhone !== null || source.contactDefaults.contactEmail !== null;
+  /** Initial local source materialization is called only by the locked section core before metadata. */
+  async prepareInitialSource(tx: Database, context: SectionContext): Promise<boolean> {
+    const row = await this.row(tx, context);
+    if (!row) throw new Error('Initial Main content is missing');
+    const [pin] = await tx.select().from(mainSourcePin).where(eq(mainSourcePin.mainInformationId, row.id));
+    if (pin) return false;
+    const plan = await planMainSource(tx, context, true);
+    await applyMainSourcePlan(tx, context, plan);
+    return true;
   }
   parse(input: unknown): MainInformationWrite {
     return mainInformationWriteSchema.parse(input);
@@ -101,14 +107,6 @@ export class MainInformationHandler implements TypedSectionHandler<MainInformati
       .select({ email: userAccounts.email })
       .from(userAccounts)
       .where(and(eq(userAccounts.organizationId, context.organizationId), eq(userAccounts.role, 'manufacturer')));
-    const [revision] = await tx
-      .select({ state: sectionRevision.state, savedAt: sectionRevision.savedAt })
-      .from(sectionRevision)
-      .where(
-        and(eq(sectionRevision.id, context.revisionId), eq(sectionRevision.organizationId, context.organizationId)),
-      );
-    const source =
-      !row?.legalDataCheckedAt && revision?.state === 'working' ? await storedMainSource(tx, context) : null;
     const legalInformation = row
       ? {
           legalName: row.legalName,
@@ -148,14 +146,6 @@ export class MainInformationHandler implements TypedSectionHandler<MainInformati
         .where(eq(dictionaryEntry.id, row.legalFormId));
       legalInformation.legalForm = form?.code ?? null;
     }
-    if (source?.source.state === 'received') {
-      Object.assign(legalInformation, source.legalInformation, { alternativeName: legalInformation.alternativeName });
-      // Prefill is only a first-read convenience; a saved correction or cleared value is never overwritten.
-      if (revision?.savedAt === null) {
-        editable.companyPhone ??= source.contactDefaults.companyPhone;
-        editable.contactEmail ??= source.contactDefaults.contactEmail;
-      }
-    }
     const regionIds = [...new Set(editable.sites.flatMap((site) => (site.regionId ? [site.regionId] : [])))];
     const regionRows = regionIds.length
       ? await tx
@@ -184,26 +174,12 @@ export class MainInformationHandler implements TypedSectionHandler<MainInformati
       editable,
       selectedRegions,
       legalInformation,
-      source: row?.legalDataCheckedAt
-        ? { state: 'received', readAt: row.legalDataCheckedAt.toISOString(), provenance: 'adata' }
-        : (source?.source ?? { state: 'not_requested', readAt: null, provenance: row?.legalName ? 'migration' : null }),
+      source: await pinnedMainSource(tx, context, row),
       registry: {
         registered: row?.unifiedRegisterRegistered ?? null,
         firstInclusionOn: row?.unifiedRegisterFirstInclusionOn ?? null,
       },
     };
-  }
-
-  /** Only normalised dictionary matches are linked; unknown source classifications retain their code/name. */
-  private async sourceEntry(tx: Database, kind: string, code: string | null): Promise<string | null> {
-    if (!code) return null;
-    const [entry] = await tx
-      .select({ id: dictionaryEntry.id })
-      .from(dictionaryEntry)
-      .innerJoin(dictionary, eq(dictionary.id, dictionaryEntry.dictionaryId))
-      .where(and(eq(dictionary.code, kind), sql`lower(${dictionaryEntry.code}) = lower(${code})`))
-      .for('share', { of: dictionaryEntry });
-    return entry?.id ?? null;
   }
 
   async save(tx: Database, context: SectionContext, input: MainInformationWrite): Promise<void> {
@@ -268,46 +244,28 @@ export class MainInformationHandler implements TypedSectionHandler<MainInformati
       .update(mainInformation)
       .set({ website: input.website, companyPhone: input.companyPhone, contactEmail: input.contactEmail })
       .where(eq(mainInformation.id, row.id));
-    if (!row.legalDataCheckedAt) {
-      const source = await storedMainSource(tx, context);
-      if (source.source.state === 'received' && source.source.readAt) {
-        const legal = source.legalInformation;
-        await tx
-          .update(mainInformation)
-          .set({
-            legalName: legal.legalName,
-            legalFormId: await this.sourceEntry(tx, 'legal_form', legal.legalForm),
-            legalFormSourceName: legal.legalForm,
-            directorFullName: legal.directorFullName,
-            stateRegisteredOn: legal.stateRegisteredOn,
-            legalAddress: legal.legalAddress,
-            legalDataCheckedAt: new Date(source.source.readAt),
-          })
-          .where(eq(mainInformation.id, row.id));
-        await tx.delete(mainInformationOked).where(eq(mainInformationOked.mainInformationId, row.id));
-        for (let position = 0; position < legal.oked.length; position++) {
-          const activity = legal.oked[position]!;
-          await tx.insert(mainInformationOked).values({
-            mainInformationId: row.id,
-            organizationId: context.organizationId,
-            code: activity.code,
-            sourceName: activity.name,
-            okedEntryId: await this.sourceEntry(tx, 'oked', activity.code),
-            position,
-          });
-        }
-        await tx.delete(companyFounder).where(eq(companyFounder.mainInformationId, row.id));
-        for (let start = 0; start < legal.founders.length; start += 1000)
-          await tx.insert(companyFounder).values(
-            legal.founders.slice(start, start + 1000).map((name, index) => ({
-              mainInformationId: row.id,
-              organizationId: context.organizationId,
-              name,
-              positionInList: start + index,
-            })),
-          );
-      }
-    }
+    const contactOwners = await tx
+      .select()
+      .from(mainContactOwnership)
+      .where(eq(mainContactOwnership.mainInformationId, row.id));
+    const contacts = (['companyPhone', 'contactEmail'] as const).map((field) =>
+      recordMainContactSave(
+        (contactOwners.find((owner) => owner.field === field) as MainContactOwnership | undefined) ??
+          initialContactOwnership(field, old[field], false),
+        old[field],
+        input[field],
+      ),
+    );
+    await tx.delete(mainContactOwnership).where(eq(mainContactOwnership.mainInformationId, row.id));
+    await tx
+      .insert(mainContactOwnership)
+      .values(
+        contacts.map((owner) => ({ ...owner, mainInformationId: row!.id, organizationId: context.organizationId })),
+      );
+    const oldOwnership = await tx
+      .select()
+      .from(mainSiteOwnership)
+      .where(eq(mainSiteOwnership.mainInformationId, row.id));
     await tx
       .delete(productionSite)
       .where(
@@ -333,6 +291,16 @@ export class MainInformationHandler implements TypedSectionHandler<MainInformati
       await tx.insert(productionSiteIdentity).values(newIdentities.slice(start, start + 1000));
     for (let start = 0; start < sites.length; start += 1000)
       await tx.insert(productionSite).values(sites.slice(start, start + 1000));
+    const ownedSites = recordMainSiteSave(old.sites as ExistingMainSite[], sites, oldOwnership as MainSiteOwnership[]);
+    await tx.delete(mainSiteOwnership).where(eq(mainSiteOwnership.mainInformationId, row.id));
+    for (let start = 0; start < ownedSites.length; start += 1000)
+      await tx
+        .insert(mainSiteOwnership)
+        .values(
+          ownedSites
+            .slice(start, start + 1000)
+            .map((owner) => ({ ...owner, mainInformationId: row!.id, organizationId: context.organizationId })),
+        );
   }
 
   async mandatoryInputs(tx: Database, context: SectionContext): Promise<CompletenessInput[]> {

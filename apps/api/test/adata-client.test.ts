@@ -11,7 +11,7 @@ import {
   pollCompanyInfo,
   redactToken,
 } from '../src/modules/adata/adata.client.js';
-import { ADATA_FIXTURE, type AdataScenario, type AdataStub, startAdataStub } from './support/adata-stub.js';
+import { ADATA_FIXTURE, adataFixtureForBin, type AdataScenario, type AdataStub, startAdataStub } from './support/adata-stub.js';
 
 // Токен — случайная строка теста; «/», «+» и «=» проверяют кодирование сегмента пути.
 const TOKEN = `${randomBytes(18).toString('base64url')}/+=`;
@@ -344,7 +344,7 @@ describe('AdataClient: два шага с опросом (EXT-02, IMBC-07)', () 
     const { pollToken } = await client.startCompanyInfo(bin);
     expect(pollToken).toMatch(/^\d{10}$/);
     const result = await poll(pollToken);
-    expect(result).toEqual({ ready: true, data: ADATA_FIXTURE.data });
+    expect(result).toEqual({ ready: true, data: adataFixtureForBin(bin).data });
     expect(stub.requests.filter((r) => r.kind === 'start')).toHaveLength(1);
     expect(stub.requests.filter((r) => r.kind === 'check')).toHaveLength(4);
   });
@@ -452,7 +452,7 @@ describe('AdataClient: два шага с опросом (EXT-02, IMBC-07)', () 
     const bin = nextBin();
     stub.scenario(bin, { kind: 'check_flaky', failures: 2 });
     const { pollToken } = await client.startCompanyInfo(bin);
-    expect(await poll(pollToken)).toEqual({ ready: true, data: ADATA_FIXTURE.data });
+    expect(await poll(pollToken)).toEqual({ ready: true, data: adataFixtureForBin(bin).data });
     expect(stub.requests.filter((r) => r.kind === 'check')).toHaveLength(3);
   });
 

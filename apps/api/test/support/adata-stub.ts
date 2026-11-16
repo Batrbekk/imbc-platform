@@ -10,6 +10,8 @@ export const ADATA_FIXTURE = JSON.parse(
   readFileSync(new URL('../fixtures/adata-company-info.json', import.meta.url), 'utf8'),
 ) as { success: true; message: 'ready'; data: Record<string, unknown> };
 
+export const adataFixtureForBin = (bin: string) => ({ ...ADATA_FIXTURE, data: { ...ADATA_FIXTURE.data, basic: { ...(ADATA_FIXTURE.data.basic as object), biin: bin } } });
+
 /** Шаг вызова, на котором срабатывает сбой; по умолчанию — Check Request. */
 type Step = { on?: 'start' | 'check' };
 
@@ -137,11 +139,11 @@ export async function startAdataStub({ token, port = 0 }: { token: string; port?
         case 'wait_forever':
           return wait();
         case 'ready':
-          return n < s.afterPolls ? wait() : json(res, 200, s.body ?? ADATA_FIXTURE);
+          return n < s.afterPolls ? wait() : json(res, 200, s.body ?? adataFixtureForBin(bin));
         case 'check_flaky':
           return n < s.failures
             ? json(res, 500, { success: false, message: 'Something went wrong' })
-            : json(res, 200, ADATA_FIXTURE);
+            : json(res, 200, adataFixtureForBin(bin));
         case 'unknown_bin':
           return json(res, 200, {
             success: true,
@@ -149,7 +151,7 @@ export async function startAdataStub({ token, port = 0 }: { token: string; port?
             data: { basic: null, kzCoContact: null, founders: null },
           });
         default:
-          return json(res, 200, ADATA_FIXTURE);
+          return json(res, 200, adataFixtureForBin(bin));
       }
     }
 

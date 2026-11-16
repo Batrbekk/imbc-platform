@@ -274,14 +274,12 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
             reviewRequired: true,
           })),
         );
-        await tx
-          .insert(s.profileSectionCandidate)
-          .values({
-            profileSectionId: contact.id,
-            organizationId: profile.organizationId,
-            reviewAssignmentId: assignment!.id,
-            sectionRevisionId: sent.revisionId!,
-          });
+        await tx.insert(s.profileSectionCandidate).values({
+          profileSectionId: contact.id,
+          organizationId: profile.organizationId,
+          reviewAssignmentId: assignment!.id,
+          sectionRevisionId: sent.revisionId!,
+        });
         await tx
           .update(s.reviewAssignment)
           .set({
@@ -537,7 +535,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       expect(JSON.stringify(body)).not.toContain('errors');
     });
 
-    it('copies all nineteen business tables and remaps child parents while preserving stable identities/files and excluding send snapshots', async () => {
+    it('copies all nineteen business tables and four provenance tables while preserving stable identities/files and excluding send snapshots', async () => {
       const source = await seedProfileGraph(pool);
       const sections = await db.select().from(s.profileSection).where(eq(s.profileSection.profileId, source.profile));
       const copied: Record<string, Record<string, unknown>[]> = {};
@@ -567,9 +565,19 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
         }
       });
       const tables = Object.values(SECTION_CONTENT_TABLES).flat();
-      expect(tables).toHaveLength(19);
+      expect(tables).toHaveLength(23);
       for (const table of tables) {
         const rows = copied[table.name]!;
+        if (!(table.name in source.rows)) {
+          expect([
+            'main_source_pin',
+            'main_contact_ownership',
+            'main_site_ownership',
+            'main_site_source_binding',
+          ]).toContain(table.name);
+          expect(rows).toEqual([]);
+          continue;
+        }
         expect(rows).toHaveLength(1);
         const row = rows[0]!;
         const original = source.rows[table.name]!;

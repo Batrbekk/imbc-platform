@@ -121,8 +121,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('MAN-06–15 main information an
     ownMainInformationSchema.parse(await (await http.get(`${ROOT}/main_information`, 'manufacturer')).json());
   const contactsRead = async () =>
     ownContactsSchema.parse(await (await http.get(`${ROOT}/contacts`, 'manufacturer')).json());
-  const mainSave = (data: MainInformationWrite, editVersion = 0) =>
-    http.send('PUT', `${ROOT}/main_information`, 'manufacturer', { editVersion, data });
+  const mainSave = async (data: MainInformationWrite, editVersion?: number) =>
+    http.send('PUT', `${ROOT}/main_information`, 'manufacturer', {
+      editVersion: editVersion ?? (await mainRead()).editVersion,
+      data,
+    });
   const contactsSave = (data: ContactsWrite, editVersion = 0) =>
     http.send('PUT', `${ROOT}/contacts`, 'manufacturer', { editVersion, data });
   const main = (sites = 2): MainInformationWrite => ({
@@ -165,7 +168,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('MAN-06–15 main information an
         bin: org!.bin!,
         requestedAt: new Date(completedAt.getTime() - 60000),
         completedAt,
-        value,
+        value: {
+          ...(value as Record<string, unknown>),
+          basic: { ...((value as { basic?: Record<string, unknown> }).basic ?? {}), biin: org!.bin! },
+        },
         source: 'adata.companyInfo',
       })
       .returning();
@@ -261,7 +267,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('MAN-06–15 main information an
     });
     const blank: MainInformationWrite = { website: null, companyPhone: null, contactEmail: null, sites: [] };
     const cleared = ownMainInformationSchema.parse(await (await mainSave(blank, initial.editVersion)).json());
-    expect(cleared).toMatchObject({ editVersion: 1, savedAt: expect.any(String), revisionId: initial.revisionId });
+    expect(cleared).toMatchObject({
+      editVersion: initial.editVersion + 1,
+      savedAt: expect.any(String),
+      revisionId: initial.revisionId,
+    });
     expect(cleared.data.editable).toEqual(blank);
     expect((await mainRead()).data.editable).toEqual(blank);
     const repeated = ownMainInformationSchema.parse(await (await mainSave(blank, cleared.editVersion)).json());
@@ -291,7 +301,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('MAN-06–15 main information an
       code: 'validation',
       errors: [{ path: 'sites.0.identityId', code: 'site_invalid' }],
     });
-    expect((await mainRead()).editVersion).toBe(0);
+    expect((await mainRead()).editVersion).toBe(1);
   });
 
   it('retired region can be retained on an existing site but cannot be selected for a new site', async () => {
@@ -456,7 +466,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('MAN-06–15 main information an
     const response = await mainSave(data);
     expect(response.status).toBe(200);
     const result = ownMainInformationSchema.parse(await response.json());
-    expect(result.editVersion).toBe(1);
+    expect(result.editVersion).toBe(2);
     expect(result.data.editable.sites).toHaveLength(10000);
     expect(new Set(result.data.editable.sites.map(({ identityId }) => identityId)).size).toBe(10000);
     expect(result.completeness.percent).toBeLessThan(100);

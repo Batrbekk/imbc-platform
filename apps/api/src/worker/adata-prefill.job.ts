@@ -15,7 +15,8 @@ import {
   type AdataTiming,
 } from '../modules/adata/adata.client.js';
 import { allowancePeriodStart, reserveAllowance } from '../modules/adata/allowance.js';
-import { extractPrefill } from '../modules/adata/company-info.js';
+import { companyInfoMatchesBin, extractPrefill } from '../modules/adata/company-info.js';
+import { requestMainSourceRefresh } from '../modules/profiles/main-source-refresh.service.js';
 
 export const ADATA_CLIENT_FACTORY = Symbol('ADATA_CLIENT_FACTORY');
 export const ADATA_TIMING = Symbol('ADATA_TIMING');
@@ -144,6 +145,7 @@ export class AdataPrefillJob {
           .update(externalCheckAttempt)
           .set({ state, completedAt: sql`now()`, failure: null })
           .where(eq(externalCheckAttempt.id, attempt.id));
+        await requestMainSourceRefresh(tx, attempt.profileId, attempt.organizationId, attempt.id);
         await this.audit.record(
           {
             organizationId: attempt.organizationId,
@@ -219,6 +221,7 @@ export class AdataPrefillJob {
     let json: string;
     let rows: ReturnType<typeof extractPrefill>;
     try {
+      if (!companyInfoMatchesBin(data, attempt.bin)) return this.unavailable(attempt, 'malformed');
       const value = redactToken(data, token);
       json = JSON.stringify(value);
       rows = extractPrefill(value);
@@ -258,6 +261,7 @@ export class AdataPrefillJob {
               })),
             )
             .onConflictDoNothing();
+        await requestMainSourceRefresh(tx, attempt.profileId, attempt.organizationId, attempt.id);
         await this.audit.record(
           {
             organizationId: attempt.organizationId,
@@ -288,6 +292,7 @@ export class AdataPrefillJob {
           .where(and(eq(externalCheckAttempt.id, attempt.id), eq(externalCheckAttempt.state, 'polling')))
           .returning({ id: externalCheckAttempt.id });
         if (!row) return false;
+        await requestMainSourceRefresh(tx, attempt.profileId, attempt.organizationId, attempt.id);
         await this.audit.record(
           {
             organizationId: attempt.organizationId,
