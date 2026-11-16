@@ -30,6 +30,7 @@ import { denyAll, FILE_READ_RULES, manufacturerFileRule } from '../src/modules/f
 import { FilesController } from '../src/modules/files/files.controller.js';
 import { orgChartSampleReadRule } from '../src/modules/files/org-chart-sample.rules.js';
 import { diligenceReportReadRule } from '../src/modules/due-diligence/report-files.js';
+import { siteSurveyReportReadRule } from '../src/modules/site-survey/site-survey-files.js';
 import type { Antivirus } from '../src/modules/files/antivirus.js';
 import { FILE_ROUTES, FilesService } from '../src/modules/files/files.service.js';
 import { type AcceptedUpload, acceptUpload, uploadInterceptor } from '../src/modules/files/upload.js';
@@ -679,7 +680,7 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
     }
   });
 
-  it('права по назначению: владелец, SME и директор читают файл производителя; оператор и наблюдатель — 403; назначение без правила (site_survey_report) — 403 всем ролям', async () => {
+  it('права по назначению: владелец, SME и директор читают файл производителя; оператор и наблюдатель — 403; непривязанный site_survey_report — 403 всем ролям', async () => {
     // Образец оргструктуры — своё правило (org-chart-sample.integration.test.ts).
     for (const purpose of FILE_PURPOSES)
       expect(FILE_READ_RULES[purpose], purpose).toBe(
@@ -689,7 +690,9 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
             ? orgChartSampleReadRule
             : purpose === 'due_diligence_report' || purpose === 'enhanced_due_diligence_report'
               ? diligenceReportReadRule
-              : denyAll,
+              : purpose === 'site_survey_report'
+                ? siteSurveyReportReadRule
+                : denyAll,
       );
 
     const cv = await createFile({ purpose: 'cv' });

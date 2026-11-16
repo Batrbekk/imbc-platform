@@ -299,18 +299,18 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
     expect(screen.queryByRole("link", { name: kk.nav.reviews })).toBeNull();
   });
 
-  it("меню SME: очередь проверки, каталог, аккаунт", async () => {
+  it("меню SME: очередь проверки, заявки на обследование, каталог, аккаунт", async () => {
     stubWorkspace(me("expert"));
     const { router, user } = renderRoute("/reviews", { locale: "en" });
 
     await screen.findByRole("heading", { level: 1, name: en.reviews.title });
     const menu = screen.getAllByRole("link").filter((link) => link.dataset.sidebar === "menu-button");
-    expect(menu.map((link) => link.textContent)).toEqual([en.nav.reviews, en.nav.catalog, en.nav.lps, en.nav.account]);
-    expect(menu.map((link) => link.getAttribute("href"))).toEqual(["/reviews", "/catalog", "/lps", "/account"]);
+    expect(menu.map((link) => link.textContent)).toEqual([en.nav.reviews, en.nav.siteSurveyRequests, en.nav.catalog, en.nav.lps, en.nav.account]);
+    expect(menu.map((link) => link.getAttribute("href"))).toEqual(["/reviews", "/imbc/site-survey-requests", "/catalog", "/lps", "/account"]);
     expect(menu[0]!.hasAttribute("data-active")).toBe(true);
     expect(menu[1]!.hasAttribute("data-active")).toBe(false);
 
-    await user.click(menu[1]!);
+    await user.click(screen.getByRole("link", { name: en.nav.catalog }));
     expect(router.state.location.pathname).toBe("/catalog");
     expect(await screen.findByRole("heading", { name: en.catalog.title })).toBeTruthy();
     expect(screen.getByRole("link", { name: en.nav.reviews }).hasAttribute("data-active")).toBe(false);
@@ -432,7 +432,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
       ["operator", ["/dashboard", "/catalog", "/lps", "/account"]],
       ["observer", ["/dashboard", "/catalog", "/account"]],
       ["director", ["/dashboard", "/catalog", "/lps", "/references", "/account"]],
-      ["expert", ["/reviews", "/catalog", "/lps", "/account"]],
+      ["expert", ["/reviews", "/imbc/site-survey-requests", "/catalog", "/lps", "/account"]],
       ["manufacturer", ["/profile", "/account"]],
       ["administrator", ["/admin/accounts", "/admin/reviews", "/references", "/account"]],
     ];
@@ -441,6 +441,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
       const fromPolicy = [
         can(role, "dashboard.read") && "/dashboard",
         can(role, "review.take") && "/reviews",
+        role === "expert" && can(role, "imbc_records.read") && "/imbc/site-survey-requests",
         can(role, "catalog.search") && "/catalog",
         can(role, "profile.edit") && "/profile",
         can(role, "lps.read") && "/lps",

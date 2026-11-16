@@ -31,6 +31,7 @@ export const QUEUES = {
   eOndirisProfileRefresh: 'eondiris-profile-refresh',
   mainSourceRefresh: 'main-source-refresh',
   diligenceRefresh: 'diligence-refresh',
+  siteSurveyRefresh: 'site-survey-refresh',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -92,6 +93,11 @@ export const PLATFORM_TZ = 'Asia/Almaty';
 
 /** Расписания (раздел 12 спецификации, архитектура §8). */
 export const SCHEDULES: ReadonlyArray<{ queue: QueueName; cron: string; note: string }> = [
+  {
+    queue: QUEUES.siteSurveyRefresh,
+    cron: '* * * * *',
+    note: 'Survey expiry/selection and durable NOT-11 recovery (IMBC-02/05, NOT-34)',
+  },
   { queue: QUEUES.fileCleanupSweep, cron: '0 3 * * *', note: 'unused manufacturer uploads older than 30 days' },
   { queue: QUEUES.certificateExpiry, cron: '30 0 * * *', note: 'истечение сертификатов (REV-20)' },
   { queue: QUEUES.purgeExportFiles, cron: '0 1 * * *', note: 'удаление файлов выгрузок старше 90 дней (OPR-23)' },
@@ -112,7 +118,11 @@ export const SCHEDULES: ReadonlyArray<{ queue: QueueName; cron: string; note: st
     note: 'атомарный outbox source-COW и повтор после завершения активного рассмотрения (MAN-25)',
   },
   { queue: QUEUES.runSubscriptions, cron: '0 6 * * *', note: 'подписки на выгрузки (OPR-20)' },
-  { queue: QUEUES.diligenceRefresh, cron: '* * * * *', note: 'полный атомарный DD результат из нормализованного Adata receipt (IMBC-07–10)' },
+  {
+    queue: QUEUES.diligenceRefresh,
+    cron: '* * * * *',
+    note: 'полный атомарный DD результат из нормализованного Adata receipt (IMBC-07–10)',
+  },
   {
     queue: QUEUES.mainSourceRefresh,
     cron: '* * * * *',

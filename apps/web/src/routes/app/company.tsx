@@ -15,6 +15,7 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader } from "@/components
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useFormat } from "@/i18n/format";
+import { SurveyCompanyReport } from "@/features/site-survey/company-report";
 import { api, ApiError } from "@/lib/api";
 import { useMe } from "@/lib/session";
 
@@ -100,6 +101,7 @@ function CompanyView({ company }: { company: Company }) {
   const format = useFormat();
   const role = useMe().data?.user.role;
   const diligence = useTranslations("diligence");
+  const survey = useTranslations("siteSurvey");
   const showDiligence = role !== undefined && ["expert", "director"].includes(role) && can(role, "imbc_records.read") !== null;
   const yesNo = (value: boolean) => (value ? common("yes") : common("no"));
   const orNone = (value: string | null) => value ?? t("notProvided");
@@ -126,6 +128,8 @@ function CompanyView({ company }: { company: Company }) {
         </div>
         {showDiligence && <div><Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
           to={`/imbc/profiles/${company.profileId}/due-diligence`} state={{ from: `/companies/${company.profileId}` }}>{diligence("open")}</Link></div>}
+        {showDiligence && <div><Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+          to={`/imbc/profiles/${company.profileId}/site-surveys`} state={{ from: `/companies/${company.profileId}` }}>{survey("openSurveys")}</Link></div>}
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -227,6 +231,7 @@ function CompanyView({ company }: { company: Company }) {
           </CardContent>
         </Card>
       </div>
+      {role !== undefined && can(role, "catalog.search") !== null && <SurveyCompanyReport current={company.siteSurvey ?? null} />}
     </>
   );
 }

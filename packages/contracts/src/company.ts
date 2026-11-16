@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { COMMODITY_GROUPS, PROFILE_TIERS, UPDATE_STATUSES } from './enums.js';
 import { diligencePublicSummarySchema } from './diligence.js';
+import { siteSurveyCurrentReportSchema } from './site-survey.js';
 
 /** Контактное лицо компании (focal point). Видят роли с `focal_point.read`, наблюдатель — нет (GEN-13). */
 export const companyContactSchema = z.object({
@@ -50,5 +51,7 @@ export const companyPageSchema = z.object({
   companyEmail: z.string().nullable(),
   focalPoint: companyContactSchema.nullable().optional(),
   diligence: diligencePublicSummarySchema.optional(),
+  /** OPR-10/GEN-13: exact current signed report and dates; no Class C comment, result or history. */
+  siteSurvey: siteSurveyCurrentReportSchema.nullable().optional(),
 });
 export type CompanyPage = z.infer<typeof companyPageSchema>;

@@ -204,6 +204,20 @@
       "when": 1794821048533,
       "tag": "0028_stage5_unlock_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1794823575869,
+      "tag": "0029_canonical_site_surveys",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1794826507564,
+      "tag": "0030_survey_notice_delivery",
+      "breakpoints": true
     }
   ]
 }

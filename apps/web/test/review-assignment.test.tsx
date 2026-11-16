@@ -30,7 +30,9 @@ describe("review assignment UI and queue boundaries", () => {
     stubReview("expert", { "GET /api/v1/reviews/queue": { body: { ...REVIEW_QUEUE, items: [{ ...REVIEW_QUEUE.items[0], assignmentId: null, receivedAt: null, unresolved: true }] } } }); mount();
     await screen.findByText(en.reviewWorkflow.unresolved); const row = within(screen.getByText(REVIEW_NAME).closest("tr")!);
     expect(row.getByText(en.reviewWorkflow.receivedUnknown)).toBeTruthy(); expect(row.queryByRole("button", { name: en.reviewWorkflow.take })).toBeNull(); expect(row.queryByRole("link", { name: en.reviewWorkflow.openReview })).toBeNull();
-    expect(row.queryByRole("link")).toBeNull();
+    expect(row.queryByRole("link", { name: en.reviewWorkflow.openReview })).toBeNull();
+    expect(row.queryByRole("link", { name: en.reviewWorkflow.openDiligence })).toBeNull();
+    expect(row.getByRole("link", { name: en.siteSurvey.openSurveys }).getAttribute("href")).toBe(`/imbc/profiles/${REVIEW_QUEUE.items[0]!.profileId}/site-surveys`);
   });
   it("keeps an operational legacy row with an unknown BIN without fabricating one", async () => {
     stubReview("expert", { "GET /api/v1/reviews/queue": { body: { ...REVIEW_QUEUE, items: [{ ...REVIEW_QUEUE.items[0], bin: null }] } } }); mount();

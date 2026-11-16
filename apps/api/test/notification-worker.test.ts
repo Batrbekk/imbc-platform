@@ -2,7 +2,8 @@ import 'reflect-metadata';
 import type { FactoryProvider, Provider } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { NOTIFY_QUEUE_OPTIONS, QUEUES } from '../src/jobs/queues.js';
+import { NOTIFY_QUEUE_OPTIONS, PLATFORM_TZ, QUEUES } from '../src/jobs/queues.js';
+import { SiteSurveyNoticeWorker } from '../src/modules/site-survey/site-survey-notice.worker.js';
 import { MailService } from '../src/mail/mail.service.js';
 import {
   defaultNotificationRenderer,
@@ -32,12 +33,16 @@ describe('worker: письма событий', () => {
     };
     expect(providers).toContain(NotificationDispatcher);
     expect(providers).toContain(MailService);
+    expect(providers).toContain(SiteSurveyNoticeWorker);
     expect(value(RECIPIENT_RESOLVERS)).toBe(DEFAULT_RECIPIENT_RESOLVERS);
-    const rendererProvider = providers.find(p => typeof p === 'object' && 'provide' in p && p.provide === NOTIFICATION_RENDERER) as FactoryProvider<NotificationRenderer>;
+    const rendererProvider = providers.find(
+      (p) => typeof p === 'object' && 'provide' in p && p.provide === NOTIFICATION_RENDERER,
+    ) as FactoryProvider<NotificationRenderer>;
     expect(rendererProvider.inject).toEqual([DB, ENV]);
     const renderer = await rendererProvider.useFactory({}, { PUBLIC_URL: 'https://imbc.local' });
-    expect((await renderer('NOT-03', 'en', { minutes: '15', link: 'https://imbc.local/login' })).subject)
-      .toBe('Your IMBC Platform account is temporarily locked');
+    expect((await renderer('NOT-03', 'en', { minutes: '15', link: 'https://imbc.local/login' })).subject).toBe(
+      'Your IMBC Platform account is temporarily locked',
+    );
     await expect(renderer('NOT-05', 'en', {})).rejects.toThrow('missing event context');
     // Внедрение по типу: почта — вторым параметром диспетчера. Опрос Keycloak письма не шлёт, а ставит
     // задание notify: диспетчера у JobHandlers нет.
@@ -67,6 +72,10 @@ describe('worker: письма событий', () => {
     const runJob = vi.fn().mockResolvedValueOnce(refusal).mockResolvedValueOnce(sent);
     const jobs = { purgeSessions: vi.fn(async () => 'не результат задания') };
     const cleanup = { run: vi.fn(async () => 'purged'), sweep: vi.fn(async () => ({ enqueued: 1 })) };
+    const survey = {
+      runJob: vi.fn(async () => ({ sent: 1, duplicates: 0, skippedRecipients: 0, state: 'completed' })),
+      refreshPending: vi.fn(async () => ({ checked: 1, queued: 1, deferred: 0, recovered: 0, obsolete: 0, failed: 0 })),
+    };
     const worker = new WorkerModule(
       boss as never,
       jobs as never,
@@ -82,12 +91,32 @@ describe('worker: письма событий', () => {
       { refreshPending: async () => ({ processed: 0, deferred: 0, failed: 0 }) } as never,
       { refreshPending: async () => ({ processed: 0, deferred: 0, failed: 0 }) } as never,
       { refresh: async () => false } as never,
+      survey as never,
     );
     await worker.onApplicationBootstrap();
 
     const job = { rule: 'NOT-04', eventKey: 'submitted:1', params: {} };
     expect(await handlers.get(QUEUES.notify)!([{ data: job }])).toEqual(refusal);
     expect(runJob).toHaveBeenCalledWith(job);
+    const surveyJob = { rule: 'NOT-11', eventKey: 'survey-fixture', params: {} };
+    expect(await handlers.get(QUEUES.notify)!([{ data: surveyJob }])).toEqual({
+      sent: 1,
+      duplicates: 0,
+      skippedRecipients: 0,
+      state: 'completed',
+    });
+    expect(survey.runJob).toHaveBeenCalledWith(surveyJob);
+    expect(runJob).toHaveBeenCalledTimes(1);
+    expect(await handlers.get(QUEUES.siteSurveyRefresh)!([{ data: null }])).toEqual({
+      checked: 1,
+      queued: 1,
+      deferred: 0,
+      recovered: 0,
+      obsolete: 0,
+      failed: 0,
+    });
+    expect(survey.refreshPending).toHaveBeenCalledOnce();
+    expect(boss.schedule).toHaveBeenCalledWith(QUEUES.siteSurveyRefresh, '* * * * *', null, { tz: PLATFORM_TZ });
     expect(await handlers.get(QUEUES.notify)!([{ data: job }])).toEqual(sent);
     expect(await handlers.get(QUEUES.purgeSessions)!([{ data: null }])).toBeUndefined();
     expect(jobs.purgeSessions).toHaveBeenCalledOnce();
@@ -115,10 +144,14 @@ describe('worker: письма событий', () => {
 
   it('письмо без текста или обязательной подстановки отклоняется, а готовый шаблон работает', () => {
     expect(() => defaultNotificationRenderer('NOT-01', 'kk', {})).toThrow(PermanentNotificationError);
+    expect(() => defaultNotificationRenderer('NOT-11', 'en', { link: 'https://imbc.local/companies/fixture' })).toThrow(
+      'requires durable Survey dispatch',
+    );
     expect(() => defaultNotificationRenderer('NOT-01', 'kk', {})).toThrow('notification NOT-01: нет текста письма');
     expect(() => defaultNotificationRenderer('NOT-04', 'kk', {})).toThrow(PermanentNotificationError);
-    expect(defaultNotificationRenderer('NOT-04', 'en', { name: 'Manufacturer', link: 'https://imbc.local/reviews' }).text)
-      .toContain('Manufacturer');
+    expect(
+      defaultNotificationRenderer('NOT-04', 'en', { name: 'Manufacturer', link: 'https://imbc.local/reviews' }).text,
+    ).toContain('Manufacturer');
     expect(() => defaultNotificationRenderer('NOT-03', 'kk', { minutes: '15' })).toThrow(PermanentNotificationError);
     expect(
       defaultNotificationRenderer('NOT-03', 'en', { minutes: '15', link: 'https://imbc.local/login' }).subject,

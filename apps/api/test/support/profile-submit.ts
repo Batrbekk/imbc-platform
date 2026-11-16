@@ -28,13 +28,15 @@ export const submissionHandlers = () => [
 let fixtureBin = 0;
 
 /** Complete producer-entered graph, while legal source fields and optional equipment details remain unknown. */
-export async function seedSubmissionProfile(pool: pg.Pool) {
+export async function seedSubmissionProfile(pool: pg.Pool, base?: { profile: string; org: string }) {
   const db = drizzle(pool, { schema: s, casing: 'snake_case' });
-  const graph = await seedProfileGraph(pool);
-  await db
-    .update(s.organizations)
-    .set({ bin: `2710${String(++fixtureBin).padStart(8, '0')}` })
-    .where(eq(s.organizations.id, graph.org));
+  const graph = await seedProfileGraph(pool, base);
+  // Existing query fixtures keep their original BIN/identity; the default isolated fixture is unchanged.
+  if (!base)
+    await db
+      .update(s.organizations)
+      .set({ bin: `2710${String(++fixtureBin).padStart(8, '0')}` })
+      .where(eq(s.organizations.id, graph.org));
   const [owner] = await db
     .insert(s.userAccounts)
     .values({

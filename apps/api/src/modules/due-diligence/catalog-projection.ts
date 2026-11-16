@@ -9,6 +9,8 @@ import { ProductionHandler } from '../profiles/production.handler.js';
 import { CertificatesHandler } from '../profiles/certificates.handler.js';
 import { DocumentsHandler } from '../profiles/documents.handler.js';
 import { validateProfileRevisionGraph, type ExactProfileRevisionMap } from '../profiles/profile-publication-graph.js';
+import { reconcileSiteSurveyPublication } from '../site-survey/survey-publication-state.js';
+import type { SurveyPublicationObservation } from '../site-survey/survey-operation.js';
 
 type Scope = { profileId: string; organizationId: string };
 type Pointer = { kind: SectionKind; sectionId: string; revisionId: string; state: string };
@@ -19,7 +21,11 @@ const unique = (items: (string | null | undefined)[]) => [...new Set(items.filte
  * NO KEY UPDATE lock. Only seven exact verified revisions are read: neither working/frozen candidates
  * nor latest EO/Adata values can enter catalog search, page, exports or pull API.
  */
-export async function rebuildVerifiedCatalogProjection(tx: Database, scope: Scope): Promise<boolean> {
+export async function rebuildVerifiedCatalogProjection(
+  tx: Database, scope: Scope, surveyObservation?: SurveyPublicationObservation,
+): Promise<boolean> {
+  // Survey generations are independent of DD visibility, including a hidden profile's deferred notice.
+  const survey = await reconcileSiteSurveyPublication(tx, scope, surveyObservation);
   const profile = (
     await tx.execute<{
       status: string;
@@ -79,15 +85,8 @@ export async function rebuildVerifiedCatalogProjection(tx: Database, scope: Scop
   const certificates = await new CertificatesHandler().read(tx, context('certificates'));
   const documents = await new DocumentsHandler().read(tx, context('documents'));
   const flags = (
-    await tx.execute<{ surveyed: boolean; worksWithCount: number }>(sql`
-    select exists(select 1 from site_survey_records s
-      join file_object f on f.id=s.report_file_id and f.organization_id=${scope.organizationId}
-        and f.purpose='site_survey_report' and f.data_class='c_imbc' and f.purge_requested_at is null
-      join file_version v on v.file_object_id=f.id and v.scan_state='passed'
-        and v.version_number=(select max(version_number) from file_version where file_object_id=f.id)
-      where s.profile_id=${scope.profileId} and s.result_yes
-        and (s.expires_on is null or s.expires_on > (current_timestamp at time zone 'Asia/Almaty')::date)) as surveyed,
-      least(3,(select count(distinct operator_org_id)::integer from works_with_marks w
+    await tx.execute<{ worksWithCount: number }>(sql`
+    select least(3,(select count(distinct operator_org_id)::integer from works_with_marks w
         where w.profile_id=${scope.profileId} and w.works_with and w.state='validated')) as "worksWithCount"`)
   ).rows[0]!;
   const focal = contacts.contacts.find((c) => c.isFocalPoint);
@@ -120,6 +119,7 @@ export async function rebuildVerifiedCatalogProjection(tx: Database, scope: Scop
         ? { fullName: focal.fullName, position: focal.position, email: focal.email, phone: focal.phone }
         : null,
     diligence: { checkedOn: profile.checkedOn, enhancedDone: profile.enhancedDone },
+    siteSurveySummary: survey.summary,
     verifiedRevisionIds: revisions,
     // Explicit allow-list excludes Main login identity and Class C connector state/evidence.
     verifiedSections: {
@@ -146,7 +146,7 @@ export async function rebuildVerifiedCatalogProjection(tx: Database, scope: Scop
       ${sql.param(commodityGroups)}::commodity_group[],${sql.param(unique(products.selectedReferences.commodityTypes.map((t) => t.code)))}::text[],
       ${sql.param(unique(products.lines.map((p) => p.tnVedCode)))}::text[],${sql.param(unique(products.lines.flatMap((p) => p.kpved.map((k) => k.code))))}::text[],
       ${sql.param(unique(main.legalInformation.oked.map((o) => o.code)))}::text[],${sql.param(certificateTypes)}::text[],${JSON.stringify(certificateDates)}::jsonb,
-      ${products.lines[0]?.tnVedCode ?? null},${headcount},${flags.surveyed},${main.registry.registered === true},${flags.worksWithCount},
+      ${products.lines[0]?.tnVedCode ?? null},${headcount},${survey.summary.siteSurveyed},${main.registry.registered === true},${flags.worksWithCount},
       ${profile.updateStatus}::update_status,${profile.pendingChanges},${profile.verifiedAt}::timestamptz,${JSON.stringify(card)}::jsonb,clock_timestamp())
     on conflict(profile_id) do update set organization_id=excluded.organization_id,bin=excluded.bin,name_en=excluded.name_en,
       name_ru=excluded.name_ru,name_normalized=excluded.name_normalized,region=excluded.region,commodity_groups=excluded.commodity_groups,

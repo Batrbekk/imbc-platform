@@ -60,8 +60,20 @@ export class MailService implements OnApplicationBootstrap {
    * только при обрыве между приёмом письма SMTP и COMMIT (расхождение 14 плана этапа 2).
    */
   async sendOnce(entry: NotificationEntry, mail: RenderedMail): Promise<'sent' | 'duplicate'> {
+    const outcome = await this.sendOnceGuarded(entry, mail, async () => true);
+    if (outcome === 'skipped') throw new Error('Unexpected unguarded notification refusal');
+    return outcome;
+  }
+
+  /** Current recipient and business conditions are locked/rechecked inside this recipient's journal/SMTP transaction. */
+  async sendOnceGuarded(
+    entry: NotificationEntry,
+    mail: RenderedMail,
+    guard: (tx: Database) => Promise<boolean>,
+  ): Promise<'sent' | 'duplicate' | 'skipped'> {
     const to = entry.to.trim();
     return this.db.transaction(async (tx) => {
+      if (!(await guard(tx as unknown as Database))) return 'skipped';
       const [claimed] = await tx
         .insert(notification)
         .values(journalRow(entry, to))

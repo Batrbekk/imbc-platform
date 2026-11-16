@@ -65,14 +65,22 @@ describe('GET /api/v1/catalog/companies/:profileId', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(companyPageSchema.parse(body).focalPoint).toEqual(FOCAL_POINT);
-    expect(company).toHaveBeenCalledWith(ID, 'operator');
+    expect(company).toHaveBeenCalledWith(
+      ID,
+      'operator',
+      expect.objectContaining({ role: 'operator', organizationType: 'operator' }),
+    );
   });
 
   it('наблюдатель — 200, ключа focalPoint нет, телефон и email компании есть (GEN-13)', async () => {
     const res = await http.get(url(ID), 'observer');
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
-    expect(company).toHaveBeenCalledWith(ID, 'observer');
+    expect(company).toHaveBeenCalledWith(
+      ID,
+      'observer',
+      expect.objectContaining({ role: 'observer', organizationType: 'observer' }),
+    );
     expect(Object.keys(body)).not.toContain('focalPoint');
     expect(body).toMatchObject({ companyPhone: PAGE.companyPhone, companyEmail: PAGE.companyEmail, tier: 'tier_2' });
     expect(companyPageSchema.parse(body)).toEqual(PAGE);

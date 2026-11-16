@@ -42,11 +42,29 @@ export async function applyAppRoleGrants(pool: pg.Pool, role: string): Promise<v
       await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON adata_main_snapshot FROM ${name}`);
       await client.query(`REVOKE DELETE, TRUNCATE ON main_source_refresh_outbox FROM ${name}`);
     }
-    const diligence = await client.query<{ exists: boolean }>("SELECT to_regclass('diligence_operation') IS NOT NULL AS exists");
+    const diligence = await client.query<{ exists: boolean }>(
+      "SELECT to_regclass('diligence_operation') IS NOT NULL AS exists",
+    );
     if (diligence.rows[0]?.exists) {
-      await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON diligence_source_snapshot, diligence_operation FROM ${name}`);
+      await client.query(
+        `REVOKE UPDATE, DELETE, TRUNCATE ON diligence_source_snapshot, diligence_operation FROM ${name}`,
+      );
       await client.query(`REVOKE DELETE, TRUNCATE ON diligence_refresh_outbox FROM ${name}`);
     }
+    const surveys = await client.query<{ exists: boolean }>(
+      "SELECT to_regclass('site_survey_operation') IS NOT NULL AS exists",
+    );
+    if (surveys.rows[0]?.exists) {
+      await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON site_survey_operation, site_survey_request FROM ${name}`);
+      await client.query(
+        `REVOKE DELETE, TRUNCATE ON site_survey_record, site_survey_publication_state, site_survey_notice_outbox FROM ${name}`,
+      );
+    }
+    const surveyPolicyLock = await client.query<{ exists: boolean }>(
+      "SELECT to_regprocedure('site_survey_lock_notification_policy()') IS NOT NULL AS exists",
+    );
+    if (surveyPolicyLock.rows[0]?.exists)
+      await client.query(`GRANT EXECUTE ON FUNCTION site_survey_lock_notification_policy() TO ${name}`);
     // Журнал аудита (AUD-02) и принятия NDA (FC-02, DBML: append-only) — только добавление:
     // у роли приложения нет UPDATE/DELETE.
     await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON audit_entries FROM ${name}`);

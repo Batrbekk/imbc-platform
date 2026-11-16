@@ -17,6 +17,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { sectionPath, useOwnSections, useSubmissionState } from "@/features/profile/profile-data";
 import { SubmissionWorkflow } from "@/features/profile/submission-workflow";
+import { SurveyOwnRequestCard } from "@/features/site-survey/own-request";
 import { useFormat } from "@/i18n/format";
 import { api } from "@/lib/api";
 
@@ -54,6 +55,7 @@ export function ProfilePage() {
       ) : profile.data && overview.data ? (
         <>
           <ProfileView profile={profile.data} overview={overview.data} state={submission.data} />
+          <SurveyOwnRequestCard currentProfile={profile.data} />
           <SubmissionWorkflow
             overview={overview.data}
             state={submission.data}

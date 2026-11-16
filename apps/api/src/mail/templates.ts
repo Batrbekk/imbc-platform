@@ -10,7 +10,7 @@ import { PermanentNotificationError } from '../notifications/errors.js';
  * (LANG-02); язык письма выбирает отправитель по получателю (NOT-19). Письма, которые отправляет сам Keycloak
  * (установка и сброс пароля NOT-01), — в теме писем Keycloak.
  */
-export const MAIL_TEMPLATE_CODES = ['NOT-02', 'NOT-03', 'NOT-04', 'NOT-05', 'NOT-10'] as const;
+export const MAIL_TEMPLATE_CODES = ['NOT-02', 'NOT-03', 'NOT-04', 'NOT-05', 'NOT-10', 'NOT-11'] as const;
 export type MailTemplateCode = (typeof MAIL_TEMPLATE_CODES)[number];
 
 export interface RenderedMail {
@@ -87,6 +87,7 @@ type Vars = {
   'NOT-04': { name: string; link: string };
   'NOT-05': { mode: string; status: string; sections: string; link: string };
   'NOT-10': { name: string; link: string };
+  'NOT-11': { link: string };
 };
 
 const resultSectionSchema = z.strictObject({

@@ -26,7 +26,7 @@ export class CatalogController {
   @Get('catalog/companies/:profileId')
   @Can('catalog.search')
   company(@Param('profileId') profileId: string, @Auth() auth: AuthContext) {
-    return this.catalog.company(parseOrThrow(z.uuid(), profileId), auth.user.role);
+    return this.catalog.company(parseOrThrow(z.uuid(), profileId), auth.user.role, auth.user);
   }
 
   @Get('dashboard')

@@ -17,6 +17,8 @@ import type { Database } from '../src/database/database.module.js';
 import * as schema from '../src/database/schema/index.js';
 import { CatalogService } from '../src/modules/catalog/catalog.service.js';
 import { migrateThrough, openTestPool, resetDatabase } from './support/database.js';
+import { seedSubmissionProfile } from './support/profile-submit.js';
+import { createVerifiedFixtureWorkflow } from './support/verified-fixture.js';
 
 /** Контактное лицо «Альфы» в card: его видят роли с focal_point.read, наблюдатель — нет (GEN-13). */
 const FOCAL_POINT = {
@@ -66,6 +68,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('каталог и дашбор�
   let db: Database;
   const valkey = { get: vi.fn(), set: vi.fn() };
   let catalog: CatalogService;
+  let workflow: Awaited<ReturnType<typeof createVerifiedFixtureWorkflow>>;
+  const verifiedRevisionIds = new Map<string, Record<string, string>>();
   /** profile_id каждой строки COMPANIES, в том же порядке. */
   const profileIds: string[] = [];
   /** Верифицированный профиль, которого нет в проекции. */
@@ -81,7 +85,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('каталог и дашбор�
       .values({
         id,
         organizationId: org!.id,
-        status: 'verified',
+        status: 'draft',
         updateStatus: status,
         verifiedAt,
         completenessPct: 100,
@@ -95,6 +99,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('каталог и дашбор�
     await resetDatabase(pool);
     await migrateThrough(pool);
     db = drizzle(pool, { schema, casing: 'snake_case' });
+    workflow = await createVerifiedFixtureWorkflow(pool);
 
     // Одна точка отсчёта: у одинаковых daysAgo одинаковый verified_at.
     const now = Date.now();
@@ -102,35 +107,57 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('каталог и дашбор�
       const verifiedAt = new Date(now - c.daysAgo * 86_400_000);
       const { org, profile } = await manufacturer(i + 1, c.name, c.status, verifiedAt, c.id);
       profileIds.push(profile.id);
-      await db.insert(schema.catalogVisible).values({
-        profileId: profile.id,
-        organizationId: org.id,
-        bin: org.bin!,
-        nameEn: c.name,
-        nameRu: c.name,
-        nameNormalized: normalizeCompanyName(c.name),
-        region: c.region,
-        commodityGroups: ['A'],
-        commodityTypes: [],
-        tnvedCodes: [],
-        kpvedCodes: [],
-        okedCodes: [],
-        certificateTypes: [],
-        certificatesValidUntil: {},
-        siteSurveyed: c.surveyed,
-        updateStatus: c.status,
-        verifiedAt,
-        card: {},
-      });
+      const graph = await seedSubmissionProfile(pool, { profile: profile.id, org: org.id });
+      await workflow.verify(graph);
+      await workflow.green(graph);
+      if (c.surveyed) await workflow.addSurvey(graph);
+      verifiedRevisionIds.set(profile.id, graph.revisions);
+      // Query metadata keeps deliberate ties/counts; all seven companies have real publication proof.
+      await db
+        .update(schema.manufacturerProfiles)
+        .set({ updateStatus: c.status, verifiedAt })
+        .where(eq(schema.manufacturerProfiles.id, profile.id));
+      await db
+        .update(schema.catalogVisible)
+        .set({
+          bin: org.bin!,
+          nameEn: c.name,
+          nameRu: c.name,
+          nameNormalized: normalizeCompanyName(c.name),
+          region: c.region,
+          commodityGroups: ['A'],
+          commodityTypes: [],
+          tnvedCodes: [],
+          kpvedCodes: [],
+          okedCodes: [],
+          certificateTypes: [],
+          certificatesValidUntil: {},
+          siteSurveyed: c.surveyed,
+          updateStatus: c.status,
+          verifiedAt,
+          card: { verifiedRevisionIds: graph.revisions },
+        })
+        .where(eq(schema.catalogVisible.profileId, profile.id));
     }
     // Верифицированный unresponsive-профиль, которого нет в проекции: каталог и дашборд его не видят.
-    outsideId = (await manufacturer(COMPANIES.length + 1, 'Вне проекции', 'unresponsive', new Date())).profile.id;
+    const outside = await manufacturer(COMPANIES.length + 1, 'Вне проекции', 'unresponsive', new Date());
+    outsideId = outside.profile.id;
+    await workflow.verify(await seedSubmissionProfile(pool, { profile: outsideId, org: outside.org.id }));
+    await db
+      .update(schema.manufacturerProfiles)
+      .set({ updateStatus: 'unresponsive' })
+      .where(eq(schema.manufacturerProfiles.id, outsideId));
     // Страница компании: у «Альфы» card нынешней формы и сертификаты, у «Гаммы» card прежней формы
-    // ({ demo: true }), у остальных — пустой card.
+    // ({ demo: true }), у остальных — без контактов. Точные revision pins сохранены во всех card.
     await db
       .update(schema.catalogVisible)
       .set({
-        card: { companyPhone: '+7 700 000 00 01', companyEmail: 'info@alfa.demo.local', focalPoint: FOCAL_POINT },
+        card: {
+          verifiedRevisionIds: verifiedRevisionIds.get(idOf('Альфа'))!,
+          companyPhone: '+7 700 000 00 01',
+          companyEmail: 'info@alfa.demo.local',
+          focalPoint: FOCAL_POINT,
+        },
         certificateTypes: ['ISO 9001', 'API 6D'],
         certificatesValidUntil: { 'ISO 9001': '2027-11-12' },
         tnvedCodes: ['7308909809'],
@@ -140,7 +167,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('каталог и дашбор�
       .where(eq(schema.catalogVisible.profileId, idOf('Альфа')));
     await db
       .update(schema.catalogVisible)
-      .set({ card: { demo: true } })
+      .set({ card: { demo: true, verifiedRevisionIds: verifiedRevisionIds.get(idOf('Гамма'))! } })
       .where(eq(schema.catalogVisible.profileId, idOf('Гамма')));
   }, 60000);
 
@@ -151,6 +178,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('каталог и дашбор�
   });
 
   afterAll(async () => {
+    await workflow?.close();
     await pool?.end();
   });
 
@@ -320,8 +348,12 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('каталог и дашбор�
     const missing = { status: 404, code: 'not_found', title: 'Компания не найдена' };
     for (const role of ROLES) {
       // Тот же ответ, что и для несуществующего id: о профиле вне проекции ничего не сказано.
-      expect(await companyError(outsideId, role), role).toEqual(missing);
-      expect(await companyError('00000000-0000-4000-8000-0000000000ff', role), role).toEqual(missing);
+      const expected =
+        role === 'manufacturer' || role === 'administrator'
+          ? { status: 403, code: 'forbidden', title: 'Нет прав на это действие' }
+          : missing;
+      expect(await companyError(outsideId, role), role).toEqual(expected);
+      expect(await companyError('00000000-0000-4000-8000-0000000000ff', role), role).toEqual(expected);
     }
     const page = companyPageSchema.parse(await catalog.company(idOf('Яяя'), 'observer'));
     expect(page).toMatchObject({ profileId: idOf('Яяя'), nameRu: 'Яяя', updateStatus: 'unresponsive', tier: 'tier_1' });
@@ -356,6 +388,33 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('каталог и дашбор�
       expect(page, name).toMatchObject({ companyPhone: null, companyEmail: null, focalPoint: null });
     }
   });
+
+  it.each(['missing', 'stale'] as const)(
+    'старая проекция с %s verifiedRevisionIds не даёт доступ к странице компании',
+    async (kind) => {
+      const id = idOf('Бета');
+      const [before] = await db.select().from(schema.catalogVisible).where(eq(schema.catalogVisible.profileId, id));
+      try {
+        const card =
+          kind === 'missing'
+            ? {}
+            : {
+                verifiedRevisionIds: {
+                  ...verifiedRevisionIds.get(id)!,
+                  main_information: verifiedRevisionIds.get(idOf('Гамма'))!.main_information,
+                },
+              };
+        await db.update(schema.catalogVisible).set({ card }).where(eq(schema.catalogVisible.profileId, id));
+        for (const role of ['operator', 'observer', 'expert', 'director'] as const)
+          expect(await companyError(id, role), role).toMatchObject({ status: 404, code: 'not_found' });
+      } finally {
+        await db
+          .update(schema.catalogVisible)
+          .set({ card: before!.card })
+          .where(eq(schema.catalogVisible.profileId, id));
+      }
+    },
+  );
 
   it('кеш dashboard:v2 верной формы отдаётся без запроса к базе', async () => {
     const cached = { ...staleDashboard(), tier: { tier_1: 98, tier_2: 1 } };

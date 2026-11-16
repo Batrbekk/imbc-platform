@@ -20,6 +20,8 @@ import { AccountsService } from '../src/modules/admin/accounts.service.js';
 import { CatalogService } from '../src/modules/catalog/catalog.service.js';
 import { ProfilesService } from '../src/modules/profiles/profiles.service.js';
 import { migrateThrough, openTestPool, resetDatabase } from './support/database.js';
+import { seedSubmissionProfile } from './support/profile-submit.js';
+import { createVerifiedFixtureWorkflow } from './support/verified-fixture.js';
 
 function bin(seed: number): string {
   for (let i = 0; i < 100; i++) {
@@ -35,18 +37,24 @@ const ADATA_DATA = (
   JSON.parse(readFileSync(new URL('./fixtures/adata-company-info.json', import.meta.url), 'utf8')) as { data: unknown }
 ).data as { basic: Record<string, unknown> } & Record<string, unknown>;
 /** ФИО руководителя, учредители и юр. адрес фикстуры: видит только сам производитель (GEN-11, ADM-06). */
-const PERSONAL = ['Тестов Тест Тестович', 'Тестова Айгуль', 'ТОО «Тест Холдинг»', 'Казахстан, г. Алматы, ул. Тестовая, д. 1'];
+const PERSONAL = [
+  'Тестов Тест Тестович',
+  'Тестова Айгуль',
+  'ТОО «Тест Холдинг»',
+  'Казахстан, г. Алматы, ул. Тестовая, д. 1',
+];
 const REQUESTED_AT = new Date('2026-11-12T09:00:00Z');
 const COMPLETED_AT = new Date('2026-11-12T09:01:30Z');
 type AttemptState = NonNullable<(typeof schema.externalCheckAttempt.$inferInsert)['state']>;
 
-// Свой профиль производителя: статус, полнота и актуальность из manufacturer_profiles, тир — из проекции
+// Свой профиль производителя: статус, полнота и актуальность из manufacturer_profiles, тир — по точному Survey pin
 // (MAN-41, MAN-46, IMBC-22). Профиль ищется только по организации (GEN-11).
 describe.skipIf(!process.env.TEST_DATABASE_URL)('свой профиль производителя', () => {
   vi.setConfig({ testTimeout: 30000 });
   let pool: pg.Pool;
   let db: Database;
   let profiles: ProfilesService;
+  let workflow: Awaited<ReturnType<typeof createVerifiedFixtureWorkflow>>;
   let seed = 0;
 
   async function manufacturer(name: string, profile: Partial<typeof schema.manufacturerProfiles.$inferInsert>) {
@@ -62,8 +70,13 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('свой профиль про�
   }
 
   /** Строка проекции; её updateStatus и pendingChanges намеренно расходятся с manufacturer_profiles. */
-  async function project(org: { id: string; bin: string | null; name: string }, profileId: string, siteSurveyed: boolean) {
-    await db.insert(schema.catalogVisible).values({
+  async function project(
+    org: { id: string; bin: string | null; name: string },
+    profileId: string,
+    siteSurveyed: boolean,
+    verifiedRevisionIds?: Record<string, string>,
+  ) {
+    const values = {
       profileId,
       organizationId: org.id,
       bin: org.bin!,
@@ -82,7 +95,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('свой профиль про�
       updateStatus: 'active',
       pendingChanges: false,
       verifiedAt: new Date('2026-11-03T10:00:00Z'),
-      card: {},
+      card: verifiedRevisionIds ? { verifiedRevisionIds } : {},
+    } satisfies typeof schema.catalogVisible.$inferInsert;
+    await db.insert(schema.catalogVisible).values(values).onConflictDoUpdate({
+      target: schema.catalogVisible.profileId,
+      set: values,
     });
   }
 
@@ -161,9 +178,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('свой профиль про�
     await migrateThrough(pool);
     db = drizzle(pool, { schema, casing: 'snake_case' });
     profiles = new ProfilesService(db);
+    workflow = await createVerifiedFixtureWorkflow(pool);
   }, 60000);
 
   afterAll(async () => {
+    await workflow?.close();
     await pool?.end();
   });
 
@@ -171,16 +190,28 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('свой профиль про�
     const verifiedAt = new Date('2026-11-03T10:00:00Z');
     const registeredAt = new Date('2026-10-01T10:00:00Z');
     const { org, profile } = await manufacturer('Альфа', {
-      status: 'verified',
+      status: 'draft',
       hasPendingChanges: true,
       updateStatus: 'outdated',
       completenessPct: 100,
       registeredAt,
       verifiedAt,
     });
+    const graph = await seedSubmissionProfile(pool, { profile: profile.id, org: org.id });
+    await workflow.verify(graph);
+    await workflow.addSurvey(graph);
+    await db
+      .update(schema.manufacturerProfiles)
+      .set({ hasPendingChanges: true, updateStatus: 'outdated', completenessPct: 100, registeredAt, verifiedAt })
+      .where(eq(schema.manufacturerProfiles.id, profile.id));
     await project(org, profile.id, true);
     // Чужой профиль рядом: в ответ не попадает (GEN-11).
-    const other = await manufacturer('Бета', { status: 'verified', updateStatus: 'active', verifiedAt, completenessPct: 90 });
+    const other = await manufacturer('Бета', {
+      status: 'verified',
+      updateStatus: 'active',
+      verifiedAt,
+      completenessPct: 90,
+    });
     await project(other.org, other.profile.id, false);
 
     const own = await profiles.own(org.id);
@@ -198,9 +229,24 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('свой профиль про�
     });
   });
 
+  it('один флаг siteSurveyed в старой проекции не повышает свой профиль до tier_2', async () => {
+    const { org, profile } = await manufacturer('Старый флаг обследования', {
+      status: 'verified',
+      updateStatus: 'active',
+      verifiedAt: new Date(),
+      completenessPct: 100,
+    });
+    await project(org, profile.id, true);
+    expect(await profiles.own(org.id)).toMatchObject({ status: 'verified', tier: 'tier_1' });
+  });
+
   it('draft — status draft, updateStatus и tier null', async () => {
     // Значение в колонке до верификации не показывается (раздел 5.5).
-    const { org, profile } = await manufacturer('Гамма', { status: 'draft', updateStatus: 'active', completenessPct: 40 });
+    const { org, profile } = await manufacturer('Гамма', {
+      status: 'draft',
+      updateStatus: 'active',
+      completenessPct: 40,
+    });
 
     expect(await profiles.own(org.id)).toMatchObject({
       profileId: profile.id,
@@ -220,7 +266,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('свой профиль про�
       completenessPct: 100,
     });
 
-    expect(await profiles.own(org.id)).toMatchObject({ status: 'verified', updateStatus: 'unresponsive', tier: 'tier_1' });
+    expect(await profiles.own(org.id)).toMatchObject({
+      status: 'verified',
+      updateStatus: 'unresponsive',
+      tier: 'tier_1',
+    });
   });
 
   it('организация без профиля — 404 not_found', async () => {
@@ -257,7 +307,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('свой профиль про�
         fields: expectedFields(ADATA_DATA),
       });
       expect(read.fields.map((f) => f.field)).toEqual([...PREFILL_FIELDS]);
-      for (const f of read.fields) expect(f, f.field).toMatchObject({ source: 'adata', readAt: COMPLETED_AT.toISOString() });
+      for (const f of read.fields)
+        expect(f, f.field).toMatchObject({ source: 'adata', readAt: COMPLETED_AT.toISOString() });
       // ОКЭД с названием, учредители — только имена, строки по position.
       expect(read.fields.find((f) => f.field === 'activity')!.items[0]!.value).toBe('25110');
       expect(read.fields.find((f) => f.field === 'shareholders')!.items.map((i) => i.value)).toEqual([
@@ -364,12 +415,15 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('свой профиль про�
 
     it('каталог, страница компании и аккаунты без значений Adata', async () => {
       const m = await manufacturer('Адата Видимый', {
-        status: 'verified',
+        status: 'draft',
         updateStatus: 'active',
         verifiedAt: new Date('2026-11-03T10:00:00Z'),
         completenessPct: 100,
       });
-      await project(m.org, m.profile.id, false);
+      const graph = await seedSubmissionProfile(pool, { profile: m.profile.id, org: m.org.id });
+      await workflow.verify(graph);
+      await workflow.green(graph);
+      await project(m.org, m.profile.id, false, graph.revisions);
       const projected = () =>
         db.select().from(schema.catalogVisible).where(eq(schema.catalogVisible.profileId, m.profile.id));
       const before = await projected();

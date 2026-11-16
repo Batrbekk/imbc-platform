@@ -73,6 +73,13 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
 import { ReviewActionsController, ReviewAssignmentMetadataController } from './modules/reviews/review-actions.controller.js';
 import { ReviewAssignmentService } from './modules/reviews/review-assignment.service.js';
 import { ReviewWorkbenchService } from './modules/reviews/review-workbench.service.js';
+import { SiteSurveyController, OwnSiteSurveyRequestsController, SiteSurveyRequestsController } from './modules/site-survey/site-survey.controller.js';
+import { SiteSurveyService } from './modules/site-survey/site-survey.service.js';
+import { SiteSurveyRequestsService } from './modules/site-survey/site-survey-requests.service.js';
+import { SiteSurveyPublicationService } from './modules/site-survey/site-survey-publication.service.js';
+import { SITE_SURVEY_PUBLICATION } from './modules/site-survey/survey-operation.js';
+import { SiteSurveyUploadController, SiteSurveyUploadGuard } from './modules/site-survey/site-survey-upload.controller.js';
+import { SiteSurveyUploadService } from './modules/site-survey/site-survey-upload.service.js';
 
 @Module({
   imports: [
@@ -112,6 +119,10 @@ import { ReviewWorkbenchService } from './modules/reviews/review-workbench.servi
     OrgChartSampleController,
     DiligenceUploadController,
     DiligenceRunController,
+    SiteSurveyController,
+    OwnSiteSurveyRequestsController,
+    SiteSurveyRequestsController,
+    SiteSurveyUploadController,
   ],
   providers: [
     OidcService,
@@ -130,6 +141,12 @@ import { ReviewWorkbenchService } from './modules/reviews/review-workbench.servi
     DiligenceUploadGuard,
     DiligenceUploadService,
     DiligenceRunService,
+    SiteSurveyService,
+    SiteSurveyRequestsService,
+    SiteSurveyPublicationService,
+    { provide: SITE_SURVEY_PUBLICATION, useExisting: SiteSurveyPublicationService },
+    SiteSurveyUploadService,
+    SiteSurveyUploadGuard,
     MainInformationHandler,
     ContactsHandler,
     PersonnelHandler,

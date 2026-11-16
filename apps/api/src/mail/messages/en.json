@@ -17,18 +17,11 @@
     },
     "NOT-04": {
       "subject": "A manufacturer profile is ready for review",
-      "lines": [
-        "The profile of {name} has been submitted for review.",
-        "Open the review queue: {link}"
-      ]
+      "lines": ["The profile of {name} has been submitted for review.", "Open the review queue: {link}"]
     },
     "NOT-05": {
       "subject": "IMBC Platform profile review result",
-      "lines": [
-        "{result}",
-        "{details}",
-        "Open your profile: {link}"
-      ]
+      "lines": ["{result}", "{details}", "Open your profile: {link}"]
     },
     "NOT-10": {
       "subject": "A manufacturer unlocked a profile under review",
@@ -36,6 +29,10 @@
         "{name} unlocked the submitted profile to make changes. This review assignment has closed.",
         "Open the review queue: {link}"
       ]
+    },
+    "NOT-11": {
+      "subject": "A manufacturer is now site surveyed",
+      "lines": ["A manufacturer on IMBC Platform is now site surveyed.", "Open the company page: {link}"]
     }
   },
   "review": {

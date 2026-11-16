@@ -15,10 +15,13 @@ import { and, arrayOverlaps, asc, desc, eq, gte, inArray, lte, type SQL, sql } f
 import type { Redis } from 'ioredis';
 import { z } from 'zod';
 import { ProblemException } from '../../common/problem.js';
+import { AuditService } from '../../common/audit.service.js';
 import { policyForTransaction } from '../../common/policy.js';
 import { DB, type Database } from '../../database/database.module.js';
 import { catalogVisible } from '../../database/schema/index.js';
 import { VALKEY } from '../../infra/infra.module.js';
+import { loadCurrentCompanySurvey } from '../site-survey/site-survey-company.js';
+import type { AuthUser } from '../auth/auth.types.js';
 
 const t = catalogVisible;
 const DASHBOARD_TTL_S = 60;
@@ -74,6 +77,7 @@ export class CatalogService {
   constructor(
     @Inject(DB) private readonly db: Database,
     @Inject(VALKEY) private readonly valkey: Redis,
+    private readonly audit: AuditService = new AuditService(db),
   ) {}
 
   /** Между фильтрами — AND, внутри одного фильтра — OR (OPR-04). */
@@ -168,10 +172,56 @@ export class CatalogService {
    * Внутренней проекции для scope `all` пока нет (см. search). Ключ focalPoint есть в ответе только
    * у роли с focal_point.read: наблюдатель его не получает (GEN-13).
    */
-  async company(profileId: string, role: Role): Promise<CompanyPage> {
-    const [row] = await this.db
+  async company(profileId: string, role: Role, actor?: AuthUser): Promise<CompanyPage> {
+    try {
+      return await this.db.transaction(
+        (raw) => this.companyFromSnapshot(raw as unknown as Database, profileId, role, actor),
+        { isolationLevel: 'repeatable read', accessMode: 'read only' },
+      );
+    } catch (error) {
+      if (actor && error instanceof ProblemException && error.getStatus() === 403) {
+        await this.audit.record({
+          userId: actor.id,
+          organizationId: actor.organizationId,
+          action: 'catalog.search',
+          objectType: 'route',
+          objectId: '/v1/catalog/companies/:profileId',
+          outcome: 'denied',
+        });
+      }
+      throw error;
+    }
+  }
+
+  private async companyFromSnapshot(
+    tx: Database,
+    profileId: string,
+    role: Role,
+    actor?: AuthUser,
+  ): Promise<CompanyPage> {
+    const policy = await policyForTransaction(tx);
+    const scope = policy.can(role, 'catalog.search', 'a_register');
+    if (scope !== 'visible' && scope !== 'all')
+      throw new ProblemException(403, 'forbidden', 'Нет прав на это действие');
+    if (actor) {
+      const current = (
+        await tx.execute<{ role: string; organizationId: string; type: string }>(sql`
+        select a.role,a.organization_id as "organizationId",o.type from user_accounts a
+        join organizations o on o.id=a.organization_id where a.id=${actor.id} and a.state='active'`)
+      ).rows[0];
+      if (
+        !current ||
+        current.role !== role ||
+        actor.role !== role ||
+        current.organizationId !== actor.organizationId ||
+        current.type !== (role === 'operator' || role === 'observer' ? role : 'imbc')
+      )
+        throw new ProblemException(403, 'forbidden', 'Нет прав на это действие');
+    }
+    const [row] = await tx
       .select({
         profileId: t.profileId,
+        organizationId: t.organizationId,
         bin: t.bin,
         nameEn: t.nameEn,
         nameRu: t.nameRu,
@@ -196,18 +246,23 @@ export class CatalogService {
       .limit(1);
     if (!row) throw new ProblemException(404, 'not_found', 'Компания не найдена');
 
-    const { certificateTypes, certificatesValidUntil, verifiedAt, card, ...fields } = row;
+    const { organizationId, certificateTypes, certificatesValidUntil, verifiedAt, card, ...fields } = row;
+    const currentSurvey = await loadCurrentCompanySurvey(tx, { profileId, organizationId });
+    if (!currentSurvey.visible) throw new ProblemException(404, 'not_found', 'Компания не найдена');
+    const siteSurvey = currentSurvey.current;
     const parsed = companyCardDataSchema.safeParse(card);
     const contacts = parsed.success ? parsed.data : NO_CONTACTS;
     const page: CompanyPage = {
       ...fields,
+      siteSurveyed: siteSurvey !== null,
+      tier: siteSurvey ? 'tier_2' : 'tier_1',
+      siteSurvey,
       certificates: certificateTypes.map((type) => ({ type, validUntil: validUntil(certificatesValidUntil, type) })),
       verifiedAt: verifiedAt.toISOString(),
       companyPhone: contacts.companyPhone,
       companyEmail: contacts.companyEmail,
       ...(contacts.diligence ? { diligence: contacts.diligence } : {}),
     };
-    const policy = await policyForTransaction(this.db);
     if (policy.can(role, 'focal_point.read')) page.focalPoint = contacts.focalPoint;
     return page;
   }

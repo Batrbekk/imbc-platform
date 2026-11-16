@@ -102,6 +102,7 @@ export function AppShell() {
   const items: { href: string; label: string; icon: typeof SearchIcon; show: boolean; active?: string[] }[] = [
     { href: "/dashboard", label: t("nav.dashboard"), icon: LayoutDashboardIcon, show: !!can(role, "dashboard.read") },
     { href: "/reviews", label: t("nav.reviews"), icon: ClipboardListIcon, show: !!can(role, "review.take") },
+    { href: "/imbc/site-survey-requests", label: t("nav.siteSurveyRequests"), icon: ClipboardListIcon, show: role === "expert" && !!can(role, "imbc_records.read") },
     {
       href: "/catalog",
       label: t("nav.catalog"),

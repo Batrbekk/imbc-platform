@@ -24,6 +24,7 @@ import { ReviewAssignmentDialog } from "./assignment-dialog";
 
 export function ReviewQueuePage({ admin = false }: { admin?: boolean }) {
   const t = useTranslations("reviewWorkflow"), profile = useTranslations("profile"), old = useTranslations("reviews");
+  const survey = useTranslations("siteSurvey");
   const format = useFormat(), me = useMe().data?.user, client = useQueryClient(), location = useLocation();
   const allowed = me?.role === (admin ? "administrator" : "expert") && can(me.role, admin ? "review.assign" : "review.take") !== null;
   const [search, setSearch] = useSearchParams(), parsed = reviewParams(search, admin), filters = parsed.value;
@@ -106,6 +107,7 @@ export function ReviewQueuePage({ admin = false }: { admin?: boolean }) {
                         : item.assignedExpertId === me?.id && !result.isFetching ? <Link className={cn(buttonVariants({ size: "sm", variant: "outline" }))} to={`/reviews/assignments/${item.assignmentId}`} state={{ from: `${location.pathname}${location.search}` }}>{t("openReview")}</Link> : null}
                   </div>}
                   {!admin && !item.unresolved && <Link className={cn(buttonVariants({ size: "sm", variant: "outline" }), "mt-2")} to={`/imbc/profiles/${item.profileId}/due-diligence`} state={{ from: `${location.pathname}${location.search}` }}>{t("openDiligence")}</Link>}
+                  {!admin && me?.role === "expert" && can(me.role, "imbc_records.read") !== null && <Link className={cn(buttonVariants({ size: "sm", variant: "outline" }), "mt-2")} to={`/imbc/profiles/${item.profileId}/site-surveys`} state={{ from: `${location.pathname}${location.search}` }}>{survey("openSurveys")}</Link>}
                 </TableCell>
                 <TableCell><Badge variant="secondary">{item.status === "verified" && item.hasPendingChanges ? old("pendingChanges") : profile(`statusValue.${item.status}`)}</Badge></TableCell>
                 <TableCell className="max-w-sm whitespace-pre-wrap break-words">{item.assignedExpert ?? old("unassigned")}</TableCell>

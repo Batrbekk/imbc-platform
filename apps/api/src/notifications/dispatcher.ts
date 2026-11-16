@@ -30,7 +30,12 @@ export type NotificationRenderer = (
  * Тексты из языковых файлов (`mail/messages`, LANG-02). Письма без текста ещё нет — постоянный отказ: тексты
  * NOT-04…NOT-17 приходят со своими этапами.
  */
-export function defaultNotificationRenderer(rule: NotificationRuleCode, language: Locale, params: Record<string, string>): RenderedMail {
+export function defaultNotificationRenderer(
+  rule: NotificationRuleCode,
+  language: Locale,
+  params: Record<string, string>,
+): RenderedMail {
+  if (rule === 'NOT-11') throw new PermanentNotificationError('notification NOT-11: requires durable Survey dispatch');
   if (!isMailTemplateCode(rule)) throw new PermanentNotificationError(`notification ${rule}: нет текста письма`);
   return renderNotification(rule, language, params);
 }

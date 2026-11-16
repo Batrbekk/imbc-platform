@@ -17,6 +17,8 @@ import { storedDiligenceState } from '../src/modules/due-diligence/diligence-ope
 import { profileCandidateRevisions, profileSubmissionRevisions } from '../src/modules/profiles/profile-candidate.js';
 import { ProfileReviewService, profileReviewEvidence } from '../src/modules/profiles/profile-review.service.js';
 import { ProfileSubmitService } from '../src/modules/profiles/profile-submit.service.js';
+import { SiteSurveyService } from '../src/modules/site-survey/site-survey.service.js';
+import { SiteSurveyPublicationService } from '../src/modules/site-survey/site-survey-publication.service.js';
 import { migrateThrough, openTestPool, resetDatabase } from './support/database.js';
 import { seedSubmissionProfile, submissionHandlers } from './support/profile-submit.js';
 
@@ -203,27 +205,50 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('DD projection and historical-re
         originalName: 'signed.pdf',
         byteSize: 1,
         declaredMediaType: 'application/pdf',
+        detectedMediaType: 'application/pdf',
         checksum: 'fixture',
         storageKey: randomUUID(),
         scanState,
       });
       return f.id;
     };
+    const surveys = new SiteSurveyService(appPool, new AuditService(appDb), new SiteSurveyPublicationService());
+    const input = (fileId: string) => ({
+      visitStartedOn: '2020-01-01',
+      visitEndedOn: null,
+      result: 'yes' as const,
+      reportFileId: fileId,
+      expiresOn: null,
+      comment: null,
+    });
     const other = await seedSubmissionProfile(pool);
-    for (const id of [
-      await make('due_diligence_report'),
-      await make('site_survey_report', other.org),
-      await make('site_survey_report', g.org, 'pending'),
-    ]) {
+    for (const [id, code] of [
+      [await make('due_diligence_report'), 'validation_failed'],
+      [await make('site_survey_report', other.org), 'validation_failed'],
+      [await make('site_survey_report', g.org, 'pending'), 'site_survey_report_unavailable'],
+    ] as const) {
       await db.update(s.siteSurveyRecords).set({ reportFileId: id }).where(eq(s.siteSurveyRecords.id, survey.id));
+      await expect(surveys.create(expert, g.profile, input(id), randomUUID())).rejects.toMatchObject({
+        code,
+      });
       expect(await flags()).toEqual({ surveyed: false, tier: 'tier_1' });
     }
     const valid = await make('site_survey_report');
     await db.update(s.siteSurveyRecords).set({ reportFileId: valid }).where(eq(s.siteSurveyRecords.id, survey.id));
-    expect(await flags()).toEqual({ surveyed: true, tier: 'tier_2' });
-    await db.update(s.siteSurveyRecords).set({ expiresOn: '2000-01-01' }).where(eq(s.siteSurveyRecords.id, survey.id));
+    // Legacy file IDs do not invent exact canonical pins or approved migration mappings.
     expect(await flags()).toEqual({ surveyed: false, tier: 'tier_1' });
-    await db.update(s.siteSurveyRecords).set({ expiresOn: null }).where(eq(s.siteSurveyRecords.id, survey.id));
+    let canonical = await surveys.create(expert, g.profile, input(valid), randomUUID());
+    expect(await flags()).toEqual({ surveyed: true, tier: 'tier_2' });
+    canonical = await surveys.update(expert, g.profile, canonical.id, {
+      ...input(valid),
+      expiresOn: '2000-01-01',
+      expectedUpdatedAt: canonical.updatedAt,
+    });
+    expect(await flags()).toEqual({ surveyed: false, tier: 'tier_1' });
+    canonical = await surveys.update(expert, g.profile, canonical.id, {
+      ...input(valid),
+      expectedUpdatedAt: canonical.updatedAt,
+    });
     await db.insert(s.fileVersion).values({
       fileObjectId: valid,
       versionNumber: 2,
@@ -234,7 +259,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('DD projection and historical-re
       storageKey: randomUUID(),
       scanState: 'pending',
     });
-    expect(await flags()).toEqual({ surveyed: false, tier: 'tier_1' });
+    expect(await flags()).toEqual({ surveyed: true, tier: 'tier_2' });
+    expect((await surveys.read(expert, g.profile, canonical.id)).reportFileVersionId).toBe(
+      canonical.reportFileVersionId,
+    );
   });
   it('updates independent enhanced state while retaining its old clean pinned DD report after a newer candidate upload', async () => {
     const g = await seedSubmissionProfile(pool);

@@ -59,6 +59,16 @@ export const routes: RouteObject[] = [
         ),
         children: [
           {
+            path: "imbc/profiles/:profileId/site-surveys",
+            handle: { title: "siteSurvey.title" } satisfies AppRouteHandle,
+            lazy: lazyPage(() => import("@/routes/app/site-surveys"), (m) => m.Component),
+          },
+          {
+            path: "imbc/site-survey-requests",
+            handle: { title: "siteSurvey.requestsTitle" } satisfies AppRouteHandle,
+            lazy: lazyPage(() => import("@/routes/app/site-survey-requests"), (m) => m.Component),
+          },
+          {
             path: "reviews/assignments/:assignmentId",
             handle: { title: "reviewWorkflow.workbenchTitle" } satisfies AppRouteHandle,
             lazy: lazyPage(() => import("@/routes/app/review"), (m) => m.ReviewPage),

@@ -23,6 +23,7 @@ import { MainSourceWorker } from '../modules/profiles/main-source-worker.js';
 import { DiligenceWorker } from '../modules/due-diligence/diligence-worker.js';
 import { DiligenceWorkerModule } from '../modules/due-diligence/diligence-worker.module.js';
 import { CatalogProjectionRefreshService } from '../modules/due-diligence/catalog-projection-refresh.service.js';
+import { SiteSurveyNoticeWorker } from '../modules/site-survey/site-survey-notice.worker.js';
 import { ManufacturerOnboardingService } from '../modules/registration/onboarding.service.js';
 import { ANTIVIRUS, ClamdAntivirus } from '../modules/files/antivirus.js';
 import { orgChartSamplePassed } from '../modules/files/org-chart-sample.rules.js';
@@ -36,10 +37,7 @@ import {
   type QueueName,
   SCHEDULES,
 } from '../jobs/queues.js';
-import {
-  NOTIFICATION_RENDERER,
-  NotificationDispatcher,
-} from '../notifications/dispatcher.js';
+import { NOTIFICATION_RENDERER, NotificationDispatcher } from '../notifications/dispatcher.js';
 import { createDatabaseNotificationRenderer } from '../notifications/database-renderer.js';
 import { DEFAULT_RECIPIENT_RESOLVERS, RECIPIENT_RESOLVERS } from '../notifications/recipients.js';
 import { AccountInactivityJob } from './account-inactivity.job.js';
@@ -68,6 +66,7 @@ import { JobHandlers } from './handlers.service.js';
   providers: [
     JobHandlers,
     CatalogProjectionRefreshService,
+    SiteSurveyNoticeWorker,
     MailService,
     KeycloakAdminService,
     SessionService,
@@ -81,8 +80,11 @@ import { JobHandlers } from './handlers.service.js';
     // Письма событий (раздел 8.2): получатели по правилам-данным, тексты из языковых файлов.
     NotificationDispatcher,
     { provide: RECIPIENT_RESOLVERS, useValue: DEFAULT_RECIPIENT_RESOLVERS },
-    { provide: NOTIFICATION_RENDERER, inject: [DB, ENV],
-      useFactory: (db: Database, env: Env) => createDatabaseNotificationRenderer(db, env.PUBLIC_URL) },
+    {
+      provide: NOTIFICATION_RENDERER,
+      inject: [DB, ENV],
+      useFactory: (db: Database, env: Env) => createDatabaseNotificationRenderer(db, env.PUBLIC_URL),
+    },
     { provide: ADATA_CLIENT_FACTORY, useValue: defaultAdataClientFactory },
     { provide: ADATA_TIMING, useValue: ADATA_DEFAULT_TIMING },
     // ClamAV вызывает только worker (DATA-07).
@@ -111,6 +113,7 @@ export class WorkerModule implements OnApplicationBootstrap {
     private readonly mainSource: MainSourceWorker,
     private readonly diligence: DiligenceWorker,
     private readonly catalogProjection: CatalogProjectionRefreshService,
+    private readonly siteSurvey: SiteSurveyNoticeWorker,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -130,7 +133,9 @@ export class WorkerModule implements OnApplicationBootstrap {
       // Задание проверяется схемой (только id, код правила и параметры, без адресов). Постоянный отказ —
       // строка журнала и завершение без повторов, причина — в output задания; сбой SMTP или базы — повтор
       // (NOTIFY_QUEUE_OPTIONS).
-      [QUEUES.notify]: (d) => this.notifications.runJob(d),
+      [QUEUES.notify]: (d) =>
+        (d as { rule?: unknown } | null)?.rule === 'NOT-11' ? this.siteSurvey.runJob(d) : this.notifications.runJob(d),
+      [QUEUES.siteSurveyRefresh]: () => this.siteSurvey.refreshPending(),
       [QUEUES.sendPasswordEmail]: (d) => h.sendPasswordEmail(d),
       [QUEUES.cleanupIdentity]: (d) => h.cleanupIdentity(d),
       // Очередь письма сброса создаётся раньше задания неактивности, которое её наполняет (AUTH-07).
@@ -186,6 +191,7 @@ export class WorkerModule implements OnApplicationBootstrap {
           // pg-boss сохраняет безопасный итог уведомлений и источника (без адресов/исходных данных);
           // остальные очереди результата не отдают, как раньше.
           return queue === QUEUES.notify ||
+            queue === QUEUES.siteSurveyRefresh ||
             queue === QUEUES.eOndirisDaily ||
             queue === QUEUES.eOndirisProfileRefresh ||
             queue === QUEUES.mainSourceRefresh

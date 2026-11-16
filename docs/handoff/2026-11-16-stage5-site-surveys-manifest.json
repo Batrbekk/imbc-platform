@@ -1,0 +1,442 @@
+{
+  "checkpoint": "Stage5 SiteSurvey bounded local acceptance",
+  "date": "2026-11-16",
+  "previousGitCheckpoint": "82cee1e55de2a47cab72451f558efd4740ddb9a2",
+  "applicationAggregateSha256": "33bf307277101bcfb59cbacc6f4ba8e1d917a7c796e4152517a773b5609e7816",
+  "aggregateAlgorithm": "SHA256 of sorted path TAB file-SHA256 LF",
+  "files": [
+    {
+      "path": "apps/api/drizzle/0029_canonical_site_surveys.sql",
+      "sha256": "f09fddff9fcb1b3e9037cd69441c3b166ffe81ed91535331141c02823e2a3135"
+    },
+    {
+      "path": "apps/api/drizzle/0030_survey_notice_delivery.sql",
+      "sha256": "5f1e9c57226d0bb8f76c354c143e1f62c5f6f8abe10b2e3bf4ae158bbe0c2942"
+    },
+    {
+      "path": "apps/api/drizzle/meta/0029_snapshot.json",
+      "sha256": "7ab354cc1ebc0aeefb4d03c5bdf635ac6b999cf28a247ce2ef0e57e720e6296e"
+    },
+    {
+      "path": "apps/api/drizzle/meta/0030_snapshot.json",
+      "sha256": "034ad00b942918216dc538dd030e07caf612ea4c7d621108037281ee263468b9"
+    },
+    {
+      "path": "apps/api/drizzle/meta/_journal.json",
+      "sha256": "ddbfb199e954c2d81b6e490c0901fdb49511f3d9ebfc37a3e2de4b8a0edfd0e6"
+    },
+    {
+      "path": "apps/api/src/app.module.ts",
+      "sha256": "f898e364b9b1363714802b296aad40af67ff1d554ff63850015a9b6936e4378b"
+    },
+    {
+      "path": "apps/api/src/database/app-role.ts",
+      "sha256": "6c589b7ef378afc8e02c4cdb68dcb858d36f2db7559e9ff4f04b166d91263069"
+    },
+    {
+      "path": "apps/api/src/database/schema/index.ts",
+      "sha256": "95d3fd0a238b7d31d692eb63a8463beb05854a9f6bfc4ff71000ad05b7357d67"
+    },
+    {
+      "path": "apps/api/src/database/schema/site-survey.ts",
+      "sha256": "e3c382e9945cbf0d361353a97893c001120ed9e50cd97815bb7f9e8b0ecf94e4"
+    },
+    {
+      "path": "apps/api/src/jobs/queues.ts",
+      "sha256": "47d2f73d728210ffa2c265f8c1a60e2a218f9c483264040c3e78e993e50e112a"
+    },
+    {
+      "path": "apps/api/src/mail/mail.service.ts",
+      "sha256": "fcbe09188e078f039b0bec5552d8adc4c24b2e5029b336bca56fefe9bc2ecbaa"
+    },
+    {
+      "path": "apps/api/src/mail/messages/en.json",
+      "sha256": "9619ea8980586af1262d39946a367c87ee5e59e4f4df8c5d75c278bc687e7538"
+    },
+    {
+      "path": "apps/api/src/mail/messages/kk.json",
+      "sha256": "11706f8d230ccd869a241d44e083e885d7ae1fb31ecef84212d5fa2e853d804c"
+    },
+    {
+      "path": "apps/api/src/mail/messages/ru.json",
+      "sha256": "bbba8c3f994451d15c3451d90e9afd5305b49ae44fc184b024fd1bd98c4571a3"
+    },
+    {
+      "path": "apps/api/src/mail/templates.ts",
+      "sha256": "ba151e37ace14a361b49cc9307e585403ec65bc5b98a08de2090509aec69ce94"
+    },
+    {
+      "path": "apps/api/src/modules/catalog/catalog.controller.ts",
+      "sha256": "fa71051686699971bc8b1eb113f0575f038865edafb5951f26295072227486d2"
+    },
+    {
+      "path": "apps/api/src/modules/catalog/catalog.service.ts",
+      "sha256": "0fbe6d9463e7ed6314d5314000b29b0582017abe0dd8c1c125d2a921a331ae6c"
+    },
+    {
+      "path": "apps/api/src/modules/due-diligence/catalog-projection.ts",
+      "sha256": "569e84626321b011c7c175df00433dfd532f33f48ff96516033d43904b0ae842"
+    },
+    {
+      "path": "apps/api/src/modules/files/file-access.ts",
+      "sha256": "bfa6f3f0e17bdfbbf32396aa95fa29db7be7e09ddab4bd81325b99eb43fbbcd4"
+    },
+    {
+      "path": "apps/api/src/modules/profiles/profiles.service.ts",
+      "sha256": "d8de194d7430a86e10e726b602ba5b1a1f8a6ebe2cef24859d92c61df2a79d0a"
+    },
+    {
+      "path": "apps/api/src/modules/site-survey/effective-survey.ts",
+      "sha256": "ea99b4cfd14b08c3631a2a7317344e894df7629e947322e47112f4c6362bee89"
+    },
+    {
+      "path": "apps/api/src/modules/site-survey/site-survey-company.ts",
+      "sha256": "4f29be3896eb6cc0f1b0242259bfc2790af865cda902c90e4e7bc552a08d10d4"
+    },
+    {
+      "path": "apps/api/src/modules/site-survey/site-survey-files.ts",
+      "sha256": "5be62a90f4051ecadd12f54f82bc4940b0f51caed91cb942ff412c779150835e"
+    },
+    {
+      "path": "apps/api/src/modules/site-survey/site-survey-notice.worker.ts",
+      "sha256": "44128dbbc7a693cca80b7200e9b57e9a15d147f715e27ee47911e92c5d161171"
+    },
+    {
+      "path": "apps/api/src/modules/site-survey/site-survey-publication.service.ts",
+      "sha256": "e8b1181715c1c34e7fe5601fad1952042b452c3072a6b89b6597045fe7bbf47a"
+    },
+    {
+      "path": "apps/api/src/modules/site-survey/site-survey-requests.service.ts",
+      "sha256": "27de9b5126321029006dc5da33600c020b07d75f145268dfa48eb75b6180332b"
+    },
+    {
+      "path": "apps/api/src/modules/site-survey/site-survey-upload.controller.ts",
+      "sha256": "1e55a12655671bf773758a596bff6f2040dfe192138d18379844d0411b2053b5"
+    },
+    {
+      "path": "apps/api/src/modules/site-survey/site-survey-upload.service.ts",
+      "sha256": "dc80a2e833dc220a571608f99596cb40e4400c4c2a3938fc965430dc508a29f6"
+    },
+    {
+      "path": "apps/api/src/modules/site-survey/site-survey.controller.ts",
+      "sha256": "d873b1916da0df43442e10e922607718342cf4edb3d15aa97e9ff0c4f2bef46f"
+    },
+    {
+      "path": "apps/api/src/modules/site-survey/site-survey.service.ts",
+      "sha256": "b2a27891c9e5a948916c47b26eb257acdea4e4009a24ea801bce4d7d6442b9cf"
+    },
+    {
+      "path": "apps/api/src/modules/site-survey/survey-operation.ts",
+      "sha256": "c0f5ed7ecca59247db6c0bc952d01863d30380f5389d04cec9d07484c81750ac"
+    },
+    {
+      "path": "apps/api/src/modules/site-survey/survey-parse.ts",
+      "sha256": "eaf3e7da49b45face73af8869206dca009966707cdc932befddf40a03739d621"
+    },
+    {
+      "path": "apps/api/src/modules/site-survey/survey-publication-state.ts",
+      "sha256": "d39bc576cc3f51567ac6fba34101b241544cce4276e8df69ba77d71b125f3212"
+    },
+    {
+      "path": "apps/api/src/modules/site-survey/survey-report.ts",
+      "sha256": "3c90a1aa315730373a9056dba6812cc2c21d258be526b82d1b1f9c22f6de33d7"
+    },
+    {
+      "path": "apps/api/src/modules/site-survey/survey-scope.ts",
+      "sha256": "09c6b5c26d3e6c55e1cee29a4a8a0bbefcbceb4e41afab0bb49403061e128f26"
+    },
+    {
+      "path": "apps/api/src/modules/site-survey/survey-state.ts",
+      "sha256": "bfdab95d4d02c3160029ce33bb2cd516d7f5bb0b242f597ac36cd0907a9aa194"
+    },
+    {
+      "path": "apps/api/src/modules/site-survey/survey-store.ts",
+      "sha256": "1788cd3b298dc04943d492f28be0aa381f5b88f0ccdbb55b3fa1b3ac0ce7a8db"
+    },
+    {
+      "path": "apps/api/src/notifications/dispatcher.ts",
+      "sha256": "3d9b797067d0172b37a164df657a30bb2a35a01db351e3d2e80dc34e395df44a"
+    },
+    {
+      "path": "apps/api/src/worker/worker.module.ts",
+      "sha256": "176cd2d53dc2c68d8df6a9bcde10304cba7b57a958f9338a295c4fcb050d485c"
+    },
+    {
+      "path": "apps/api/test/catalog.integration.test.ts",
+      "sha256": "0c7aad4bc9b749af0cf0d26b6bfdbaa70b284a6b6a31d3fbfd64d6ae1be8a45b"
+    },
+    {
+      "path": "apps/api/test/company.http.test.ts",
+      "sha256": "0453e7814b5644e5ff744e62892e6a64d69e2a7463058ec7758ddc7bf21cc1a5"
+    },
+    {
+      "path": "apps/api/test/dictionaries.integration.test.ts",
+      "sha256": "1fa1d2c4ecd2212bc75ebca326e4b3b76d8b2ea981322e6006e5214d136dcc5a"
+    },
+    {
+      "path": "apps/api/test/diligence-boundaries.integration.test.ts",
+      "sha256": "4d41b5b5d28ef00cca08e93bd19a4206a7a77145b55f7333d4418b7ee2bcc681"
+    },
+    {
+      "path": "apps/api/test/files.integration.test.ts",
+      "sha256": "6e0da2c9d3e2feeaa7496db9b2d3bb83791d68ef8e8286be90c48ef7c3b8db95"
+    },
+    {
+      "path": "apps/api/test/migration-stage1.integration.test.ts",
+      "sha256": "a5f6f2e2c41d4e831a0aeacb0d4c61f85779b97f6b70e2e88be0739f523758c8"
+    },
+    {
+      "path": "apps/api/test/notification-worker.test.ts",
+      "sha256": "160be5dc8de197994f466d99bcdef1c2f674ac04563f8e7a3e6c6b2c0717df0c"
+    },
+    {
+      "path": "apps/api/test/notifications.integration.test.ts",
+      "sha256": "8c6b9765cf2fd92a7eb3890624c392348435062df681f210d6f9bb9f9b4ae0c2"
+    },
+    {
+      "path": "apps/api/test/onboarding.integration.test.ts",
+      "sha256": "567a0c59bed8ceaae66665cfbec51715aef0a8d0a7c3716c7ee0c5086ae3c648"
+    },
+    {
+      "path": "apps/api/test/profile.integration.test.ts",
+      "sha256": "11116e9e1768d5a2712335390405f62a2b6c82a2b64bea72ad7cd136fb9df648"
+    },
+    {
+      "path": "apps/api/test/reference-data.integration.test.ts",
+      "sha256": "d935b3d57022dc46d97cb9186723b185219f3414a437249d77d5a015e137540f"
+    },
+    {
+      "path": "apps/api/test/site-survey-api.integration.test.ts",
+      "sha256": "ece7ce0bf4087e98fc2e87aa434c00171532876b590c038938ae1978373f1f3c"
+    },
+    {
+      "path": "apps/api/test/site-survey-effective.test.ts",
+      "sha256": "c7b9c950db718d417c527c86c8d1caecc79db4b27607f0d4d4b40a3b88f44089"
+    },
+    {
+      "path": "apps/api/test/site-survey-files.integration.test.ts",
+      "sha256": "32498354c30992e19bbdff10619bcc417b575165bbc110568422a62feb801ad8"
+    },
+    {
+      "path": "apps/api/test/site-survey-notice-migration.integration.test.ts",
+      "sha256": "63c255cff2a7ff8af25e2d4f740c907a16d75a77f9f353c791c4a11b0e3a7120"
+    },
+    {
+      "path": "apps/api/test/site-survey-notice.integration.test.ts",
+      "sha256": "2f6281037c3368d693e0b969e5d369bc62ef0fea9583c17b3a1f4a80fe779153"
+    },
+    {
+      "path": "apps/api/test/site-survey-publication.integration.test.ts",
+      "sha256": "42335a48fe6f9851d909beb491342e921de60570612d983a84f276e2ccffe27a"
+    },
+    {
+      "path": "apps/api/test/site-survey-upload.integration.test.ts",
+      "sha256": "e9a23dbd4ea5da9affef26cd1a1b7df4480244edf95ed980a4da0f95052121fa"
+    },
+    {
+      "path": "apps/api/test/support/profile-submit.ts",
+      "sha256": "9702a124e4ecba6a2d3a804ad9e5a86d9cf942aa06ea8ab5ccecfea43c167791"
+    },
+    {
+      "path": "apps/api/test/support/survey-smtp-relay.ts",
+      "sha256": "e1feb5d60930bf4eb082a6824366cb808c9798362b034665ed2a5c9eede560df"
+    },
+    {
+      "path": "apps/api/test/support/verified-fixture.ts",
+      "sha256": "65d4dfe332d9bbe158f58731ba041a02f73eeae02c0db977a1146ba0251ee50b"
+    },
+    {
+      "path": "apps/web/messages/en.json",
+      "sha256": "a7f57995db73a81391a7b72ba70c41290f6f0bdcd92ce255c791ea2a6db4daf0"
+    },
+    {
+      "path": "apps/web/messages/kk.json",
+      "sha256": "8ddea7e311d4905f2976f570895ae62d30ab0b6fa61d6f39b0758a70737f727a"
+    },
+    {
+      "path": "apps/web/messages/ru.json",
+      "sha256": "be122399823ed7fcd666121571cf31becb0c9ce2ccadea77ebfcbd1f97487766"
+    },
+    {
+      "path": "apps/web/src/components/app/app-shell.tsx",
+      "sha256": "7c01d7b4319870bf0ab8ece4321cfd0f94867370cfbafabe28062aa5cd098e93"
+    },
+    {
+      "path": "apps/web/src/features/reviews/queue.tsx",
+      "sha256": "c2ec94c591b9a6ddbe4d20bdff7c66c8fb5eb7d998c15ba27a07dcad62ac49a2"
+    },
+    {
+      "path": "apps/web/src/features/site-survey/api.ts",
+      "sha256": "7ce3b0f58a421f9535a258f5f89789ee4b997414663b6a199d3ba228dedd3d5b"
+    },
+    {
+      "path": "apps/web/src/features/site-survey/collection.tsx",
+      "sha256": "8f72ec639a1651f971599f72188583c096eadd29b6eaa60571daab63f77ec069"
+    },
+    {
+      "path": "apps/web/src/features/site-survey/company-report.tsx",
+      "sha256": "c257ba3c17ba04e449629a672ac9dbfa5ed1e72d6b7b6ee75c04a7fd7adc72f1"
+    },
+    {
+      "path": "apps/web/src/features/site-survey/editor.tsx",
+      "sha256": "833dab14b56f5ba084e72b14383fd908402f9eca213a92e3411af78677e807fd"
+    },
+    {
+      "path": "apps/web/src/features/site-survey/feedback.tsx",
+      "sha256": "bb7bc17aaffcb9aed332f9e59d37142a183c9dd6039c144c43a77ccd534ef453"
+    },
+    {
+      "path": "apps/web/src/features/site-survey/history.tsx",
+      "sha256": "74e4594e5ee62d541ed53af8a144f127914eb895d1dcd61f2610dea165ee8763"
+    },
+    {
+      "path": "apps/web/src/features/site-survey/index.ts",
+      "sha256": "bc03e17b256c230bbc0bd3f1cecd69283a51170db31670afebf84e0b2a21f893"
+    },
+    {
+      "path": "apps/web/src/features/site-survey/own-request.tsx",
+      "sha256": "a0c2a9af88d768a15af2f34b9f600e42568e292bec96fa9cbe83dc69e170004b"
+    },
+    {
+      "path": "apps/web/src/features/site-survey/paging.tsx",
+      "sha256": "040318128101fb513396d7f1e093a061a562a1cc219aabb743eb4b657c11c334"
+    },
+    {
+      "path": "apps/web/src/features/site-survey/params.ts",
+      "sha256": "09402ce5074a864d86c01cd3c020f9f4d4d978b7bd90b440e20a261870e64a19"
+    },
+    {
+      "path": "apps/web/src/features/site-survey/record.tsx",
+      "sha256": "e8ef7f2f348636b52b90d7b07f7ea100c176b7c949671f35d3d2e011c813e24b"
+    },
+    {
+      "path": "apps/web/src/features/site-survey/report-upload.tsx",
+      "sha256": "dd2208b1d97122fdd66f546aebe501b810efc05dad3c6cb2546a7d320a5be1d5"
+    },
+    {
+      "path": "apps/web/src/features/site-survey/report.tsx",
+      "sha256": "9442be317c173c47b8523a0a67ed607cc362bc463958666eee959cb483370eb8"
+    },
+    {
+      "path": "apps/web/src/features/site-survey/requests.tsx",
+      "sha256": "b07784d401e385af57645806b8f5826613236973f32acf8432c1b9eb130c2df1"
+    },
+    {
+      "path": "apps/web/src/features/site-survey/scope.ts",
+      "sha256": "0b37ff2b8c9623d92a1fe796fdde9be7b995c836abf887d861a01106a516a0e2"
+    },
+    {
+      "path": "apps/web/src/features/site-survey/summary.tsx",
+      "sha256": "417366c805076a63d5b9787928b08da326a36ccdcc64832ac7b8f21f1dcee753"
+    },
+    {
+      "path": "apps/web/src/router.tsx",
+      "sha256": "c4ef08ba8744ed300b3bc8a5d23634135bef275d8d8188e0684ba82f03eac5ae"
+    },
+    {
+      "path": "apps/web/src/routes/app/company.tsx",
+      "sha256": "7bbe342ceee680a6ad8fdc90581bd104976f47e493db5a855f6b43156358d7bb"
+    },
+    {
+      "path": "apps/web/src/routes/app/profile.tsx",
+      "sha256": "333d5044d3949be5e91df39a0a692817f90404b4bad1464f5dfc5533f1122818"
+    },
+    {
+      "path": "apps/web/src/routes/app/site-survey-requests.tsx",
+      "sha256": "bbeabb1298b575b6a261d82e6e98baf68b9940ac029d0d8e04eb9d6c2abbac13"
+    },
+    {
+      "path": "apps/web/src/routes/app/site-surveys.tsx",
+      "sha256": "021d2c8a07701cb9177038b5391342ed8d0997a19c39ab37ec35d014fdfcd5e0"
+    },
+    {
+      "path": "apps/web/test/app-shell.test.tsx",
+      "sha256": "594e8838d5d0b06b99cb9264715990fa5dd14ca1c9bba264330fb6f7c6580f40"
+    },
+    {
+      "path": "apps/web/test/review-assignment.test.tsx",
+      "sha256": "a0ddf70401ee05ef6e5895432a19612e608ae0dc164d55b2bb40d5adf2e63456"
+    },
+    {
+      "path": "apps/web/test/support/survey.tsx",
+      "sha256": "323aeded3bdaecc1684d791aa37ac38c8d5b64c9fae6ddf68552ae2b6db71560"
+    },
+    {
+      "path": "apps/web/test/survey-messages.test.ts",
+      "sha256": "cb89fb4f7c38598aef54cd887fd43bcf358dde9d69ce42dd9c9f8218b3f4a1b2"
+    },
+    {
+      "path": "apps/web/test/survey-read.test.tsx",
+      "sha256": "abe506032c71b3a68ff813777bce6bea405b1a7e82c6751d1e5d34f1573d0a27"
+    },
+    {
+      "path": "apps/web/test/survey-write.test.tsx",
+      "sha256": "8a8d8056a5ad3cd2a7865ce4a63553a620c08f16ad0c54ce8c5344148a5f5c4f"
+    },
+    {
+      "path": "packages/contracts/src/company.ts",
+      "sha256": "140f12a05cf91168211798bde50dfc4403c27209628a120ab86bc01293006870"
+    },
+    {
+      "path": "packages/contracts/src/index.ts",
+      "sha256": "350efbfe7b7ad0848d20c1addc3244ff45f74d2b0314b4c5ff8084746580f18c"
+    },
+    {
+      "path": "packages/contracts/src/site-survey.ts",
+      "sha256": "e890c4c85ae38aaa358c544ec3004dfb58d67731d07dd752e267b7ccf2cdb053"
+    },
+    {
+      "path": "packages/contracts/test/site-survey.test.ts",
+      "sha256": "8e52f771a249515d67ffcaf6d75ef4809ea50378d55aff5f8cf910ca92e144ef"
+    }
+  ],
+  "review": {
+    "reviewer": "GPT-6 Astra",
+    "decision": "Approved bounded LOCAL Survey composition",
+    "backendAggregate": "7646a6cf09138c252ba9e23e7d0217822ccce510944455fd10bd1a95fd599227",
+    "uiAggregate": "19f0f5630365abd542ae0c7342defe039fbded36decc3ba32d253a21e87c842b",
+    "independentWebPassed": 635,
+    "independentContractsPassed": 376,
+    "independentCompanyAndAppModuleDiPassed": 41,
+    "independentNoticeMigrationAndTemplatePassed": 63,
+    "sourceDrift": []
+  },
+  "validation": {
+    "fullApi": {
+      "passed": 2113,
+      "skipped": 108,
+      "passedFiles": 113,
+      "skippedFiles": 5,
+      "exit": 0,
+      "skipBoundary": "32 NOT11 SMTP cases proved in separate owner/Astra suites;76 other runner-specific cases remain separately scoped"
+    },
+    "ownerNoticeActualPgQueueSmtpPassed": 32,
+    "contractsPassed": 376,
+    "ownerWebPassed": 630,
+    "actualBrowser": {
+      "initialHttpControls": 34,
+      "initialCompletedResponses": 198,
+      "returnCompletedGet200": 18,
+      "session": "bounded fixture",
+      "objectStorageAndAntivirus": "isolated doubles",
+      "normalChromeDownloadToDisk": "client blocked; exact-version HTTP bytes proved separately"
+    },
+    "frozenAllowedGitTree": {
+      "build": "PASS",
+      "typecheck": "PASS",
+      "generate": "PASS — no schema changes",
+      "webPassed": 630
+    },
+    "requirements": {
+      "mappedIds": 288,
+      "checkerPassed": 24,
+      "completionClaim": false
+    }
+  },
+  "remaining": [
+    "Git publication recorded by actual repository history",
+    "Full Stage5 internal records/AGAR/CDP and later stages including Release2",
+    "Real OIDC/storage/ClamAV corpus/provider/production SMTP and whole-worker acceptance",
+    "Azure update of this checkpoint and UAT/load/security/operational sign-off"
+  ]
+}

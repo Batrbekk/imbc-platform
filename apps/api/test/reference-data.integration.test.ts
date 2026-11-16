@@ -822,6 +822,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
       pool.query(`DO $$ BEGIN
         IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${ROLE}') THEN
           REVOKE ALL ON ALL TABLES IN SCHEMA public FROM ${ROLE};
+          REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM ${ROLE};
           REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM ${ROLE};
           REVOKE ALL ON SCHEMA public FROM ${ROLE};
           DROP ROLE ${ROLE};
