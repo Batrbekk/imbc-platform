@@ -19,7 +19,14 @@ import { id } from './_shared.js';
 import { certificateGroup, productLineSource, recordStatus } from './enums.js';
 import { fileObject, fileVersion } from './files.js';
 import { dictionaryEntry } from './reference.js';
-import { certificateIdentity, documentIdentity, productionSiteIdentity, productLineIdentity, sectionRevision } from './profile.js';
+import { eOndirisRecord } from './e-ondiris.js';
+import {
+  certificateIdentity,
+  documentIdentity,
+  productionSiteIdentity,
+  productLineIdentity,
+  sectionRevision,
+} from './profile.js';
 
 /** DATA-01/GEN-11: every content link includes its organisation; partial drafts remain nullable (MAN-40). */
 const revisionColumns = () => ({
@@ -229,8 +236,13 @@ export const productLine = pgTable(
     index('product_line_tn_ved_idx').on(t.organizationId, t.tnVedCode),
     check('product_line_capacity_ck', sql`${t.capacityQuantity} >= 0`),
     check('product_line_share_ck', sql`${t.inCountryValueShare} between 0 and 100`),
-    // The source snapshot table is introduced by ingestion (4b); no dangling source UUID is allowed meanwhile.
-    check('product_line_source_snapshot_reserved_ck', sql`${t.eOndirisRecordId} is null`),
+    // Historical nullable source links remain readable; linked facts belong to an immutable local snapshot.
+    foreignKey({
+      name: 'product_line_e_ondiris_snapshot_fk',
+      columns: [t.eOndirisRecordId],
+      foreignColumns: [eOndirisRecord.id],
+    }),
+    check('product_line_e_ondiris_source_ck', sql`${t.eOndirisRecordId} is null or ${t.source} = 'e_ondiris'`),
   ],
 );
 

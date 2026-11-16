@@ -169,6 +169,13 @@
       "when": 1794802964268,
       "tag": "0023_release_policy_rules",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794805150259,
+      "tag": "0024_stage4a_eondiris",
+      "breakpoints": true
     }
   ]
 }

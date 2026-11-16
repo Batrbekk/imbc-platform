@@ -67,6 +67,10 @@ describe('worker: письма событий', () => {
       {} as never,
       { runJob } as never,
       cleanup as never,
+      {
+        daily: async () => ({ state: 'disabled', accepted: 0, rejected: 0 }),
+        refreshPending: async () => ({ processed: 0, deferred: 0, ambiguous: 0, failed: 0 }),
+      } as never,
     );
     await worker.onApplicationBootstrap();
 
@@ -80,6 +84,17 @@ describe('worker: письма событий', () => {
     expect(cleanup.run).toHaveBeenCalledWith({ fileObjectId: 'fixture-id' });
     expect(await handlers.get(QUEUES.fileCleanupSweep)!([{ data: null }])).toBeUndefined();
     expect(cleanup.sweep).toHaveBeenCalledOnce();
+    expect(await handlers.get(QUEUES.eOndirisDaily)!([{ data: null }])).toEqual({
+      state: 'disabled',
+      accepted: 0,
+      rejected: 0,
+    });
+    expect(await handlers.get(QUEUES.eOndirisProfileRefresh)!([{ data: null }])).toEqual({
+      processed: 0,
+      deferred: 0,
+      ambiguous: 0,
+      failed: 0,
+    });
   });
 
   it('письмо без текста или подстановки — постоянный отказ, а не пустое письмо: NOT-04 до своего этапа', () => {

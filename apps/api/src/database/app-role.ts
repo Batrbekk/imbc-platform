@@ -24,6 +24,14 @@ export async function applyAppRoleGrants(pool: pg.Pool, role: string): Promise<v
     const policy = await client.query<{ exists: boolean }>("SELECT to_regclass('policy_rule') IS NOT NULL AS exists");
     if (policy.rows[0]?.exists)
       await client.query(`REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON policy_rule FROM ${name}`);
+    const registry = await client.query<{ exists: boolean }>(
+      "SELECT to_regclass('e_ondiris_record') IS NOT NULL AS exists",
+    );
+    if (registry.rows[0]?.exists) {
+      await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON e_ondiris_record FROM ${name}`);
+      await client.query(`GRANT UPDATE(is_current) ON e_ondiris_record TO ${name}`);
+      await client.query(`REVOKE DELETE, TRUNCATE ON e_ondiris_sync_scope, e_ondiris_profile_refresh FROM ${name}`);
+    }
     // Журнал аудита (AUD-02) и принятия NDA (FC-02, DBML: append-only) — только добавление:
     // у роли приложения нет UPDATE/DELETE.
     await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON audit_entries FROM ${name}`);

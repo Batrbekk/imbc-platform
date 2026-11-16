@@ -56,6 +56,7 @@ import { ProductionHandler } from './modules/profiles/production.handler.js';
 import { ProfileUploadController, ProfileUploadGuard } from './modules/profiles/profile-upload.controller.js';
 import { ProfileUploadService } from './modules/profiles/profile-upload.service.js';
 import { defineSectionHandler, PROFILE_SECTION_HANDLERS } from './modules/profiles/section-handler.js';
+import { EOndirisModule } from './modules/e-ondiris/e-ondiris.module.js';
 import { ManufacturerOnboardingService } from './modules/registration/onboarding.service.js';
 import { RegistrationController } from './modules/registration/registration.controller.js';
 import { CurrentNdaController } from './modules/registration/current-nda.controller.js';
@@ -74,6 +75,7 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     PolicyModule,
     InfraModule,
     AuditModule,
+    EOndirisModule,
   ],
   controllers: [
     HealthController,

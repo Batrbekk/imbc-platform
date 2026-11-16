@@ -6,7 +6,7 @@ export default defineConfig({
   test: {
     include: ['test/**/*.test.ts'],
     environment: 'node',
-    // Интеграционные файлы пересоздают одну и ту же БД imbc_auth_test — только последовательно.
-    fileParallelism: !process.env.TEST_DATABASE_URL,
+    // Integration files recreate their isolated auth/source database; serialize files sharing either runner.
+    fileParallelism: !process.env.TEST_DATABASE_URL && !process.env.EONDIRIS_TEST_DATABASE_URL,
   },
 });

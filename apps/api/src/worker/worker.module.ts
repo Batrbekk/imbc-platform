@@ -16,6 +16,8 @@ import { AdataScheduler } from '../modules/adata/adata.scheduler.js';
 import { KeycloakAdminService } from '../modules/auth/keycloak-admin.service.js';
 import { SessionService } from '../modules/auth/session.service.js';
 import { ProfilesService } from '../modules/profiles/profiles.service.js';
+import { EOndirisWorkerModule } from '../modules/e-ondiris/e-ondiris-worker.module.js';
+import { EOndirisWorker } from '../modules/e-ondiris/worker.js';
 import { ManufacturerOnboardingService } from '../modules/registration/onboarding.service.js';
 import { ANTIVIRUS, ClamdAntivirus } from '../modules/files/antivirus.js';
 import { orgChartSamplePassed } from '../modules/files/org-chart-sample.rules.js';
@@ -54,6 +56,7 @@ import { JobHandlers } from './handlers.service.js';
     PolicyModule,
     InfraModule,
     AuditModule,
+    EOndirisWorkerModule,
   ],
   providers: [
     JobHandlers,
@@ -95,6 +98,7 @@ export class WorkerModule implements OnApplicationBootstrap {
     private readonly fileScan: FileScanJob,
     private readonly notifications: NotificationDispatcher,
     private readonly fileCleanup: FileCleanupJob,
+    private readonly eOndiris: EOndirisWorker,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -135,6 +139,8 @@ export class WorkerModule implements OnApplicationBootstrap {
       [QUEUES.runSubscriptions]: () => h.todo(QUEUES.runSubscriptions),
       [QUEUES.adataPrefill]: (d) => this.adataPrefill.run(d),
       [QUEUES.identitySync]: (d) => h.syncIdentity(d),
+      [QUEUES.eOndirisDaily]: () => this.eOndiris.daily(),
+      [QUEUES.eOndirisProfileRefresh]: () => this.eOndiris.refreshPending(),
     };
 
     for (const [queue, run] of Object.entries(routes) as [QueueName, (data: never) => Promise<unknown>][]) {
@@ -163,9 +169,11 @@ export class WorkerModule implements OnApplicationBootstrap {
         try {
           let output: unknown;
           for (const job of jobs) output = await run(job.data as never);
-          // Результат обработчика pg-boss сохраняет в output задания: у notify — итог отправки или причина
-          // постоянного отказа (без адресов); остальные очереди результата не отдают, как раньше.
-          return queue === QUEUES.notify ? output : undefined;
+          // pg-boss сохраняет безопасный итог уведомлений и источника (без адресов/исходных данных);
+          // остальные очереди результата не отдают, как раньше.
+          return queue === QUEUES.notify || queue === QUEUES.eOndirisDaily || queue === QUEUES.eOndirisProfileRefresh
+            ? output
+            : undefined;
         } catch (error) {
           // pg-boss сохраняет ошибку обработчика в output задания: у ошибки базы — только сводка (NFR-11).
           throw redactDatabaseError(error);

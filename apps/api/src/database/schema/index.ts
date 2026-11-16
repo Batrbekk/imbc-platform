@@ -13,3 +13,5 @@ export * from './profile-file-history.js';
 export * from './profile-review.js';
 export * from './account-nda.js';
 export * from './policy-rules.js';
+export * from './e-ondiris.js';
+export * from './e-ondiris-outbox.js';

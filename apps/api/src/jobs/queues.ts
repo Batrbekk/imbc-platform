@@ -27,6 +27,8 @@ export const QUEUES = {
   adataPrefill: 'adata-prefill',
   identitySync: 'identity-sync',
   inactivityReset: 'inactivity-reset',
+  eOndirisDaily: 'eondiris-daily-copy',
+  eOndirisProfileRefresh: 'eondiris-profile-refresh',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -97,6 +99,16 @@ export const SCHEDULES: ReadonlyArray<{ queue: QueueName; cron: string; note: st
     note: 'три месяца без входа → inactive и ссылка сброса (AUTH-07, NOT-26)',
   },
   { queue: QUEUES.updateStatus, cron: '0 9 * * *', note: 'квартальный цикл актуализации (UPD-01…05)' },
+  {
+    queue: QUEUES.eOndirisDaily,
+    cron: '0 4 * * *',
+    note: 'суточная локальная копия e-Ondiris; при неподтверждённом транспорте explicit disabled (EXT-02)',
+  },
+  {
+    queue: QUEUES.eOndirisProfileRefresh,
+    cron: '* * * * *',
+    note: 'атомарный outbox source-COW и повтор после завершения активного рассмотрения (MAN-25)',
+  },
   { queue: QUEUES.runSubscriptions, cron: '0 6 * * *', note: 'подписки на выгрузки (OPR-20)' },
   { queue: QUEUES.purgeSessions, cron: '15 * * * *', note: 'просроченные сеансы, коды и доверенные устройства' },
   {
