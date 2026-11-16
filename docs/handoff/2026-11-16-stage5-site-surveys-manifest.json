@@ -434,9 +434,13 @@
     }
   },
   "remaining": [
-    "Git publication recorded by actual repository history",
     "Full Stage5 internal records/AGAR/CDP and later stages including Release2",
     "Real OIDC/storage/ClamAV corpus/provider/production SMTP and whole-worker acceptance",
     "Azure update of this checkpoint and UAT/load/security/operational sign-off"
-  ]
+  ],
+  "publishedApplicationCheckpoint": {
+    "commit": "3eeab65120e9feb5cb02ce2c97ff383b422cb8e9",
+    "ref": "refs/heads/feat/stage-3-profile",
+    "verifiedRemoteMatch": true
+  }
 }
