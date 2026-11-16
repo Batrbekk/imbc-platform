@@ -1,18 +1,18 @@
 # IMBC: план разработки по спецификации v1.4
 
-Редакция от 16 ноября 2026 года по спецификации v1.4 от 13 ноября. Документ описывает фазу 1: порядок этапов, зависимости, объём и приёмку. Состояния уже выполненных этапов ниже сохраняют даты их фактических проверок; наличие нового плана не означает реализации или выката. Подробные планы — в `docs/superpowers/plans/`; продолжение текущей части 3а заменено [планом v1.4](superpowers/plans/2026-11-16-stage-3a-spec-v1.4.md).
+Редакция от 16 ноября 2026 года по спецификации v1.4 от 16 ноября, commit `073fe16c097293c17474002438a35b0e6116c1f1`. Документ описывает фазу 1: порядок этапов, зависимости, объём и приёмку. Состояния уже выполненных этапов ниже сохраняют даты и источник фактических проверок; наличие нового плана не означает реализации или выката. [Содержательная сверка новой редакции](handoff/2026-11-16-spec-source-update.md), [общий план и текущее состояние](superpowers/plans/2026-11-16-overall-development-plan.md). Подробные планы — в `docs/superpowers/plans/`; продолжение текущей части 3а заменено [планом v1.4](superpowers/plans/2026-11-16-stage-3a-spec-v1.4.md).
 
 ## 1. Основания
 
 Ответственность источников:
 
-1. [Спецификация v1.4](analyst/2026-11-13/specification-v1.4.md) — поведение, права, объём и приёмка. **288 требований**; источник имеет статус `draft for sign-off`.
-2. [DBML и SQL-снимок 13 ноября](analyst/2026-11-13/imbc-platform.dbml) — поля, связи, справочники, mapping исходных книг и экспортный контракт. В DBML 101 таблица и 42 перечисления. SQL — результат генерации, не миграция приложения.
-3. [Глоссарий](analyst/2026-11-13/GLOSSARY.md) — термины; [ответы 13 ноября](analyst/2026-11-13/2026-11-13-replies.md) — разбор обновлённых контрактов и оставшихся вводных. Черновые ответы 12 ноября не являются принятыми решениями.
+1. [Спецификация v1.4 от 16 ноября](analyst/2026-11-16/specification-v1.4.md) — поведение, права, объём и приёмка. **288 требований**; источник имеет статус `draft for sign-off`. [Русская редакция](analyst/2026-11-16/specification-v1.4.ru.md) содержит те же ID.
+2. [DBML и SQL-снимок 16 ноября](analyst/2026-11-16/imbc-platform.dbml) — поля, связи, справочники, mapping исходных книг и экспортный контракт. В DBML 101 таблица и 41 перечисление. SQL — результат генерации, не миграция приложения. [Происхождение и хеши](analyst/2026-11-16/SOURCE.json).
+3. [Глоссарий](analyst/2026-11-16/GLOSSARY.md) — термины; [ответы 13 ноября](analyst/2026-11-13/2026-11-13-replies.md) — контекст контрактов и оставшихся вводных там, где новая редакция не изменила правило. Черновые ответы 12 ноября не являются принятыми решениями.
 4. `docs/analyst/2026-11-11/v0.5-architecture-update-brief.md` и архитектура v0.4 — техническая основа там, где не противоречит текущей спецификации и DBML. Бриф с названием `v0.5-current-architecture-brief.md` и пометкой `Superseded` не используется.
 5. Заметки встреч, описание API Adata, образцы источников и прототип — контекст. Текущие требования и DBML имеют приоритет над историческими списками полей.
 
-Снимок 11 ноября и подробные планы выполненных работ сохраняются как история. В v1.4 добавлены 16 ID (LPS-01–08, OPR-39–43, MIG-16, ACC-06–07), без удаления прежних ID; одновременно изменилось содержание существующих требований к профилю, источникам, импорту и релизам. Сверка только номеров не проверяет соответствие поведения.
+Снимки 11 и 13 ноября и подробные планы выполненных работ сохраняются как история. В v1.4 от 13 ноября добавлены 16 ID (LPS-01–08, OPR-39–43, MIG-16, ACC-06–07). В редакции 16 ноября удалён прежний DATA-07 и добавлен LPS-09: число действующих требований осталось 288. Изменено содержание file/security/migration/LPS правил. Сверка только номеров не проверяет соответствие поведения. Старые file/scan и LPS checkpoints не принимают новую дельту; её реализация и приёмка открыты.
 
 «Делаем по спецификации Абая» означает пять правил:
 
@@ -41,7 +41,7 @@
 
 - **Локально принят срез этапа5 REV01–09:** рабочая очередь/назначение SME, семь frozen sections, atomic decisions/CAS, возврат/верификация/pendingchanges и реальные NOT04/05/10. MAN43/NOT29 retention и NOT31 quarter anchor исправлены; GPT-6 Astra bounded Approved (199API/153UI/86contracts +5actualSMTP scenarios), exactGit checkpoint API2002PASS/76separate-envskips, web536PASS/contracts368PASS, types/build/lint/map288ID. [Checkpoint](handoff/2026-11-16-stage5-integration.md). Обследования площадок, остальные записи IMBC и весь production scope остаются открыты.
 
-- **Текущий основной поток — этап5, внутренние записи IMBC.** Обследования площадок SQL0029 и доставка NOT11 SQL0030 локально приняты с финальным ревью GPT-6 Astra: API2113PASS/108separate-envskips, web630/contracts376; отдельно32 actualSMTP owner и63 independent notice/migration controls. Final Astra635UI/376contracts/41company-and-AppModule-DI и actual browser34HTTP/198responses плюс18GET return proof имеют явно указанные fixture/runtime границы. Exact Git checkpoint `3eeab65` опубликован с проверенным remote match; Azure кандидат остаётся старее. Backend/UI заметок, исторических взаимодействий и контекста продуктов разрабатываются параллельно; AGAR/CDP, весь Stage6–10 и Release2 остаются в цели. [Survey checkpoint](handoff/2026-11-16-stage5-site-surveys.md), [общий план](superpowers/plans/2026-11-16-overall-development-plan.md), [полная поставка](superpowers/plans/2026-11-16-production-delivery.md).
+- **Текущий основной поток — этап5, внутренние записи IMBC.** Обследования площадок SQL0029 и доставка NOT11 SQL0030 локально приняты с финальным ревью GPT-6 Astra: API2113PASS/108separate-envskips, web630/contracts376; отдельно32 actualSMTP owner и63 independent notice/migration controls. Final Astra635UI/376contracts/41company-and-AppModule-DI и actual browser34HTTP/198responses плюс18GET return proof имеют явно указанные fixture/runtime границы. Exact Git checkpoint `3eeab65` опубликован с проверенным remote match; Azure кандидат остаётся старее. Заметки, исторические взаимодействия и контекст продуктов приняты в локальной Root49 композиции и checkpoint `5435d0d`: final696web/380contracts/build/types/lint/schema, actual37HTTP/17browser и независимые Astra native/AppModule/authority/history gates. [Приёмка записей](handoff/2026-11-16-stage5-imbc-records.md). По новой редакции реализуется отдельный file/storage/migration/UI cutover; AGAR/CDP, весь Stage6–10 и Release2 остаются в цели. [Survey checkpoint](handoff/2026-11-16-stage5-site-surveys.md), [общий план](superpowers/plans/2026-11-16-overall-development-plan.md), [полная поставка](superpowers/plans/2026-11-16-production-delivery.md).
 
 ## 3. Как ведём разработку
 
@@ -74,7 +74,7 @@
 - **Чтение.** Оператор/наблюдатель и manufacturer exports/pull API читают разрешённые проверенные данные visible verified profiles. Директор видит все профили в каталоге/карточке, но его manufacturer dashboard считает только visible verified. LPS читает собственные сохранённые неудалённые записи без manufacturer verification/NDA.
 - **Редакции и история.** Отправленная и верифицированная редакция не перезаписывается. Замена текущих source/DD/draft значений сохраняет полный before/after, автора и время; список названий изменённых полей недостаточен. Оператор читает verified revisions и соответствующие source/file snapshots, без pending values.
 - **Коды.** БИН, ОКЭД, ТН ВЭД, КПВЭД, ЕНС ТРУ хранятся текстом (DATA-03). Многозначные поля — отдельными строками (DATA-02).
-- **Файлы.** Файл недоступен, пока не прошёл антивирус; отдаётся только после проверки прав записи-владельца (DATA-07, GEN-09).
+- **Файлы.** Private storage и выдача через сервер после проверки прав записи-владельца и точной разрешённой версии (GEN-09, NFR-09). Type/size validation сохраняется (DATA-06); scan/quarantine и зависимость доступа от scan исключены новой редакцией. Переход существующего кода выполняется отдельной совместимой дельтой.
 - **Время.** Даты, сроки и расписания считаются по Asia/Almaty (DATA-08).
 - **Внешние сервисы.** Только через коннектор и только из worker. В тестах — заглушка на записанных ответах. Реальный вызов Adata расходует квоту заказчика и делается по прямой команде владельца.
 - **Почта.** Автоматические тесты пишут на адреса `.local`; они остаются в Mailpit.
@@ -123,13 +123,13 @@
 | А    | Общий вход — сделан                                               | 13         | —             | —                        |
 | 0    | Контракты и права, web на Vite, архитектура                       | 7          | Средний       | —                        |
 | 1    | Регистрация, организации, аккаунты                                | 18         | Средний       | 0                        |
-| 2    | Справочники, файлы, основа уведомлений                            | 15         | Средний       | 0                        |
+| 2    | Справочники, файлы, основа уведомлений                            | 14         | Средний       | 0                        |
 | 3    | Профиль производителя                                             | 38         | Очень большой | 1, 2                     |
 | 4а   | Копия e-Ondiris, коннектор Adata, каталог проверок                | 8          | Большой       | 0, 2                     |
 | 4б   | Предзаполнение профиля, запуск due diligence                      | 6          | Средний       | 3, 4а                    |
 | 5    | Проверка SME, записи IMBC, тиры, проекция                         | 34         | Очень большой | 3, 4б                    |
 | 6    | Оператор, наблюдатель, директор — производители                   | 53         | Очень большой | 5                        |
-| 6б   | Отдельный LPS: SME CRUD, таблица и дашборд                        | 13         | Большой       | 0, 1, 2; параллельно 3–6 |
+| 6б   | LPS: staff CRUD, ограниченный операторский вид и дашборд          | 14         | Большой       | 0, 1, 2; параллельно 3–6 |
 | 7    | Актуальность, уведомления, аудит                                  | 18         | Большой       | 5                        |
 | 8    | Миграция производителей/PDF и отдельно LPS                        | 21         | Большой       | 5, 7; LPS после 6б       |
 | 9    | Release 2: прогноз, STR и KTRE, запрос AGAR, версии NDA, подписки | 22         | Большой       | 5, 6                     |
@@ -216,7 +216,7 @@
 
 **Цель.** Основание, без которого нельзя строить профиль и рассылать письма: справочники администратора, закрытое хранилище файлов и общие правила уведомлений.
 
-**Требования.** GEN-09; ADM-08, ADM-09, ADM-11; NOT-18–21; DATA-02–07; NFR-09.
+**Требования.** GEN-09; ADM-08, ADM-09, ADM-11; NOT-18–21; DATA-02–06; NFR-09.
 
 **Данные.** `dictionary`, `dictionary_entry`, `dictionary_entry_translation`; `file_object` с назначением и классом данных; `file_version`; `org_chart_sample`; `notification_rule` и `notification` вместо `notifications_sent`. Товарные группы и роли контактов переходят из перечислений PostgreSQL в справочники.
 
@@ -239,7 +239,7 @@
   - **Выкат на Azure 14.11.2026:** `deploy.sh redeploy` из чистого checkout `335ef02`, `IMBC_DEPLOY_RESULT=ok`; все одиннадцать пунктов «Проверок после выката этапа 2» runbook на стенде совпали с ожидаемым (`caddy validate` и `nginx -t` для прокси-конфигураций тоже прошли) — [запись проверки](deployment/verification-2026-11-14.md).
   - **Не сделано:** приёмка на стенде под ролями — на Azure никто не входил, поэтому не сделана и часть списка «Посмотреть при первом выкате этапа 2» ([runbook](deployment/azure-dev.md#справочники-файлы-и-уведомления-этап-2)): настоящий файл 20–25 МБ через Caddy, копирование карантин → рабочий бакет на RustFS стенда, задания без `failed` через час; ящик IMBC на стенде не задан; прогон сборочного конвейера (GitHub Actions заблокирован); перечни IMBC (ниже, «Вводные»); снимок обязательных типов при отправке профиля — `submission_requirement` (ADM-09, этап 3: сейчас меняется только признак `mandatory` с аудитом); загрузка файлов производителем, привязка файла к секции и очистка непривязанных (этап 3), чтение файлов оператором и наблюдателем (этап 6), файлы обследований и due diligence (этап 5), просмотр STR и KTRE (этап 9); тексты и события NOT-04…NOT-17 (этапы 5–9; полный каталог — этап 7), части получателей `focal_point` и `manufacturer_contacts` (этап 3) и `assigned_sme_or_imbc_mailbox` (этап 5), экрана правил и входящих нет (раздел 8.2 спецификации: «There is no notification inbox»); импорт перечней из интерфейса (перечень приходит файлом в репозитории и релизом); кабинет директора, кроме чтения справочников (этап 6); релиз contract этапа 2 (миграция `0011`, первой задачей этапа 3); вычитка новых казахских текстов (LANG-03, handoff §10); ответы Абая на вопросы 43–56. Оговорка к «Данные» выше: перечисления PostgreSQL `contact_role` и `commodity_group` остаются до этапов 3 и 5 — справочники уже есть, но профиль и проекция ещё ссылаются на перечисления.
 
-**Приёмка.** Файл до прохождения скана не открывается никому. Ссылка на чужой файл возвращает отказ и запись в аудит. Ведущие нули кодов сохраняются. Значение, использованное в профиле, удалить нельзя. Повтор события не отправляет второе письмо на тот же адрес. Наблюдателю письмо не уходит. Язык письма — язык получателя (NOT-19), ссылка в письме требует входа (NOT-20). Автоматически эти условия закрыты тестами (перечень — план этапа, «Приёмка»); выкат сделан 14.11.2026, приёмка на стенде под ролями ещё не проводилась; её результат — отдельная запись `docs/deployment/verification-<дата>.md`.
+**Приёмка текущей редакции.** Ссылка на чужой файл возвращает отказ и запись в аудит; scan не блокирует файл. Type/size/content и version-binding проверки сохраняются. Ведущие нули кодов сохраняются. Значение, использованное в профиле, удалить нельзя. Повтор события не отправляет второе письмо на тот же адрес. Наблюдателю письмо не уходит. Язык письма — язык получателя (NOT-19), ссылка в письме требует входа (NOT-20). Историческая реализация и выкат 14.11.2026 относятся к прежней редакции с scan; новая дельта и стендовая приёмка под ролями открыты.
 
 **Вводные.** Классификаторы ОКЭД, ТН ВЭД, КПВЭД, перечни регионов, типов товаров, процессов и типов оборудования — от IMBC: в продакшене эти списки пусты, на стенде лежат временные значения seed. Вместе с ними нужны названия товарных групп A–E на трёх языках, полный список правовых форм и типов документов, образец оргструктуры, адрес ящика IMBC для продакшена и вычитка новых казахских текстов.
 
@@ -362,23 +362,23 @@
 
 ### Этап 6б. Отдельный реестр LPS
 
-**Цель.** SME ведёт companies и product/service entries; SME, operator и director сразу читают saved non-deleted records в одной таблице и fixed dashboard. Можно делать параллельно manufacturer этапам 3–6 после общей auth/policy/reference основы.
+**Цель.** SME, administrator и director ведут все LPS business data; operator читает отдельный компактный вид только с согласованными разрешёнными полями. Сохранённые non-deleted records сразу обновляют внутренние данные и разрешённую операторскую проекцию. Можно делать параллельно manufacturer этапам 3–6 после общей auth/policy/reference основы.
 
-**Требования.** LPS-01–08; OPR-39–43.
+**Требования.** LPS-01–09; OPR-39–43.
 
 **Данные.** lps_company/country; lps_entry с independent status/source Type/planned launch/business last_updated; normalized commodities, paired locations, contacts с multiple email/phone; classG и existing audit/import journal. Нет BIN/profile/account/NDA/verification для записанной компании.
 
 **Работы.**
 
-- SME CRUD, обязательны company name/scope/status; optional values unknown; new Type LPS, historical LC retained. Status выбирается вручную Planning/In process/Localized/On hold, без transitions/approval/notifications. Company context один раз, несколько независимых scopes/statuses.
-- One row per entry, workbook order A:S и Product / service; multivalue cells не multiplying rows, stable ID для paging. Full details, horizontal scroll, aligned contact methods и location pairs.
-- Search company/scope/comments/city/contact names; filters AND между полями/OR внутри. City+region должны совпасть на одной location; type+group на одной classification. URL воспроизводит state; table/dashboard используют тот же matcher.
+- Full CRUD всех LPS business fields для SME/administrator/director; обязательны company name/scope/status; optional values unknown; new Type LPS, historical LC retained. Status выбирается вручную Planning/In process/Localized/On hold, без transitions/approval/notifications. Company context один раз, несколько независимых scopes/statuses.
+- One row per entry, multivalue cells не multiplying rows, stable ID для paging. Полный внутренний staff вид и отдельный понятный компактный operator list/details/dashboard по согласованному LPS-09 design; операторская проекция не повторяет всю workbook A:S.
+- Field visibility matrix согласуется с IMBC. Hidden fields отсутствуют в operator DTO и не влияют на search/filter/sort/tooltips/drilldown. AND между полями/OR внутри; city+region должны совпасть на одной location, type+group на одной classification, если эти поля включены в разрешённый вид. URL воспроизводит state; list/dashboard используют тот же matcher.
 - Typed sort по всем business columns; dict sort order, dates/numbers typed, multivalue lexicographic stable keys, launch known bounds →TBD→blank, blank last оба направления, stable ID tie breaker. Нет invented launch dates/zero, business Last updated не заменяется save timestamp.
 - Dashboard matching entry count/distinct company count/status/region/group; Unknown buckets. Status totals reconcile; multi-bucket breakdowns не сумма overall. Drilldown сохраняет остальные filters; financial aggregates нет.
 - Logical delete исключает только выбранную запись из live views/counts; audit before/after/user/time сохраняет историю. Company/dictionary deletion не cascade-удаляет используемые entries.
-- Operator/director readonly, server denies mutation; manufacturer/observer/admin LPS access denied. Admin управляет только dictionaries. Нет LPS notes/requests/import/export/API, application/localization workflow или изменения manufacturer data/tiers.
+- Operator readonly, server denies mutation; manufacturer/observer LPS access denied. Staff LPS CRUD не расширяет другие права administrator/director. Original migration evidence и audit immutable; все три staff роли могут читать LPS evidence/events и записывать resolutions. Нет LPS notes/requests/general import/export/pull API, application/localization workflow или изменения manufacturer data/tiers.
 
-**Приёмка.** ACC-06 проверяется на этапе 10: одна company с двумя statuses; multiple country/classification/location/contact methods без duplicate rows; одинаковые table/dashboard filters/counts; paired filters, sort null/TBD, drilldown; logical delete с историей и сохранением второго entry; allowed/refused всех ролей. Migration отдельно этап 8/ACC-07.
+**Приёмка.** ACC-06 проверяется на этапе 10: full business CRUD каждой из трёх staff ролей; operator mutation denied и отсутствие hidden fields в responses и query side channels; manufacturer/observer denied; readable compact list/dashboard/permitted details. Одна company с двумя statuses; multiple country/classification/location/contact methods без duplicate rows; одинаковые list/dashboard filters/counts; paired filters, sort null/TBD, drilldown; logical delete с историей и сохранением второго entry. Audit/original migration evidence не переписываются. Migration отдельно этап 8/ACC-07. Предыдущая локальная приёмка 13-ноябрьской модели сохраняется как история, новую дельту не закрывает.
 
 ### Этап 7. Актуальность, уведомления, аудит
 
@@ -398,7 +398,7 @@
 - Напоминания 60/30/7/0 дней: новое schedule generation при замене file/date; only current generation dispatch, unique schedule+threshold; expired-on-save не late reminders; null expiry без писем; достижение одним днём группируется по получателю.
 - Полный каталог писем: тексты всех писем лежат в языковых файлах, английский — исходный (LANG-02). Общие правила рассылки заведены на этапе 2.
 - Аудит: вход, выход, отказы, смены статусов, решения, принятия NDA, выгрузки, скачивания, открытия страниц компаний, LPS CRUD/logical deletion; полные предыдущие значения для восстановления истории. Хранение пять лет, без изменения и удаления.
-- Журнал для директора с фильтрами; для администратора — только события аккаунтов. Снимки недели и месяца.
+- Журнал для директора с фильтрами; для администратора — события аккаунтов и LPS; для SME — LPS events. LPS evidence не даёт доступа администратора к manufacturer evidence. Снимки недели и месяца.
 
 **Приёмка.** Границы семи дней и квартала проверяются управляемым временем. Повтор задания не отправляет второе письмо. Письма сверх 50 уходят на следующий день. Три месяца без входа не двигают квартал.
 
@@ -416,10 +416,10 @@
 
 - Manufacturers: signed-off982 rows/816 BIN, лист A:AL. Один BIN→profile; строки supply products; repeated company facts reconcile. Multiple goods/codes split только с known association, без Cartesian multiplication/positional guessing. Leading zeros, foreign phone formats, approved aliases сохраняются.
 - OUT OF/N/A, invalid-check-digit BIN, candidate duplicates/conflicts/missing mappings flagged с raw values; не drop/merge по догадке. Source legal seed до Adata; ambiguous address не копируется в legal+production автоматически.
-- Supply-to NCOC/TCO/KPO→validated works-with; surveys without PDFs не surveyed/tier2; ~320 PDFs match byBIN, unmatched вручную. Internal columns→engagement/events/productcontext/notes, historicalLC flags не LPSentry. AGAR/status/execution создаётся только при определённом product/meaning, ambiguous0/1scale не guessed.
+- Supply-to NCOC/TCO/KPO→validated works-with; surveys without PDFs не surveyed/tier2; ~320 PDFs match by filename/stable-reference → BIN из предоставленной CSV/XLSX/XLS mapping-таблицы. Извлечение BIN из PDF/OCR исключено; неоднозначные mapping вручную после IMBC confirmation. Internal columns→engagement/events/productcontext/notes, historicalLC flags не LPSentry. AGAR/status/execution создаётся только при определённом product/meaning, ambiguous0/1scale не guessed.
 - Trial imports repeatable, no emails, everyrow logged. Manufacturer Draft hidden до producer completion/send+SMEverification; NDA при первом migrated sign-in. Invite all migrated после приёмки; missing/invalid emails report; password retry existinglogin не сбрасывает profile/status и не повторяет contact mailing.
 - LPS:57 populatedrows, Sheet1 A1:S58, отдельный source_kind/lps migration. SME approves company identity/scope, dictionary aliases, pairing contacts/locations/classifications; source order не relation. Stable dataset/sheet/row/resolved-scope migration keys, approved splits/merges retainall source links, no duplicates between trials.
-- LPS planned launch year/quarter/range/TBD/blank и decimals/business dates сохраняют precision; unknown не 0/date/complete. Missing requiredcompany/scope/status resolved beforeloading; optionalunknown допускается с issue. Ни одна source row не теряется и не размножается. После accepted migration обычный SMECRUD, без recurring import screen/emails/accounts.
+- LPS planned launch year/quarter/range/TBD/blank и decimals/business dates сохраняют precision; unknown не 0/date/complete. Missing requiredcompany/scope/status resolved beforeloading; optionalunknown допускается с issue. Ни одна source row не теряется и не размножается. После accepted migration обычный IMBC staff CRUD по LPS-03, без recurring import screen/emails/accounts.
 
 **Приёмка.** Manufacturer ACC-03:100%rows accounted, sample≥200records и <5%field differences. LPS ACC-07 отдельно:review all57rows, approved reconciliation/mappings/issues и exactsource counts без lost/duplicate rows; every split/merge traced. Manufacturervisibility и LPSaccess принимаются независимо.
 
@@ -438,7 +438,7 @@
 - Forecast XLSX по DBML: consolidated A:J, required headers и usable values; source id/KPVED optional, FPAL ignored/not stored; description не copy, missing quantity не zero, decimals preserved, negatives flagged до IMBC correction/explicit acceptance. Horizon version metadata: current 2031, future 2035 не annual columns. Rowcount от actual source, не утверждённые 85/120 тысяч.
 - Forecast hierarchy commodity/subcommodity отдельно от manufacturerA–E/type; approved M:N forecast_classification только для cross-filters. Unmapped rows usable в own hierarchy. Units через approved aliases, без guessed conversion. Поиск/filters/TN VED prefix, без download/print.
 - Раздел технических требований: товарная группа → продукт → STR или KTRE в просмотрщике с масштабом и прокруткой. Без скачивания и печати. Из строки прогноза файл не открывается.
-- AGAR request: verified manufacturerproduct имеет active approved product_line_requirements_product mapping к current verified product revision, active requirements product и current scannedSTR. Name/group/TN VED совпадение не создаёт mapping; substantive changes требуют recheck. Без STR new request отказ, historicalAGAR records сохраняются. Request SMElist, без email (IMBC-25).
+- AGAR request: verified manufacturerproduct имеет active approved product_line_requirements_product mapping к current verified product revision, active requirements product и current live IMBC-owned STR. Name/group/TN VED совпадение не создаёт mapping; substantive changes требуют recheck. Без STR new request отказ, historicalAGAR records сохраняются. Scan gate исключён. Request SMElist, без email (IMBC-25).
 - Версии NDA: новая версия закрывает оба раздела до повторного принятия.
 - Подписки: название, формат, период; файл со ссылкой в письме, без вложения; файлы за 90 дней; пауза при неактивности аккаунта и предупреждение за 14 дней.
 
@@ -456,7 +456,7 @@
 
 **Работы.**
 
-- В сборочный конвейер добавляются сквозные сценарии шести ролей. Отдельно — нагрузочный тест по NFR-07 и проверка по списку OWASP ASVS 5.0 Level 2.
+- В сборочный конвейер добавляются сквозные сценарии шести ролей. Отдельно — нагрузочный тест с зафиксированными client/network/server/external-service условиями по NFR-07 и согласованный mapping определённого subset security controls к ASVS items и доказательствам по NFR-11; полный Level 2 или certification не заявляются.
 - Поставка по разделу 13: манифесты Kubernetes и пайплайны, секреты, мониторинг, резервное копирование и показ восстановления, инструкции по эксплуатации.
 - Описание API в OpenAPI 3.1, включая pull API. Словарь данных, который утверждает IMBC до миграции.
 - Языковые файлы: английский исходный, казахский и русский — машинный перевод, вычитывает IMBC.
@@ -512,8 +512,8 @@
 
 ## 10. Ближайшие шаги
 
-1. Snapshot v1.4/DBML и карта 288 ID применены; старые источники сохранены как история. Проверять содержание, а не только существование ID.
-2. Локальные suites, итоговое Astra-ревью и браузерная приёмка Task 12 завершены. До открытия producer uploads закрыть полный реальный офисный corpus/ClamAV; отдельный R1 contract0011 проверить на стенде до выката R2.
+1. Snapshot v1.4/DBML от 16 ноября и карта 288 ID применены; старые источники сохранены как история. DATA-07 исключён, LPS-09 добавлен. Проверять содержание, а не только существование ID; новый file/LPS cutover ещё открыт.
+2. Исторические локальные suites, Astra и браузер Task 12 сохранены. Полный реальный офисный corpus и private storage/version-binding проверки остаются; malware scan не входит в новую приёмку. Завершить отдельную совместимую file-дельту и расширенные LPS permissions/operator projection по текущему источнику.
 3. Задачи 5–11 [плана 3а v1.4](superpowers/plans/2026-11-16-stage-3a-spec-v1.4.md) реализованы. Внешние проверки Task 12 остаются в handoff; отправка и пять остальных форм относятся к 3б/3в. Ручных акционеров и подтверждения Adata нет.
 4. После завершённой локальной приёмки 3а детализировать 3б (файлы и общие сертификаты) и 3в (отправка/состояния); параллельно готовить 4а (контракты источников) и 6б (LPS).
 5. Проверить дельты прежних этапов 0–2 к v1.4, включая повторное приглашение по MAN-02; legal texts, справочники, CI и приёмка шести ролей на стенде остаются незавершёнными до фактических результатов.
@@ -528,13 +528,13 @@
 | А    | 13     | AUTH 01–05, 08–10; MAN 02; NOT 01–03; LANG 01                                                       |
 | 0    | 7      | GEN 03–04, 07–08, 10; UPD 06; IMBC 19                                                               |
 | 1    | 18     | GEN 01–02, 05–06; AUTH 06–07; MAN 01, 03, 05; FC 02; ADM 01–03, 05–06; NOT 23–24, 26                |
-| 2    | 15     | GEN 09; ADM 08–09, 11; NOT 18–21; DATA 02–07; NFR 09                                                |
+| 2    | 14     | GEN 09; ADM 08–09, 11; NOT 18–21; DATA 02–06; NFR 09                                                |
 | 3    | 38     | GEN 11; MAN 04, 09–11, 13–15, 17–24, 26–46; DATA 01                                                 |
 | 4а   | 8      | IMBC 10–12, 14; EXT 01–02, 04–05                                                                    |
 | 4б   | 6      | MAN 06–08, 12, 25; IMBC 07                                                                          |
 | 5    | 34     | MAN 16; REV 01–09; IMBC 01–03, 05–06, 08–09, 13, 15, 20–24, 26; EXT 03; NOT 04–05, 10–11, 27–29, 34 |
 | 6    | 53     | GEN 12–13; IMBC 04, 16–18; ADM 07; OPR 01–14, 19–38; NOT 07–08, 13–14, 32–33; DATA 09–14            |
-| 6б   | 13     | LPS 01–08; OPR 39–43                                                                                |
+| 6б   | 14     | LPS 01–09; OPR 39–43                                                                                |
 | 7    | 18     | UPD 01–05; REV 10; NOT 06, 12, 15–16, 30–31; LANG 02; AUD 01–04; DATA 08                            |
 | 8    | 21     | ADM 04; NOT 22, 25; MIG 01–16; ACC 03, 07                                                           |
 | 9    | 22     | FC 01, 03–10; IMBC 25; ADM 10, 12–15; OPR 15–18; NOT 09, 17, 35                                     |

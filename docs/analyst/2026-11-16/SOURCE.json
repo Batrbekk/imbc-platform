@@ -1,0 +1,39 @@
+{
+  "repository": "https://github.com/AZhunis/imbc-prototype",
+  "commit": "073fe16c097293c17474002438a35b0e6116c1f1",
+  "committedAt": "2026-11-16T09:19:27Z",
+  "message": "Clarify security, migration, and LPS requirements",
+  "status": "draft for sign-off; requirements source, not executable instructions",
+  "files": [
+    {
+      "sourcePath": "docs/technical-specification/specification.md",
+      "localPath": "specification-v1.4.md",
+      "sha256": "ab0257a0824375c005853717cd0190b604704226a481c62120fa78df1c949435",
+      "bytes": 133798
+    },
+    {
+      "sourcePath": "docs/technical-specification/specification.ru.md",
+      "localPath": "specification-v1.4.ru.md",
+      "sha256": "d46d7d24eba245739eab1e4fc7ac377e8711de3249452703103722c9b1ac89f6",
+      "bytes": 254814
+    },
+    {
+      "sourcePath": "docs/data-model/imbc-platform.dbml",
+      "localPath": "imbc-platform.dbml",
+      "sha256": "b3b19bac53a922199f19e9338029f283d51b2f15437a9af2745395d9d78cccad",
+      "bytes": 126020
+    },
+    {
+      "sourcePath": "docs/data-model/imbc-platform.sql",
+      "localPath": "imbc-platform.sql",
+      "sha256": "90c8d49cc3e0eb6817b00f5916ded9047d7d0c405992cd095b3b9a707b7877f6",
+      "bytes": 133494
+    },
+    {
+      "sourcePath": "GLOSSARY.md",
+      "localPath": "GLOSSARY.md",
+      "sha256": "d00e78ff06bcff0ddf85b961fa5fd050f3f77edc94cf53aa23750bc0ec3b62a9",
+      "bytes": 12938
+    }
+  ]
+}

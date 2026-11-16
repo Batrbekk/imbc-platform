@@ -19,7 +19,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const DEFAULT_SPEC = 'docs/analyst/2026-11-13/specification-v1.4.md';
+export const DEFAULT_SPEC = 'docs/analyst/2026-11-16/specification-v1.4.md';
 export const BASELINE_FILE = 'scripts/requirements-baseline.json';
 
 // Префиксы разделов текущей спецификации. При запуске скрипта префиксы берутся

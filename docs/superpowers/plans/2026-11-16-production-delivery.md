@@ -2,7 +2,7 @@
 
 Основание: запрос владельца 16 ноября «продолжай по всему плану до production состояния» и уточнение: инфраструктура собирается в Azure по архитектуре проекта; Azure CLI авторизован, GitLab пока отсутствует. Это разрешение на продолжение разработки всех этапов. Дополнительное решение владельца: пока используется только существующий dev-сервер Azure; новых платных ресурсов не создавать. На нём разрешена уменьшенная переносимая поставка по архитектуре. Production-серверы предоставит заказчик; один dev-узел не доказывает HA/SLO production. Реальные письма тестируются только на `.local`; интеграции разрабатываются на записанных ответах до согласованной проверки оплаченных модулей.
 
-Источник: v1.4 от 13 ноября, DBML и ответы 13 ноября, ревизия `8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6` (повторно проверена 16 ноября). Полная карта 288 требований остаётся в [roadmap](../../development-roadmap.md). У источника ещё статус draft for sign-off: его утверждение и содержательные вводные IMBC не подменяются технической приёмкой.
+Источник: v1.4 и DBML от 16 ноября, ревизия `073fe16c097293c17474002438a35b0e6116c1f1`. [Исходный снимок](../../analyst/2026-11-16/SOURCE.json), [содержательная сверка](../../handoff/2026-11-16-spec-source-update.md). Ответы 13 ноября используются там, где новая редакция не изменила контракт. Полная карта 288 действующих требований остаётся в [roadmap](../../development-roadmap.md): прежний DATA-07 удалён, LPS-09 добавлен. У источника ещё статус draft for sign-off: его утверждение и содержательные вводные IMBC не подменяются технической приёмкой. Исторические checked пункты file/scan и LPS ниже описывают прежний источник; новую дельту не закрывают.
 
 Исходный код: `653ba1b`, ветка `feat/stage-3-profile`, `.claude/worktrees/stage-3`. Срез 3а принят локально: 1651 тест, независимое ревью GPT-6 Astra, браузер и R1 compatibility. Внешняя приёмка файлов и Azure открыта. Работа идёт последовательными коммитами; schema/UI/инфраструктура имеют отдельных владельцев, общий API и интеграция — у координатора.
 
@@ -13,7 +13,7 @@
 - Интерфейс и письма en/ru/kk проходят сценарии шести ролей. Производитель проходит регистрацию → заполнение → отправку → возврат → повторную отправку → Verified → изменение.
 - Источники и миграции сохраняют происхождение, leading zeros и связи; неуспешное чтение не является finding. Проверенные внешние поля не меняются на непроверенные.
 - Kubernetes-поставка с GitLab CI, Argo CD, Vault/OpenBao, observability, backup/restore и эксплуатационными документами проверена в Azure; реальные расходы и доступы соответствуют согласованной конфигурации.
-- Полный Office/PDF corpus, ClamAV/storage, 20–25 MB upload, нагрузка NFR-07, ASVS, восстановление и UAT пройдены на фактической поставке. Настоящие legal/NDA тексты, релизные справочники и интеграционные mappings предоставлены и утверждены владельцами данных.
+- Полный Office/PDF corpus, private storage, 20–25 MB upload, нагрузка с зафиксированными условиями NFR-07, согласованный subset security controls NFR-11, восстановление и UAT пройдены на фактической поставке. Malware scan/quarantine/scan blocking исключены; старая scan-dependent реализация должна быть обновлена. Настоящие legal/NDA тексты, релизные справочники и интеграционные mappings предоставлены и утверждены владельцами данных.
 
 Локальные checkpoints 3б: `b3b2222` backend, `8d48bbd` UI; 1962 теста, build/typecheck/lint/generate/requirements и Astra Approved. [Факты и незавершённая приёмка](../../handoff/2026-11-16-stage3b-continuation.md). На существующем Azure dev развёрнут отдельный свежий K3s-стенд из `8d48bbd`: девять Ready pods, миграции 0000–0019, private storage/SMTP и реальные health/network/ClamAV PONG проверки. [Проверка фактической поставки](../../deployment/verification-2026-11-16-stage3b-k3s.md). Старый публичный релиз `335ef02` сохранён; старый Git HEAD и synced marker имеют отдельные значения. 3в на сервер ещё не поставлен; browser/corpus/restore/R1/edge остаются отдельными шагами.
 
@@ -35,7 +35,8 @@
 - [x] Формы personnel/certificates/documents/products/production, существующие Base UI компоненты, partial save/409/dirty guard, en/ru/kk.
 - [x] Поддержка notification recipient parts этапа 3: одна явно выбранная contact revision, без смешивания COW-истории; работоспособна для Draft/Returned/Verified по событию.
 - [x] Интеграционная приёмка 100% шести обязательных секций, optional production, чужих файлов/профилей, file-only re-upload COW, retired dictionary values и shared certificate/site isolation; GPT-6 Astra review и браузер 1280/390.
-- [ ] Настоящий свежий корпус Office/LibreOffice/Google Docs/PDF и ClamAV/storage до открытия upload на стенде.
+- [ ] Настоящий свежий корпус Office/LibreOffice/Google Docs/PDF и private storage/version-binding на актуальной поставке.
+- [ ] Совместимая дельта файлов по источнику 16 ноября: upload/storage/worker/DTO/native guards без scan/quarantine; точные исторические версии, purpose/type/size/tenant checks и audit сохраняются. Старые bytes и metadata сверяются; hook образца оргструктуры и Survey/NOT-11 поколения обновляются явно, без переписывания журналов.
 
 - [x] Durable append-only `profile_file_history`, exact versions, retained replaced files, transaction locks and batched captures; upload-state API and safe orphan cleanup after persisted tombstone/all-FK checks. Storage-key orphan sweep after failed cleanup without DB object remains Stage 10.
 - [x] Четыре release-единицы годовой мощности MAN-23: pieces/tonnes/metres/sets, миграция отдельного `unit` справочника; не использовать «per_year» как пятую единицу.
@@ -76,12 +77,13 @@
 ## 5/6/6б. Рабочие кабинеты
 
 - [x] SME assignment/open/decisions/return/verify и pending changes workflow; exact frozen sections, persisted policy/assignee/CAS, immutable recipient/result context, реальные NOT04/05/10. MAN43/NOT29 сохраняет rejected/partial decisions после Unlock; NOT31 сдвигает квартал по accepted changed revisions. Bounded Astra Approved:199independentAPI/153UI/86contracts +5actualSMTP cases/16.local messages; owner151targeted/536web, exactGit checkpoint2002API/76separate-envskips/368contracts +24current-source. [Срез и открытая production-приёмка](../../handoff/2026-11-16-stage5-integration.md).
-- [ ] Site survey/DD/enhanced DD, IMBC engagements/status/shortlist/execution, records и совместимые миграции. Survey0029 records/requests/uploads/exact-report access/durable generations, SQL0030 scheduler/NOT11/SMTP и final composed UI bounded accepted locally: full API2113PASS/108 separate-environment skips, web630/contracts376, Astra635web/41API-DI. [Proof и оставшаяся приёмка](../../handoff/2026-11-16-stage5-site-surveys.md): exact Git checkpoint `3eeab65` опубликован с remote match, production acceptance открыта. Backend и UI внутренних записей ведутся отдельно по [конкретному плану](2026-11-16-stage5-imbc-records.md); checkbox не закрывает весь этот объём.
+- [ ] Site survey/DD/enhanced DD, IMBC engagements/status/shortlist/execution, records и совместимые миграции. Survey0029 records/requests/uploads/exact-report access/durable generations, SQL0030 scheduler/NOT11/SMTP и final composed UI bounded accepted locally: full API2113PASS/108 separate-environment skips, web630/contracts376, Astra635web/41API-DI. [Proof и оставшаяся приёмка](../../handoff/2026-11-16-stage5-site-surveys.md): exact Git checkpoint `3eeab65` опубликован с remote match, production acceptance открыта. Внутренние записи приняты в Root49 localcomposition, checkpoint `5435d0d`; final696web/380contracts/schema/build/types/lint, actual37HTTP/17browser и independent Astra gates описаны в [handoff](../../handoff/2026-11-16-stage5-imbc-records.md). AGAR/UI и новая file-дельта не закрыты; общий checkbox остаётся открытым.
 - [ ] Verified projection, tier 1/2, visibility green/amber, update status, certificate validity, multi-site region facets/distinct manufacturers.
 - [ ] Operator company/files/works-with/visit/note/request с собственной организацией; observer разрешённый readonly без focal/confidential/export/API.
 - [ ] Director: все profiles в company/catalog, visible verified dashboard; administrator только разрешённые account/reference действия.
 - [x] Отдельный LPS backend: SME CRUD, stable records, operator/director readonly API/dashboard, SQL paired filters/totals/typed sort, logical deletion/full audit; без manufacturer/NDA/export/pull API. Migration0025 bounded Approved GPT-6 Astra после двух P2 fixes;63 LPS PG/HTTP cases прошли,112 affected reference cases и340 contracts имеют отдельные gates. [Подробности и открытая приёмка](2026-11-16-stage6b-lps.md).
 - [x] LPS UI: SME редактор/company reuse, operator/director readonly details/table/dashboard, URL filters/drilldown, en/ru/kk, sticky company/product context и mobile390 editor.429 web cases; Astra independently69 web +49 auth и visual re-review, оба P2 закрыты. [Срез](2026-11-16-stage6b-lps.md).
+- [ ] Дельта LPS по редакции 16 ноября: SME/administrator/director full business CRUD; read-only audit/evidence для staff; отдельные operator DTO/search/filter/sort/dashboard/UI только с полями согласованного LPS-09 design. Предыдущие два checked пункта относятся к прежним правам, новую матрицу не принимают.
 - [ ] LPS actual PostgreSQL browser/runtime/load acceptance на предназначенной поставке. Все57 source rows и import provenance — этап8.
 - [ ] Полные API/OpenAPI/UI/permissions/audit tests и приёмка шести ролей, нагрузка NFR-07.
 
@@ -89,7 +91,7 @@
 
 - [ ] Quarter confirmations, expiry schedule generations, active/outdated/unresponsive rules, NOT reminders/deadlines/Almaty time и полный каталог событий.
 - [ ] Audit UI по разрешённому scope, safe full diff/history, отсутствие notification inbox по ТЗ.
-- [ ] Manufacturer/PDF migration staging/reconciliation/approval; отдельная LPS migration с 57 source rows; неопределённые связи в review queue, не silent positional mapping.
+- [ ] Manufacturer/PDF migration staging/reconciliation/approval; PDF filename/reference → BIN только по CSV/XLSX/XLS mapping без PDF parsing/OCR; отдельная LPS migration с 57 source rows; неопределённые связи в review queue, не silent positional mapping.
 - [ ] Search exports/subscriptions/pull API по разрешённым verified projections, credentials/revocation/data class/expiry/privacy.
 - [ ] Forecast horizon 2031, approved STR product mappings, KTRE/AGAR/CDP контракты, разрешённые документы и новые NDA versions; без Release 1 подмены scope.
 - [ ] Воспроизводимая миграционная приёмка и Release 2 сценарии, которые требуют данных IMBC/операторов.
@@ -98,10 +100,10 @@
 
 - [x] Read-only Azure inventory и конкретный topology/cost plan: сохранить существующий dev-стенд, определить production/UAT, network/storage/identity/DNS/backup/SKU.
 - [ ] GitLab CI pipeline со строгими Node 26/contracts/web/API/PG checks и container images; отсутствующий GitLab разворачивается или подключается по выбранной конфигурации.
-- [ ] Kubernetes manifests/Helm, API/worker/web/Keycloak/PostgreSQL/queues/storage/ClamAV, readiness/resource limits/rollout/migrations, Argo CD и secrets из Vault/OpenBao.
+- [ ] Kubernetes manifests/Helm, API/worker/web/Keycloak/PostgreSQL/queues/private storage, readiness/resource limits/rollout/migrations, Argo CD и secrets из Vault/OpenBao; исключённый scanner не становится обязательным компонентом новой поставки.
 - [ ] Prometheus/Grafana/Loki/Alloy/OTel, dashboards/alerts/log redaction; backup PostgreSQL/object/identity/Vault, PITR и реальная restore drill.
-- [ ] ASVS/access review, rotation/least privilege/TLS/CSP/rate limits, dependency/container checks, limits/retention/orphan cleanup.
-- [ ] Production/UAT deploy, real role/login/upload/scan/mail tests в согласованном scope; k6 2000 profiles/200 concurrent users, SLO из NFR-07.
+- [ ] Согласованный NFR-11 subset mapping → ASVS items → доказательства; access/session/input/CSRF/output/formula/HTTPS/secrets/audit checks, rotation/least privilege, dependency/container checks и limits/retention/orphan cleanup по актуальному scope.
+- [ ] Production/UAT deploy, real role/login/upload/private-file/mail tests в согласованном scope; k6 2000 profiles/200 concurrent users, SLO и зафиксированные client/network/server/external-service условия NFR-07.
 - [ ] Runbooks, operator ownership, incident/rollback/restore, approved legal/reference/source/migration inputs, IMBC UAT/sign-off и окончательная карта доказательств 288 требований.
 
 ## Текущие владельцы и вводные
