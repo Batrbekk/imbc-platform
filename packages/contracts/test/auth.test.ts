@@ -64,6 +64,7 @@ describe('страница после входа: destinationFor', () => {
     ['/reviews', 'review.take'],
     ['/admin/accounts', 'accounts.manage'],
     ['/references', 'reference.read'],
+    ['/lps', 'lps.read'],
   ];
 
   it.each(ROLES)('без сохранённого адреса %s попадает на стартовую страницу', (role) => {
@@ -133,6 +134,16 @@ describe('страница после входа: destinationFor', () => {
     expect(destinationFor('administrator', '/companies/x?y')).toBe('/admin/accounts');
     // Путь сравнивается декодированным, как у роутера.
     expect(destinationFor('manufacturer', '/%63ompanies/x')).toBe('/profile');
+  });
+
+  it('LPS и компании LPS доступны только SME, оператору и директору, включая закодированный путь', () => {
+    for (const role of ROLES) {
+      const allowed = ['expert', 'operator', 'director'].includes(role);
+      for (const saved of ['/lps', '/lps/', '/lps?programme=LC&programme=LPS#results', '/lps/companies/x', '/%6cps/companies/?page=2'])
+        expect(destinationFor(role, saved), `${role} ${saved}`).toBe(allowed ? saved : roleHome(role));
+    }
+    expect(destinationFor('manufacturer', '/lps-more')).toBe('/lps-more');
+    expect(destinationFor('observer', '/lps%2Fcompanies')).toBe('/lps%2Fcompanies');
   });
 
   it('страница сравнивается по сегментам: вложенный путь — та же страница, похожее имя — нет', () => {

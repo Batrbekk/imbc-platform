@@ -304,8 +304,8 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
 
     await screen.findByRole("heading", { level: 1, name: en.reviews.title });
     const menu = screen.getAllByRole("link").filter((link) => link.dataset.sidebar === "menu-button");
-    expect(menu.map((link) => link.textContent)).toEqual([en.nav.reviews, en.nav.catalog, en.nav.account]);
-    expect(menu.map((link) => link.getAttribute("href"))).toEqual(["/reviews", "/catalog", "/account"]);
+    expect(menu.map((link) => link.textContent)).toEqual([en.nav.reviews, en.nav.catalog, en.nav.lps, en.nav.account]);
+    expect(menu.map((link) => link.getAttribute("href"))).toEqual(["/reviews", "/catalog", "/lps", "/account"]);
     expect(menu[0]!.hasAttribute("data-active")).toBe(true);
     expect(menu[1]!.hasAttribute("data-active")).toBe(false);
 
@@ -428,10 +428,10 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
   it("меню по матрице прав; у оператора, наблюдателя и директора дашборд — первый пункт (GEN-10, OPR-31)", async () => {
     // Ожидаемые пункты; сверяются и с PolicyMatrix, чтобы тест не разошёлся с ней.
     const expected: [Me["user"]["role"], string[]][] = [
-      ["operator", ["/dashboard", "/catalog", "/account"]],
+      ["operator", ["/dashboard", "/catalog", "/lps", "/account"]],
       ["observer", ["/dashboard", "/catalog", "/account"]],
-      ["director", ["/dashboard", "/catalog", "/references", "/account"]],
-      ["expert", ["/reviews", "/catalog", "/account"]],
+      ["director", ["/dashboard", "/catalog", "/lps", "/references", "/account"]],
+      ["expert", ["/reviews", "/catalog", "/lps", "/account"]],
       ["manufacturer", ["/profile", "/account"]],
       ["administrator", ["/admin/accounts", "/references", "/account"]],
     ];
@@ -442,6 +442,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
         can(role, "review.take") && "/reviews",
         can(role, "catalog.search") && "/catalog",
         can(role, "profile.edit") && "/profile",
+        can(role, "lps.read") && "/lps",
         can(role, "accounts.manage") && "/admin/accounts",
         can(role, "reference.read") && "/references",
         "/account",

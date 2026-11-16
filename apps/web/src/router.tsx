@@ -59,6 +59,16 @@ export const routes: RouteObject[] = [
         ),
         children: [
           {
+            path: "lps",
+            handle: { title: "lps.title" } satisfies AppRouteHandle,
+            lazy: lazyPage(() => import("@/routes/app/lps"), (m) => m.LpsPage),
+          },
+          {
+            path: "lps/companies",
+            handle: { title: "lps.companies" } satisfies AppRouteHandle,
+            lazy: lazyPage(() => import("@/routes/app/lps-companies"), (m) => m.LpsCompaniesPage),
+          },
+          {
             // Очередь проверки SME (REV-01, REV-04).
             path: "reviews",
             handle: { title: "reviews.title" } satisfies AppRouteHandle,

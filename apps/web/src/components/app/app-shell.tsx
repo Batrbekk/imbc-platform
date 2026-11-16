@@ -111,6 +111,7 @@ export function AppShell() {
       active: ["/catalog", "/companies"],
     },
     { href: "/profile", label: t("nav.profile"), icon: BuildingIcon, show: !!can(role, "profile.edit") },
+    { href: "/lps", label: t("nav.lps"), icon: BuildingIcon, show: !!can(role, "lps.read") },
     {
       href: "/admin/accounts",
       label: t("nav.adminAccounts"),
