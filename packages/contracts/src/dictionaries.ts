@@ -19,6 +19,9 @@ export const DICTIONARY_CODES = [
   'certificate_type',
   'document_type',
   'unit',
+  'country',
+  'programme',
+  'lps_status',
 ] as const;
 export type DictionaryCode = (typeof DICTIONARY_CODES)[number];
 
@@ -66,6 +69,9 @@ export const DICTIONARY_CODE_PATTERNS: Record<DictionaryCode, RegExp> = {
   certificate_type: GENERIC_CODE,
   document_type: GENERIC_CODE,
   unit: GENERIC_CODE,
+  country: /^[A-Z]{2}$/,
+  programme: /^(LC|LPS)$/,
+  lps_status: GENERIC_CODE,
 };
 
 /**

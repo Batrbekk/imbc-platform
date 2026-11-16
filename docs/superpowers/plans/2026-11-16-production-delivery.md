@@ -77,7 +77,8 @@
 - [ ] Verified projection, tier 1/2, visibility green/amber, update status, certificate validity, multi-site region facets/distinct manufacturers.
 - [ ] Operator company/files/works-with/visit/note/request с собственной организацией; observer разрешённый readonly без focal/confidential/export/API.
 - [ ] Director: все profiles в company/catalog, visible verified dashboard; administrator только разрешённые account/reference действия.
-- [ ] Отдельный LPS: SME CRUD, stable records, operator/director readonly table/dashboard, свои filters/totals; без manufacturer/NDA/export/pull API.
+- [x] Отдельный LPS backend: SME CRUD, stable records, operator/director readonly API/dashboard, SQL paired filters/totals/typed sort, logical deletion/full audit; без manufacturer/NDA/export/pull API. Migration0025 bounded Approved GPT-6 Astra после двух P2 fixes;63 LPS PG/HTTP cases прошли,112 affected reference cases и340 contracts имеют отдельные gates. [Подробности и открытая приёмка](2026-11-16-stage6b-lps.md).
+- [ ] LPS UI: SME редактор и company reuse, operator/director readonly table/dashboard, URL filters/drilldown, en/ru/kk, actual role/browser/runtime/load acceptance. Все57 source rows и import provenance — этап8.
 - [ ] Полные API/OpenAPI/UI/permissions/audit tests и приёмка шести ролей, нагрузка NFR-07.
 
 ## 7/8/9. Актуальность, миграция, Release 2

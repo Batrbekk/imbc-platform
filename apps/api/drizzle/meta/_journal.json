@@ -176,6 +176,13 @@
       "when": 1794805150259,
       "tag": "0024_stage4a_eondiris",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1794807186802,
+      "tag": "0025_stage6b_lps",
+      "breakpoints": true
     }
   ]
 }

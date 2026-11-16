@@ -42,6 +42,10 @@ export const DICTIONARY_USAGES: Record<DictionaryCode, readonly DictionaryUsage[
   ],
   document_type: [{ table: 'documents', column: 'type_code', array: false }],
   unit: [],
+  // LPS references are UUID FKs; database 23503 is translated to entry_in_use by the service.
+  country: [],
+  programme: [],
+  lps_status: [],
 };
 
 /**

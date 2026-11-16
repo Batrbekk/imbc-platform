@@ -1,0 +1,6 @@
+{
+  "dictionary": "country",
+  "status": "specification",
+  "source": "v1.4 DBML lps_company_country.country_id: ISO 3166-1 alpha-2; Kazakhstan is explicitly permitted. Additional countries require approved dictionary entries and migration mappings.",
+  "entries": [{ "code": "KZ", "names": { "kk": "Қазақстан", "ru": "Казахстан", "en": "Kazakhstan" }, "sortOrder": 0 }]
+}

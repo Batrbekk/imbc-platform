@@ -173,8 +173,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
       'certificate_type',
       'document_type',
       'unit',
+      'country',
+      'programme',
+      'lps_status',
     ]);
-    expect(results.map((r) => r.inserted)).toEqual([3, 5, 3, 9, 4, 4]);
+    expect(results.map((r) => r.inserted)).toEqual([3, 5, 3, 9, 4, 4, 1, 2, 4]);
 
     // MAN-09: правовые формы — LLP, LLC, JSC (полный перечень — IMBC).
     const legalForms = await entries('legal_form');
@@ -257,7 +260,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
   it('повторная загрузка ничего не добавляет; название, исправленное администратором, не возвращается; недостающий перевод добавляется', async () => {
     await loadReferenceDirectory(db, RELEASE, 'release');
     const first = await counts();
-    expect(first).toEqual({ entries: 28, translations: 84, audit: 6 });
+    expect(first).toEqual({ entries: 35, translations: 105, audit: 9 });
 
     // Администратор правит названия, порядок, обязательность и выводит значение из оборота.
     await pool.query(
@@ -838,8 +841,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
       );
 
       const results = await loadReferenceDirectory(asApp, RELEASE, 'release');
-      expect(results.reduce((sum, r) => sum + r.inserted, 0)).toBe(28);
-      expect(await counts()).toEqual({ entries: 28, translations: 84, audit: 6 });
+      expect(results.reduce((sum, r) => sum + r.inserted, 0)).toBe(35);
+      expect(await counts()).toEqual({ entries: 35, translations: 105, audit: 9 });
       // Повтор под той же ролью.
       expect((await loadReferenceDirectory(asApp, RELEASE, 'release')).every((r) => r.inserted === 0)).toBe(true);
 
@@ -887,6 +890,9 @@ describe('файлы справочников в репозитории', () => 
       'release/certificate_type': 9,
       'release/document_type': 4,
       'release/unit': 4,
+      'release/country': 1,
+      'release/programme': 2,
+      'release/lps_status': 4,
       'provisional/region': 9,
       'provisional/oked': 4,
       'provisional/tn_ved': 4,

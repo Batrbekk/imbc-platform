@@ -134,6 +134,9 @@ describe('файлы и справочники (DBML, ADM-08, DATA-05, DATA-07)'
       'certificate_type',
       'document_type',
       'unit',
+      'country',
+      'programme',
+      'lps_status',
     ]);
   });
 });
@@ -203,7 +206,7 @@ describe('файлы справочников: схема, шаблоны код
     expect(referenceFileSchema.safeParse(file({ code: 'X', names: { ru: 'x' }, extra: 1 })).success).toBe(false);
     // Неизвестный справочник, неизвестный статус и пустой список.
     expect(
-      referenceFileSchema.safeParse({ ...file({ code: 'X', names: { ru: 'x' } }), dictionary: 'country' }).success,
+      referenceFileSchema.safeParse({ ...file({ code: 'X', names: { ru: 'x' } }), dictionary: 'unknown_dictionary' }).success,
     ).toBe(false);
     expect(referenceFileSchema.safeParse({ ...file({ code: 'X', names: { ru: 'x' } }), status: 'draft' }).success).toBe(
       false,

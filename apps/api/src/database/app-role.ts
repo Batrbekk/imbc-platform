@@ -27,6 +27,10 @@ export async function applyAppRoleGrants(pool: pg.Pool, role: string): Promise<v
     const registry = await client.query<{ exists: boolean }>(
       "SELECT to_regclass('e_ondiris_record') IS NOT NULL AS exists",
     );
+    // Class G supports logical deletion only: preserve company/entry facts and their audit subjects.
+    const lps = await client.query<{ exists: boolean }>("SELECT to_regclass('lps_entry') IS NOT NULL AS exists");
+    if (lps.rows[0]?.exists)
+      await client.query(`REVOKE DELETE, TRUNCATE ON lps_company, lps_entry FROM ${name}`);
     if (registry.rows[0]?.exists) {
       await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON e_ondiris_record FROM ${name}`);
       await client.query(`GRANT UPDATE(is_current) ON e_ondiris_record TO ${name}`);

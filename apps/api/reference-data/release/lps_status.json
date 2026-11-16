@@ -1,0 +1,19 @@
+{
+  "dictionary": "lps_status",
+  "status": "specification",
+  "source": "v1.4 LPS-04: initial manual statuses; no transition workflow.",
+  "entries": [
+    { "code": "planning", "names": { "kk": "Жоспарлау", "ru": "Планирование", "en": "Planning" }, "sortOrder": 0 },
+    {
+      "code": "in_process",
+      "names": { "kk": "Іске асыру барысында", "ru": "В процессе", "en": "In process" },
+      "sortOrder": 1
+    },
+    {
+      "code": "localized",
+      "names": { "kk": "Жергіліктендірілген", "ru": "Локализовано", "en": "Localized" },
+      "sortOrder": 2
+    },
+    { "code": "on_hold", "names": { "kk": "Тоқтатыла тұр", "ru": "Приостановлено", "en": "On hold" }, "sortOrder": 3 }
+  ]
+}

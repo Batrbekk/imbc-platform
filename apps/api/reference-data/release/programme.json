@@ -1,0 +1,9 @@
+{
+  "dictionary": "programme",
+  "status": "specification",
+  "source": "v1.4 LPS-02 and DBML lps_entry.source_type_id: LC and LPS are labels, with LPS the default.",
+  "entries": [
+    { "code": "LC", "names": { "kk": "LC", "ru": "LC", "en": "LC" }, "sortOrder": 0 },
+    { "code": "LPS", "names": { "kk": "LPS", "ru": "LPS", "en": "LPS" }, "sortOrder": 1 }
+  ]
+}
