@@ -30,8 +30,9 @@ export async function lockRegistrationIdentity(tx: Database, subject: string): P
 
 /**
  * Один поток регистрации и приглашения (AUTH-01): пользователь Keycloak → строки БД и задание письма
- * установки пароля (NOT-01) в одной транзакции → компенсация. Сначала IdP, затем БД: при сбое БД
- * пользователь Keycloak удаляется, а неудачное удаление ставится в `cleanup-identity`.
+ * установки пароля (NOT-01) в одной транзакции → компенсация. Сначала IdP, затем БД. Удаляется только
+ * доказанный после завершения транзакции orphan; потерянный ACK COMMIT не означает откат. Неизвестный
+ * исход проверки/удаления ставится в `cleanup-identity`, который повторяет блокировку и проверку ссылки.
  */
 @Injectable()
 export class IdentityProvisioningService {
@@ -42,6 +43,31 @@ export class IdentityProvisioningService {
     @Inject(QUEUE) private readonly queue: PgBoss,
     private readonly keycloak: KeycloakAdminService,
   ) {}
+
+  private async compensateCreatedIdentity(subject: string, registrationBin?: string): Promise<void> {
+    try {
+      await withQueueTransaction(this.pool, async (tx) => {
+        // An ACK can be lost after commit. Lock before taking a fresh reference snapshot; registration
+        // retains its BIN serialization too, while other invitation roles need only the identity lock.
+        await tx.execute(sql`set transaction isolation level read committed`);
+        await boundLockWaits(tx);
+        if (registrationBin)
+          await tx.execute(sql`select pg_advisory_xact_lock(2146711107, hashtext(${registrationBin}))`);
+        await lockRegistrationIdentity(tx, subject);
+        const [referenced] = await tx
+          .select({ id: userAccounts.id })
+          .from(userAccounts)
+          .where(eq(userAccounts.idpSubject, subject));
+        if (!referenced) await this.keycloak.deleteUser(subject);
+      });
+    } catch {
+      // Unknown lock/read outcome is not proof of an orphan. The worker uses the same identity lock
+      // and an exact-reference check, with only the subject in its durable payload.
+      await this.queue.send(QUEUES.cleanupIdentity, { subject }).catch(() => {
+        this.logger.error('Failed to enqueue identity cleanup');
+      });
+    }
+  }
 
   async provision<T>(
     identity: { email: string; firstName: string | null; locale: Locale },
@@ -66,6 +92,9 @@ export class IdentityProvisioningService {
     }
     try {
       return await withQueueTransaction(this.pool, async (tx, queueDb) => {
+        await tx.execute(sql`set transaction isolation level read committed`);
+        await boundLockWaits(tx);
+        await lockRegistrationIdentity(tx, subject);
         const result = await writeRows(tx, subject);
         // Доставка письма повторяется заданием: сбой SMTP не оставляет зафиксированную запись без письма.
         await this.queue.send(
@@ -76,13 +105,7 @@ export class IdentityProvisioningService {
         return result;
       });
     } catch (error) {
-      try {
-        await this.keycloak.deleteUser(subject);
-      } catch {
-        await this.queue.send(QUEUES.cleanupIdentity, { subject }).catch(() => {
-          this.logger.error('Failed to enqueue identity cleanup');
-        });
-      }
+      await this.compensateCreatedIdentity(subject);
       throw error;
     }
   }
@@ -151,25 +174,7 @@ export class IdentityProvisioningService {
       });
     } catch (error) {
       if (createdSubject) {
-        try {
-          const subject = createdSubject;
-          await locked(async (tx) => {
-            // A thrown COMMIT acknowledgment may follow a successful commit. Wait for the original
-            // BIN/identity transaction, then obtain a fresh snapshot; absence before the wait is unsafe.
-            await lockRegistrationIdentity(tx, subject);
-            const [referenced] = await tx
-              .select({ id: userAccounts.id })
-              .from(userAccounts)
-              .where(eq(userAccounts.idpSubject, subject));
-            if (!referenced) await this.keycloak.deleteUser(subject);
-          });
-        } catch {
-          // Unknown database/lock outcome is not proof of an orphan. Cleanup repeats the identity lock
-          // and exact-reference check; its payload contains no BIN/email/registration answers.
-          await this.queue.send(QUEUES.cleanupIdentity, { subject: createdSubject }).catch(() => {
-            this.logger.error('Failed to enqueue identity cleanup');
-          });
-        }
+        await this.compensateCreatedIdentity(createdSubject, bin);
       }
       if (provisioningConflict(error)) {
         // A uniqueness failure aborts its transaction. Only a fresh locked transaction can resolve it.
