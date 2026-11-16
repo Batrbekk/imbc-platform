@@ -92,6 +92,27 @@
       "when": 1794682857393,
       "tag": "0012_file_rejection_reason",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794781275744,
+      "tag": "0013_profile_rename",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1794781331354,
+      "tag": "0014_stage3_profile_model",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1794781511220,
+      "tag": "0015_stage3_profile_data",
+      "breakpoints": true
     }
   ]
 }

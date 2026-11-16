@@ -5,7 +5,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { PgBoss } from 'pg-boss';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { computeBinCheckDigit, type RegistrationRequest } from '@imbc/contracts';
+import { computeBinCheckDigit, SECTION_KINDS, type RegistrationRequest } from '@imbc/contracts';
 import { AuditService } from '../src/common/audit.service.js';
 import { ProblemException } from '../src/common/problem.js';
 import type { Env } from '../src/config/env.js';
@@ -381,6 +381,17 @@ describe.skipIf(!databaseUrl)('регистрация v1.3 и профиль п�
     expect(
       await db.query.profileSections.findMany({ where: eq(schema.profileSections.profileId, profile!.id) }),
     ).toHaveLength(8);
+    // The old eight rows remain only for R1 rollback. v1.4 exposes exactly seven authoritative sections.
+    const currentSections = await db
+      .select()
+      .from(schema.profileSection)
+      .where(eq(schema.profileSection.profileId, profile!.id));
+    expect(currentSections.map((section) => section.kind).sort()).toEqual([...SECTION_KINDS].sort());
+    expect(
+      currentSections.every(
+        (section) => section.organizationId === organization.id && section.workingRevisionId !== null,
+      ),
+    ).toBe(true);
     expect(await acceptancesOf(organization.id)).toEqual([
       {
         id: expect.any(String),

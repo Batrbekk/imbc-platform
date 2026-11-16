@@ -35,6 +35,11 @@ import { UPLOAD_SLOTS, UploadSlots } from './modules/files/upload-slots.js';
 import { HealthController } from './modules/health/health.controller.js';
 import { ProfilesController } from './modules/profiles/profiles.controller.js';
 import { ProfilesService } from './modules/profiles/profiles.service.js';
+import { ProfileSectionsController } from './modules/profiles/profile-sections.controller.js';
+import { ProfileSectionsService } from './modules/profiles/profile-sections.service.js';
+import { MainInformationHandler } from './modules/profiles/main-information.handler.js';
+import { ContactsHandler } from './modules/profiles/contacts.handler.js';
+import { defineSectionHandler, PROFILE_SECTION_HANDLERS } from './modules/profiles/section-handler.js';
 import { ManufacturerOnboardingService } from './modules/registration/onboarding.service.js';
 import { RegistrationController } from './modules/registration/registration.controller.js';
 import { ReviewsController } from './modules/reviews/reviews.controller.js';
@@ -57,6 +62,7 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     RegistrationController,
     CatalogController,
     ProfilesController,
+    ProfileSectionsController,
     ReviewsController,
     AccountsController,
     OrganizationsController,
@@ -70,6 +76,17 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     AuthRateLimitService,
     KeycloakAdminService,
     ProfilesService,
+    ProfileSectionsService,
+    MainInformationHandler,
+    ContactsHandler,
+    {
+      provide: PROFILE_SECTION_HANDLERS,
+      inject: [MainInformationHandler, ContactsHandler],
+      useFactory: (main: MainInformationHandler, contacts: ContactsHandler) => [
+        defineSectionHandler(main),
+        defineSectionHandler(contacts),
+      ],
+    },
     CatalogService,
     ReviewsService,
     AccountsService,

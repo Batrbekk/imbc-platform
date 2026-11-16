@@ -25,7 +25,7 @@ import {
   markState,
   prefillField,
   prefillSource,
-  profileSection,
+  legacyProfileSection as profileSection,
   requestState,
   valueSource,
 } from './enums.js';

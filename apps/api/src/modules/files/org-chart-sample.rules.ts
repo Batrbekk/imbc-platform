@@ -31,13 +31,13 @@ export function orgChartSampleAccess(role: Role): OrgChartSampleAccess {
  */
 export const orgChartSampleReadRule: FileReadRule = async ({ tx, auth, file }) => {
   const access = orgChartSampleAccess(auth.user.role);
-  if (access === 'any') return true;
-  if (access !== 'current') return false;
+  if (access === 'any') return { allowed: true, versions: 'latest' };
+  if (access !== 'current') return { allowed: false };
   const [sample] = await tx
     .select({ isCurrent: orgChartSample.isCurrent })
     .from(orgChartSample)
     .where(eq(orgChartSample.fileObjectId, file.id));
-  return sample?.isCurrent === true;
+  return sample?.isCurrent === true ? { allowed: true, versions: 'latest' } : { allowed: false };
 };
 
 const logger = new Logger('OrgChartSample');

@@ -6,7 +6,10 @@ import { ALLOWED_FILE_TYPES } from './enums.js';
  * `data_class`, `scan_state` (порядок тот же); типы PostgreSQL строятся из этих констант.
  */
 
-/** Назначение файла: по нему решается, кто его читает (GEN-09). */
+/**
+ * Назначение файла: по нему решается, кто его читает (GEN-09). Compatibility names remain during expand:
+ * conformity_certificate means a held certificate.product, and production_photo also covers equipment photos.
+ */
 export const FILE_PURPOSES = [
   'organisation_chart',
   'cv',
@@ -58,8 +61,9 @@ export type FileRejectionReason = (typeof FILE_REJECTION_REASONS)[number];
 
 /**
  * Файлы секций профиля производителя (класс `b_manufacturer`): назначения, на которые ссылаются
- * таблицы профиля DBML — `main_information`, `personnel`, `personnel_cv`, `product_line`,
- * `production_photo`, `certificate`, `document`.
+ * таблицы профиля DBML v1.4 — `products_section`, `personnel_org_chart`, `personnel_cv`,
+ * `production_photo`, `equipment_item`, `certificate`, `document`. Product-certificate links reuse the
+ * certificate identity; they do not attach another file to product_line.
  */
 export const MANUFACTURER_FILE_PURPOSES = [
   'organisation_chart',
@@ -89,7 +93,10 @@ export function fileExtensionMatches(name: string, mediaType: AllowedMediaType):
   return (extension === 'jpeg' ? 'jpg' : extension) === ALLOWED_FILE_TYPES[mediaType];
 }
 
-/** Номер версии в `GET /api/v1/files/:id/content?version=`: целое от 1, без знака и дробей; нет — последняя. */
+/**
+ * Номер версии в `GET /api/v1/files/:id/content?version=`: целое от 1, без знака и дробей.
+ * Без него выбирается последняя разрешённая версия: для frozen-владельца только из снимка отправки.
+ */
 export const fileContentQuerySchema = z
   .object({
     version: z

@@ -16,6 +16,8 @@ export async function applyAppRoleGrants(pool: pg.Pool, role: string): Promise<v
   try {
     await client.query('BEGIN');
     await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${name}`);
+    // DATA-01: TRUNCATE bypasses row-level frozen-revision triggers and is never an application operation.
+    await client.query(`REVOKE TRUNCATE ON ALL TABLES IN SCHEMA public FROM ${name}`);
     // Журнал аудита (AUD-02) и принятия NDA (FC-02, DBML: append-only) — только добавление:
     // у роли приложения нет UPDATE/DELETE.
     await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON audit_entries FROM ${name}`);

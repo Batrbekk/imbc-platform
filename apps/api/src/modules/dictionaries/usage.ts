@@ -10,9 +10,10 @@ export interface DictionaryUsage {
 }
 
 /**
- * Где используется значение (DATA-04, расхождение 8 плана этапа 2): таблиц профиля DBML ещё нет, коды лежат
- * текстом в проекции каталога и скелетных таблицах редакций. С этапа 3 ссылки по внешнему ключу ловит и БД
- * (`23503` при удалении — тоже 409 `entry_in_use`). Закрытые справочники не удаляются — ссылок нет.
+ * Compatibility text references in catalog projection and legacy profile skeleton (DATA-04, NFR-06).
+ * Keep them until an explicit contract migration; new v1.4 profile references are dictionary_entry FKs,
+ * including sites, OKED/KPVED, units and submission requirements. Their 23503 is mapped by the service to
+ * 409 entry_in_use, so FK columns must not be added to these code comparisons. Closed lists cannot be deleted.
  */
 export const DICTIONARY_USAGES: Record<DictionaryCode, readonly DictionaryUsage[]> = {
   region: [{ table: 'catalog_visible', column: 'region', array: false }],

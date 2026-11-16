@@ -17,6 +17,8 @@ import {
   PROFILE_STATUSES,
   PROFILE_TIERS,
   ROLES,
+  SECTION_KINDS,
+  REVISION_ORIGINS,
   UPDATE_STATUSES,
 } from '@imbc/contracts';
 import { pgEnum } from 'drizzle-orm/pg-core';
@@ -27,7 +29,7 @@ export const accountState = pgEnum('account_state', ACCOUNT_STATES);
 export const profileStatus = pgEnum('profile_status', PROFILE_STATUSES);
 export const updateStatus = pgEnum('update_status', UPDATE_STATUSES);
 export const profileTier = pgEnum('profile_tier', PROFILE_TIERS);
-export const profileSection = pgEnum('profile_section', PROFILE_SECTIONS);
+export const legacyProfileSection = pgEnum('legacy_profile_section', PROFILE_SECTIONS);
 export const documentStatus = pgEnum('document_status', DOCUMENT_STATUSES);
 export const commodityGroup = pgEnum('commodity_group', COMMODITY_GROUPS);
 export const contactRole = pgEnum('contact_role', CONTACT_ROLES);
@@ -74,3 +76,17 @@ export const externalCheckState = pgEnum('external_check_state', [
 ]);
 export const prefillSource = pgEnum('prefill_source', PREFILL_SOURCES);
 export const prefillField = pgEnum('prefill_field', PREFILL_FIELDS);
+
+// Seven-section profile model v1.4; the old profile_section enum remains for the legacy skeleton (NFR-06).
+export const sectionKind = pgEnum('section_kind', SECTION_KINDS);
+export const revisionOrigin = pgEnum('revision_origin', REVISION_ORIGINS);
+export const recordStatus = pgEnum('record_status', [
+  'uploaded',
+  'under_review',
+  'verified',
+  'rejected',
+  'expired',
+  'missing',
+]);
+export const certificateGroup = pgEnum('certificate_group', ['company', 'product', 'other']);
+export const productLineSource = pgEnum('product_line_source', ['manual', 'e_ondiris', 'migration']);

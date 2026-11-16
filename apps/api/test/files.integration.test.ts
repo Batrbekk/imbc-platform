@@ -212,6 +212,36 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
     ).rows[0]!.id;
   };
 
+  let personnelId: string | undefined;
+  /** Saved Draft owners are required before SME/director may reach the version scan check (GEN-09). */
+  const attachPersonnelFile = async (fileId: string, purpose: 'organisation_chart' | 'cv' = 'organisation_chart') => {
+    if (!personnelId) {
+      const profileId = (
+        await pool.query<{ id: string }>('insert into manufacturer_profile(organization_id) values ($1) returning id', [
+          ownerOrg,
+        ])
+      ).rows[0]!.id;
+      const revisionId = (
+        await pool.query<{ id: string }>(
+          "select r.id from profile_section s join section_revision r on r.id=s.working_revision_id where s.profile_id=$1 and s.organization_id=$2 and s.kind='personnel'",
+          [profileId, ownerOrg],
+        )
+      ).rows[0]!.id;
+      personnelId = (
+        await pool.query<{ id: string }>(
+          'insert into personnel(section_revision_id,organization_id) values ($1,$2) returning id',
+          [revisionId, ownerOrg],
+        )
+      ).rows[0]!.id;
+    }
+    const table = purpose === 'cv' ? 'personnel_cv' : 'personnel_org_chart';
+    await pool.query(`insert into ${table}(personnel_id,organization_id,file_object_id) values ($1,$2,$3)`, [
+      personnelId,
+      ownerOrg,
+      fileId,
+    ]);
+  };
+
   beforeAll(async () => {
     pool = openTestPool();
     await resetDatabase(pool);
@@ -412,6 +442,7 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
     expect(await scanAs(rejected.versionId, { clean: false, signature: 'Eicar-Test-Signature' })).toBe('rejected');
     const passed = await createFile();
     expect(await scanAs(passed.versionId, { clean: true })).toBe('passed');
+    for (const file of [pending, rejected, passed]) await attachPersonnelFile(file.fileObjectId);
 
     for (const role of readers) {
       for (const query of ['', '?version=1']) {
@@ -658,6 +689,7 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
 
     const cv = await createFile({ purpose: 'cv' });
     const survey = await createFile({ purpose: 'site_survey_report', dataClass: 'c_imbc' });
+    await attachPersonnelFile(cv.fileObjectId, 'cv');
     for (const file of [cv, survey]) expect(await scanAs(file.versionId, { clean: true })).toBe('passed');
 
     const allowed = new Set<Role>(['manufacturer', 'expert', 'director']);

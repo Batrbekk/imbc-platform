@@ -1,5 +1,5 @@
-import { computeBinCheckDigit, reviewQueueSchema } from '@imbc/contracts';
-import { eq } from 'drizzle-orm';
+import { computeBinCheckDigit, reviewQueueSchema, type ReviewQueueFilter } from '@imbc/contracts';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -72,6 +72,33 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('очередь проверки
       verifiedAt: new Date(),
       assignedExpertId: unnamed!.id,
     });
+    // An explicit send is represented by the new section's submitted pointer, independently of the legacy mark.
+    const [sentSection] = await db
+      .select()
+      .from(schema.profileSection)
+      .where(
+        and(eq(schema.profileSection.profileId, ids['Ожидает изменений']!), eq(schema.profileSection.kind, 'contacts')),
+      );
+    await db.transaction(async (tx) => {
+      await tx
+        .update(schema.sectionRevision)
+        .set({ state: 'submitted', submittedAt: new Date() })
+        .where(eq(schema.sectionRevision.id, sentSection!.workingRevisionId!));
+      await tx
+        .update(schema.profileSection)
+        .set({ workingRevisionId: null, pendingRevisionId: sentSection!.workingRevisionId })
+        .where(eq(schema.profileSection.id, sentSection!.id));
+      await tx
+        .update(schema.manufacturerProfile)
+        .set({ hasPendingChanges: false })
+        .where(eq(schema.manufacturerProfile.id, ids['Ожидает изменений']!));
+    });
+    await manufacturer('Неотправленные изменения', {
+      status: 'verified',
+      hasPendingChanges: true,
+      updateStatus: 'active',
+      verifiedAt: new Date(),
+    });
     // Тот же registered_at, что у первого: порядок решает id.
     await manufacturer('Отправлен тогда же', { status: 'submitted', registeredAt: new Date(Date.UTC(2026, 9, 1, 10)) });
   }, 60000);
@@ -119,5 +146,14 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('очередь проверки
       // Имя пустое — email.
       'Ожидает изменений': 'second@imbc.local',
     });
+  });
+
+  it('a legacy pending mark without a sent section neither enters the queue nor affects its totals (MAN-45)', async () => {
+    const filters: ReviewQueueFilter[] = [{}, { status: ['pending_changes'] }];
+    for (const filter of filters) {
+      const queue = await reviews.queue(filter);
+      expect(queue.items.map((item) => item.profileId)).not.toContain(ids['Неотправленные изменения']);
+      expect(queue.total).toBe(filter.status ? 1 : 4);
+    }
   });
 });

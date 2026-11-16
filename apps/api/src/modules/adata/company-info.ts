@@ -80,7 +80,8 @@ function okedItems(basic: Record<string, unknown>): Item[] {
 
 const one = (v: string | null): Item[] => (v === null ? [] : [{ value: v, label: null }]);
 
-export function extractPrefill(data: unknown): PrefillRow[] {
+/** MAN-10/21: the profile adapter reads complete legal lists from the saved, bounded source response. */
+export function extractPrefill(data: unknown, options: { completeLegalLists?: boolean } = {}): PrefillRow[] {
   const parsed = companyInfoDataSchema.safeParse(data);
   if (!parsed.success) return [];
   const basic = parsed.data.basic ?? null;
@@ -109,7 +110,8 @@ export function extractPrefill(data: unknown): PrefillRow[] {
     const seen = new Set<string>();
     for (const item of fields[field]) {
       if (seen.has(item.value)) continue;
-      if (seen.size === MAX_ROWS) break;
+      if (seen.size === MAX_ROWS && !(options.completeLegalLists && (field === 'activity' || field === 'shareholders')))
+        break;
       rows.push({ field, position: seen.size, value: item.value, label: item.label });
       seen.add(item.value);
     }

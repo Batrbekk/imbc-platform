@@ -75,6 +75,7 @@ export const fileVersion = pgTable(
   },
   (t) => [
     uniqueIndex('file_version_number_uq').on(t.fileObjectId, t.versionNumber),
+    uniqueIndex('file_version_id_object_uq').on(t.id, t.fileObjectId),
     uniqueIndex('file_version_storage_key_uq').on(t.storageKey),
     check('file_version_number_ck', sql`${t.versionNumber} > 0`),
     check('file_version_byte_size_ck', sql`${t.byteSize} between 1 and ${sql.raw(String(MAX_FILE_BYTES))}`),

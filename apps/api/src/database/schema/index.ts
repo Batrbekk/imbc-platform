@@ -7,3 +7,5 @@ export * from './files.js';
 export * from './notifications.js';
 export { exportSubscriptions, exportFiles, forecastVersions, forecastLines, techSpecFiles } from './exchange.js';
 export { auditEntries, activitySnapshots, catalogVisible } from './platform.js';
+export * from './profile.js';
+export * from './profile-content.js';

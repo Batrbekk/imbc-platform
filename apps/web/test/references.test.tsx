@@ -2294,6 +2294,7 @@ describe("справочники: доступность списка и стр�
     expect(screen.getByRole("button", { name: t.previous }).getAttribute("aria-disabled")).not.toBe("true");
     await user.click(screen.getByRole("button", { name: t.previous }));
     await waitFor(() => expect(router.state.location.search).toBe("?list=tn_ved&page=2"));
+    await screen.findByText(fill(t.shown, { from: "51", to: "100", total: "120" }));
     await user.click(screen.getByRole("button", { name: t.previous }));
     await waitFor(() => expect(router.state.location.search).toBe("?list=tn_ved"));
     await waitFor(() =>

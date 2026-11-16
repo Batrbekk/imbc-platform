@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import type { DataClass, FilePurpose } from '@imbc/contracts';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { isUuid, notFound } from '../../common/actor-transaction.js';
 import { AuditService } from '../../common/audit.service.js';
@@ -24,6 +24,12 @@ export const FILE_ROUTES = {
 } as const;
 
 const forbidden = () => new ProblemException(403, 'forbidden', 'Нет прав на этот файл');
+/** Internal signal: unwind the read transaction before writing denial audit using the pool (GEN-09, AUD-01). */
+class FileReadDenied extends Error {
+  constructor(readonly fileObjectId: string) {
+    super('File read denied');
+  }
+}
 const pendingScan = () =>
   new ProblemException(409, 'file_pending_scan', 'Файл ещё проверяется на вредоносное содержимое');
 const rejectedByScan = () =>
@@ -220,37 +226,57 @@ export class FilesService {
 
   /**
    * Право и состояние версии (GEN-09, DATA-07). Порядок: файл есть (иначе 404, и id не-UUID) → правило назначения
-   * `FILE_READ_RULES` (иначе аудит `file.read` `denied` и 403) → версия, по умолчанию последняя (нет — 404) →
+   * `FILE_READ_RULES` (иначе аудит `file.read` `denied` и 403) → разрешённая версия (нет — 404) →
    * `pending` — 409 `file_pending_scan`, всё, что не `passed`, — 409 `file_rejected`.
    */
   private async authorize(auth: AuthContext, fileObjectId: string, version: number | null, ip: string | null) {
     if (!isUuid(fileObjectId)) throw notFound();
-    const [file] = await this.db
-      .select({ id: fileObject.id, organizationId: fileObject.organizationId, purpose: fileObject.purpose })
-      .from(fileObject)
-      .where(eq(fileObject.id, fileObjectId));
-    if (!file) throw notFound();
-
-    const rule = FILE_READ_RULES[file.purpose] ?? denyAll;
-    if (!(await rule({ tx: this.db, auth, file }))) {
+    // GEN-09: owner state and selected version share one read snapshot. Otherwise a freeze/replacement between
+    // the owner check and version query could turn a working-owner permission into a post-submission latest read.
+    try {
+      return await this.db.transaction(
+        (tx) => this.authorizeInTransaction(tx as unknown as Database, auth, fileObjectId, version),
+        { isolationLevel: 'repeatable read', accessMode: 'read only' },
+      );
+    } catch (error) {
+      if (!(error instanceof FileReadDenied)) throw error;
+      // The transaction has rolled back and returned its checkout before audit requests a connection.
+      // Keeping both at once would deadlock a one-connection pool or a full pool of simultaneous denials.
       try {
         await this.audit.record({
           userId: auth.user.id,
           organizationId: auth.user.organizationId,
           action: 'file.read',
           objectType: 'file_object',
-          objectId: file.id,
+          objectId: error.fileObjectId,
           outcome: 'denied',
           ip,
         });
-      } catch (error) {
+      } catch (auditError) {
         // Сбой записи не подменяет отказ ошибкой 500: в журнал — сводка, наружу — 403.
-        this.logger.error(failureSummary(error), 'Denied file read audit failed');
+        this.logger.error(failureSummary(auditError), 'Denied file read audit failed');
       }
       throw forbidden();
     }
+  }
 
-    const [row] = await this.db
+  private async authorizeInTransaction(tx: Database, auth: AuthContext, fileObjectId: string, version: number | null) {
+    const [file] = await tx
+      .select({
+        id: fileObject.id,
+        organizationId: fileObject.organizationId,
+        purpose: fileObject.purpose,
+        dataClass: fileObject.dataClass,
+      })
+      .from(fileObject)
+      .where(eq(fileObject.id, fileObjectId));
+    if (!file) throw notFound();
+
+    const rule = FILE_READ_RULES[file.purpose] ?? denyAll;
+    const decision = await rule({ tx, auth, file });
+    if (!decision.allowed) throw new FileReadDenied(file.id);
+
+    const [row] = await tx
       .select({
         id: fileVersion.id,
         versionNumber: fileVersion.versionNumber,
@@ -264,6 +290,7 @@ export class FilesService {
       .where(
         and(
           eq(fileVersion.fileObjectId, file.id),
+          decision.versions === 'latest' ? undefined : inArray(fileVersion.id, [...decision.versions]),
           version === null ? undefined : eq(fileVersion.versionNumber, version),
         ),
       )

@@ -23,7 +23,7 @@ import {
   contactRole,
   decision,
   documentStatus,
-  profileSection,
+  legacyProfileSection as profileSection,
   profileStatus,
   revisionState,
   updateStatus,
@@ -31,36 +31,9 @@ import {
 } from './enums.js';
 import { fileObject, fileVersion } from './files.js';
 
-/** Профиль производителя: один на организацию (D-01, MAN-03). */
-export const manufacturerProfiles = pgTable(
-  'manufacturer_profiles',
-  {
-    id: id(),
-    organizationId: uuid('organization_id')
-      .notNull()
-      .references(() => organizations.id),
-    status: profileStatus('status').notNull().default('draft'),
-    hasPendingChanges: boolean('has_pending_changes').notNull().default(false),
-    /** Статус актуальности появляется после первой верификации (UPD-01). */
-    updateStatus: updateStatus('update_status'),
-    quarterAnchorAt: date('quarter_anchor_at'),
-    missedQuarters: smallint('missed_quarters').notNull().default(0),
-    finalNoticeDueAt: date('final_notice_due_at'),
-    assignedExpertId: uuid('assigned_expert_id').references(() => userAccounts.id),
-    completenessPct: smallint('completeness_pct').notNull().default(0),
-    /** «Как вы узнали о нас» — только для IMBC (MAN-01, класс B). */
-    heardAboutUs: text('heard_about_us'),
-    registeredAt: timestamp('registered_at', { withTimezone: true }).notNull().defaultNow(),
-    verifiedAt: timestamp('verified_at', { withTimezone: true }),
-    source: valueSource('source').notNull().default('manual'),
-    createdAt: createdAt(),
-    updatedAt: updatedAt(),
-  },
-  (t) => [
-    uniqueIndex('manufacturer_profiles_org_uq').on(t.organizationId),
-    index('manufacturer_profiles_status_idx').on(t.status),
-  ],
-);
+/** Transitional alias of the renamed table; the R1 SQL view remains manufacturer_profiles (NFR-06). */
+export { manufacturerProfile as manufacturerProfiles } from './profile.js';
+import { manufacturerProfile as manufacturerProfiles } from './profile.js';
 
 /**
  * Принятие NDA профилем (DBML `nda_acceptance`, FC-02): время, версия и IP-адрес; ФИО и должности нет.

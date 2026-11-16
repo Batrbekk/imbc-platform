@@ -12,3 +12,7 @@ export * from './admin.js';
 export * from './policy.js';
 export * from './auth.js';
 export * from './registration.js';
+export * from './profile-sections.js';
+export * from './profile-fields.js';
+export * from './profile-main.js';
+export * from './profile-contacts.js';

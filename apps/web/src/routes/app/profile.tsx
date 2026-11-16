@@ -1,61 +1,95 @@
-import type { OwnProfile } from "@imbc/contracts";
+import { displayCompleteness, type OwnProfile, type OwnSectionsOverview } from "@imbc/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "cn";
-import { Building2Icon } from "lucide-react";
-import type { ReactNode } from "react";
+import { Building2Icon, ChevronRightIcon } from "lucide-react";
 import { Link } from "react-router";
 import { useTranslations } from "use-intl";
-
 import { PageTitle } from "@/components/app/page-title";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { sectionPath, useOwnSections } from "@/features/profile/profile-data";
 import { useFormat } from "@/i18n/format";
 import { api } from "@/lib/api";
 
-import { AdataReadCard } from "./profile-adata";
-
-/**
- * Профиль своей компании, только для чтения (MAN-41, MAN-46, IMBC-22). Сервер отдаёт только профиль
- * организации сеанса (GEN-11). Заголовок страницы и вкладки — «Профиль компании».
- */
+/** MAN-21 / MAN-41: seven sections; only main and contacts are available in the foundation. */
 export function ProfilePage() {
-  const t = useTranslations("profile");
   const nav = useTranslations("nav");
+  const t = useTranslations("profile");
+  const editor = useTranslations("profileEditor");
   const common = useTranslations("common");
-  const result = useQuery({ queryKey: ["profile", "own"], queryFn: () => api<OwnProfile>("/v1/profiles/own") });
-
+  const format = useFormat();
+  const profile = useQuery({ queryKey: ["profile", "own"], queryFn: () => api<OwnProfile>("/v1/profiles/own") });
+  const overview = useOwnSections();
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4">
+    <div className="mx-auto flex max-w-5xl flex-col gap-5">
       <PageTitle title={nav("profile")} />
       <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
         <Building2Icon className="size-6 text-primary" />
         {nav("profile")}
       </h1>
-
-      {result.data ? (
-        <>
-          <ProfileView profile={result.data} />
-          {/* Чтение Adata — свой запрос; без профиля его нет. */}
-          <AdataReadCard />
-        </>
-      ) : result.isError ? (
+      {profile.isError || overview.isError ? (
         <Alert variant="destructive">
           <AlertDescription>{t("loadError")}</AlertDescription>
-          <div className="mt-2">
-            <Button size="sm" variant="outline" onClick={() => void result.refetch()}>
-              {common("retry")}
-            </Button>
-          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              void profile.refetch();
+              void overview.refetch();
+            }}
+          >
+            {common("retry")}
+          </Button>
         </Alert>
+      ) : profile.data && overview.data ? (
+        <>
+          <ProfileView profile={profile.data} overview={overview.data} />
+          <p className="text-sm text-muted-foreground">{editor("overviewHint")}</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {overview.data.sections.map((section) => (
+              <Card key={section.kind} className={!section.available ? "bg-muted/30" : undefined}>
+                <CardContent className="flex h-full flex-col gap-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <h2 className="font-semibold">{editor(`sections.${section.kind}`)}</h2>
+                    <Badge variant="outline">
+                      {section.available
+                        ? `${format.number(displayCompleteness(section.completeness.percent))} %`
+                        : editor("soon")}
+                    </Badge>
+                  </div>
+                  {section.available ? (
+                    <>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+                        <div
+                          className="h-full rounded-full bg-primary"
+                          style={{ width: `${section.completeness.percent}%` }}
+                        />
+                      </div>
+                      <Link
+                        className={cn(buttonVariants({ variant: "outline" }), "mt-auto justify-between")}
+                        to={sectionPath(section.kind)}
+                      >
+                        {editor("openSection")}
+                        <ChevronRightIcon className="size-4" />
+                      </Link>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      {editor(section.kind === "production" ? "optionalSoon" : "requiredSoon")}
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </>
       ) : (
-        <Skeleton className="h-80" />
+        <Skeleton className="h-96" />
       )}
-
       <div className="flex flex-col items-start gap-2 text-sm text-muted-foreground">
-        <p>{t("readOnlyHint")}</p>
         <p>{t("accountHint")}</p>
         <Link className={cn(buttonVariants({ variant: "outline" }))} to="/account">
           {nav("account")}
@@ -65,47 +99,43 @@ export function ProfilePage() {
   );
 }
 
-function ProfileView({ profile }: { profile: OwnProfile }) {
+function ProfileView({ profile, overview }: { profile: OwnProfile; overview: OwnSectionsOverview }) {
   const t = useTranslations("profile");
+  const editor = useTranslations("profileEditor");
   const catalog = useTranslations("catalog");
   const format = useFormat();
-
+  const values = [
+    [t("company"), profile.organizationName],
+    [t("bin"), profile.bin],
+    [t("completeness"), `${format.number(displayCompleteness(overview.completenessPct))} %`],
+    [t("updateStatus"), profile.updateStatus ? catalog(`status.${profile.updateStatus}`) : t("notVerifiedYet")],
+    [t("tier"), profile.tier ? catalog(`tierValue.${profile.tier}`) : t("notVerifiedYet")],
+    [t("registeredAt"), format.date(profile.registeredAt)],
+    [t("verifiedAt"), format.date(profile.verifiedAt)],
+  ];
   return (
     <Card>
       <CardContent>
         <dl className="grid gap-3 text-sm">
-          <Field label={t("company")}>{profile.organizationName}</Field>
-          <Field label={t("bin")}>
-            <span className="font-mono">{profile.bin}</span>
-          </Field>
-          <Field label={t("status")}>
-            <span className="flex flex-wrap gap-1">
-              <Badge variant={profile.status === "verified" ? "default" : "secondary"}>
-                {t(`statusValue.${profile.status}`)}
-              </Badge>
-              {profile.hasPendingChanges && <Badge variant="outline">{t("pendingChanges")}</Badge>}
-            </span>
-          </Field>
-          <Field label={t("completeness")}>{format.number(profile.completenessPct)}&nbsp;%</Field>
-          {/* Статус актуальности и тир есть только у верифицированного профиля (раздел 5.5, IMBC-19). */}
-          <Field label={t("updateStatus")}>
-            {profile.updateStatus ? catalog(`status.${profile.updateStatus}`) : t("notVerifiedYet")}
-          </Field>
-          <Field label={t("tier")}>{profile.tier ? catalog(`tierValue.${profile.tier}`) : t("notVerifiedYet")}</Field>
-          <Field label={t("registeredAt")}>{format.date(profile.registeredAt)}</Field>
-          <Field label={t("verifiedAt")}>{format.date(profile.verifiedAt)}</Field>
+          <div className="grid gap-1 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+            <dt className="text-muted-foreground">{t("status")}</dt>
+            <dd className="flex flex-wrap gap-2">
+              <Badge>{t(`statusValue.${overview.profileStatus}`)}</Badge>
+              {overview.sections.some((section) => section.hasWorkingChanges) ? (
+                <Badge variant="outline">{editor("unsubmitted")}</Badge>
+              ) : overview.hasPendingChanges ? (
+                <Badge variant="outline">{t("pendingChanges")}</Badge>
+              ) : null}
+            </dd>
+          </div>
+          {values.map(([label, value]) => (
+            <div key={label} className="grid gap-1 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+              <dt className="text-muted-foreground">{label}</dt>
+              <dd className="break-words">{value}</dd>
+            </div>
+          ))}
         </dl>
       </CardContent>
     </Card>
-  );
-}
-
-/** Строка «подпись — значение» карточки. */
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="grid gap-1 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:gap-4">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd>{children}</dd>
-    </div>
   );
 }

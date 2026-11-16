@@ -9,6 +9,7 @@ export class ApiError extends Error {
     title: string,
     readonly detail?: string,
     readonly retryAfter?: number,
+    readonly fieldErrors: readonly { path: string; code: string }[] = [],
   ) {
     super(title);
   }
@@ -39,6 +40,15 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
       String(body?.title ?? res.statusText),
       body?.detail ? String(body.detail) : undefined,
       Number(res.headers.get("retry-after")) || undefined,
+      Array.isArray(body?.errors)
+        ? body.errors.flatMap((item: unknown) => {
+            if (typeof item !== "object" || item === null) return [];
+            const issue = item as Record<string, unknown>;
+            return typeof issue.path === "string" && typeof (issue.code ?? issue.message) === "string"
+              ? [{ path: issue.path, code: String(issue.code ?? issue.message) }]
+              : [];
+          })
+        : [],
     );
   }
   return body as T;

@@ -53,51 +53,86 @@ export const routes: RouteObject[] = [
       {
         // Рабочие страницы за проверкой сеанса; оболочка (сайдбар, панель, подсказки) и каждая
         // страница — отдельные чанки, экраны входа — в основном.
-        lazy: lazyPage(() => import("@/components/app/app-shell"), (m) => m.AppShell),
+        lazy: lazyPage(
+          () => import("@/components/app/app-shell"),
+          (m) => m.AppShell,
+        ),
         children: [
           {
             // Очередь проверки SME (REV-01, REV-04).
             path: "reviews",
             handle: { title: "reviews.title" } satisfies AppRouteHandle,
-            lazy: lazyPage(() => import("@/routes/app/reviews"), (m) => m.ReviewsPage),
+            lazy: lazyPage(
+              () => import("@/routes/app/reviews"),
+              (m) => m.ReviewsPage,
+            ),
           },
           {
             path: "catalog",
             handle: { title: "catalog.title" } satisfies AppRouteHandle,
-            lazy: lazyPage(() => import("@/routes/app/catalog"), (m) => m.CatalogPage),
+            lazy: lazyPage(
+              () => import("@/routes/app/catalog"),
+              (m) => m.CatalogPage,
+            ),
           },
           {
             // Страница компании из каталога (OPR-06, OPR-09); заголовок вкладки — название компании.
             path: "companies/:profileId",
             handle: { title: "company.title" } satisfies AppRouteHandle,
-            lazy: lazyPage(() => import("@/routes/app/company"), (m) => m.CompanyPage),
+            lazy: lazyPage(
+              () => import("@/routes/app/company"),
+              (m) => m.CompanyPage,
+            ),
           },
           {
             path: "dashboard",
             handle: { title: "dashboard.title" } satisfies AppRouteHandle,
-            lazy: lazyPage(() => import("@/routes/app/dashboard"), (m) => m.DashboardPage),
+            lazy: lazyPage(
+              () => import("@/routes/app/dashboard"),
+              (m) => m.DashboardPage,
+            ),
           },
           {
             // Организации и аккаунты для администратора (ADM-02, ADM-06).
             path: "admin/accounts",
             handle: { title: "adminAccounts.title" } satisfies AppRouteHandle,
-            lazy: lazyPage(() => import("@/routes/app/admin-accounts"), (m) => m.AdminAccountsPage),
+            lazy: lazyPage(
+              () => import("@/routes/app/admin-accounts"),
+              (m) => m.AdminAccountsPage,
+            ),
           },
           {
             // Справочники и образец оргструктуры: администратор правит, директор читает (ADM-08, GEN-04).
             path: "references",
             handle: { title: "references.title" } satisfies AppRouteHandle,
-            lazy: lazyPage(() => import("@/routes/app/references"), (m) => m.ReferencesPage),
+            lazy: lazyPage(
+              () => import("@/routes/app/references"),
+              (m) => m.ReferencesPage,
+            ),
           },
           {
             path: "account",
             handle: { title: "account.title" } satisfies AppRouteHandle,
-            lazy: lazyPage(() => import("@/routes/app/account"), (m) => m.AccountPage),
+            lazy: lazyPage(
+              () => import("@/routes/app/account"),
+              (m) => m.AccountPage,
+            ),
           },
           {
             path: "profile",
             handle: { title: "nav.profile" } satisfies AppRouteHandle,
-            lazy: lazyPage(() => import("@/routes/app/profile"), (m) => m.ProfilePage),
+            lazy: lazyPage(
+              () => import("@/routes/app/profile"),
+              (m) => m.ProfilePage,
+            ),
+          },
+          {
+            path: "profile/:section",
+            handle: { title: "nav.profile" } satisfies AppRouteHandle,
+            lazy: lazyPage(
+              () => import("@/routes/app/profile-section"),
+              (m) => m.ProfileSectionPage,
+            ),
           },
         ],
       },

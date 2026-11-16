@@ -13,12 +13,13 @@ const ALLOWED = [
   /^modules\/adata\//,
   /^worker\/adata-prefill\.job\.ts$/,
   /^modules\/profiles\/profiles\.service\.ts$/,
+  /^modules\/profiles\/main-source\.ts$/,
 ];
 
 // Значения Adata не попадают в каталог, страницу компании, выгрузки и ответы администратора (GEN-11, ADM-06):
 // ни один другой модуль не называет их таблиц.
 describe('граница модулей', () => {
-  it('таблицы Adata называют только схема, модуль adata, задание worker и ProfilesService (GEN-11, ADM-06)', () => {
+  it('таблицы Adata называют только схема, модуль adata, задание worker и адаптеры своего профиля (GEN-11, ADM-06)', () => {
     const files = readdirSync(SRC, { recursive: true, encoding: 'utf8' })
       .map((file) => file.split('\\').join('/'))
       .filter((file) => file.endsWith('.ts'));

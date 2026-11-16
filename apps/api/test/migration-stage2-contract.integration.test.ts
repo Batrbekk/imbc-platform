@@ -433,7 +433,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('contract этапа 2: мигр
   describe('чистая база после 0011', () => {
     beforeAll(async () => {
       await resetDatabase(pool);
-      await migrateThrough(pool);
+      // Проверки точного состава FK относятся к contract 0011. Последующие этапы добавляют свои связи;
+      // совместимость текущей схемы Drizzle с ними проверяется отдельно выше.
+      await migrateThrough(pool, CONTRACT);
+      expect(await journal()).toBe(journalThrough(CONTRACT));
     }, 60000);
 
     it('после 0011 нет notifications_sent, dictionaries, dictionary_entries, file_objects, file_versions и типа file_scan_state; enum_range(null::scan_state) = pending, passed, rejected; file_version.scan_state — тип scan_state (DATA-07)', async () => {
