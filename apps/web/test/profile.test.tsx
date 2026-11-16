@@ -21,6 +21,24 @@ const stubOverview = (body = ownProfile(), sections = overview()) => stubApi({
 });
 
 describe("seven-section manufacturer overview", () => {
+  it("opens all seven implemented sections from API availability", async () => {
+    const sections = overview();
+    sections.completenessPct = 100;
+    sections.sections = sections.sections.map((item, index) => ({ ...item, available: true,
+      revisionId: `00000000-0000-4000-8000-${String(800 + index).padStart(12, "0")}`,
+      revisionState: "verified", revisionOrigin: "manufacturer", completeness: { percent: 100, missing: [] } }));
+    stubOverview(ownProfile(), sections);
+    renderRoute("/profile", { locale: "en" });
+    await screen.findByText(ownProfile().organizationName);
+    const page = within(screen.getByRole("main"));
+    expect(page.getAllByRole("link", { name: en.profileEditor.openSection }).map((link) => link.getAttribute("href"))).toEqual([
+      "/profile/main-information", "/profile/contacts", "/profile/personnel", "/profile/products", "/profile/production", "/profile/certificates", "/profile/documents",
+    ]);
+    expect(page.queryByText(en.profileEditor.soon)).toBeNull();
+    expect(field(en.profile.completeness)).toMatch(/^100\s%$/);
+  });
+
+
   it("has seven sections, two editable entry links, five coming-soon sections and the six-section denominator", async () => {
     const mock = stubOverview();
     renderRoute("/profile", { locale: "en" });

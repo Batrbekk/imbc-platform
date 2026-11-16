@@ -1,6 +1,7 @@
 import { fieldId, useFieldMessage } from "./form-data";
 import { ArrowDownIcon, ArrowUpIcon, Trash2Icon } from "lucide-react";
 import { useTranslations } from "use-intl";
+import { useFormat } from "@/i18n/format";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -24,16 +25,17 @@ export function ProfileTextField({
   onChange: (value: string) => void;
   disabled: boolean;
   errors: SectionFieldErrors;
-  type?: "text" | "email" | "tel" | "url";
+  type?: "text" | "email" | "tel" | "url" | "date";
   hint?: string;
 }) {
   const error = useFieldMessage(errors[path]);
+  const format = useFormat();
   return (
     <Field data-invalid={Boolean(error)}>
       <FieldLabel htmlFor={fieldId(path)}>{label}</FieldLabel>
       {disabled ? <Textarea
         id={fieldId(path)}
-        value={value ?? ""}
+        value={type === "date" ? format.date(value) : value ?? ""}
         readOnly
         rows={1}
         className="min-h-9 resize-none overflow-hidden [overflow-wrap:anywhere]"

@@ -26,6 +26,18 @@ function formatFor(locale: Locale): AppFormat {
 const NBSP = " ";
 
 describe("useFormat", () => {
+  it("keeps exact decimal capacity and fractions in all locales without floating-point rounding", () => {
+    for (const locale of ["en", "ru", "kk"] as const) {
+      const format = formatFor(locale);
+      const group = locale === "en" ? "," : NBSP;
+      const decimal = locale === "en" ? "." : ",";
+      expect(format.decimal("9007199254740993.123456789")).toBe(`9${group}007${group}199${group}254${group}740${group}993${decimal}123456789`);
+      expect(format.decimal("-0.00001")).toBe(`-0${decimal}00001`);
+      expect(format.decimal("-0")).toBe("0");
+      expect(format.decimal("1000.00")).toBe(`1${group}000${decimal}00`);
+      for (const value of [null, undefined, "", "NaN", "1e20", "0x10", "001", "1,5"]) expect(format.decimal(value)).toBe("—");
+    }
+  });
   it("неверная или отсутствующая дата — «—» на всех трёх языках, страница не падает", () => {
     for (const locale of ["kk", "ru", "en"] as const) {
       const format = formatFor(locale);

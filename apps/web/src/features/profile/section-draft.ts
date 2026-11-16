@@ -26,7 +26,9 @@ export function useSectionDraft<Read, Write>(
   // Sync a clean draft when a new server value arrives; dirty input keeps its original editVersion.
   if (!dirty && !saving && initial !== server) {
     setServer(initial);
-    setDraft(editable(initial.data));
+    const refreshed = editable(initial.data);
+    // A scan-only refresh must keep equivalent equipment row objects and their in-flight upload controls.
+    if (JSON.stringify(refreshed) !== JSON.stringify(draft)) setDraft(refreshed);
   }
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) => dirty && currentLocation.pathname !== nextLocation.pathname,

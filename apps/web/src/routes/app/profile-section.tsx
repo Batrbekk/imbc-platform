@@ -1,14 +1,18 @@
 import {
   contactsWriteSchema,
   mainInformationWriteSchema,
+  personnelWriteSchema, documentsWriteSchema, certificatesWriteSchema, productsWriteSchema, productionWriteSchema,
   type ContactsRead,
   type MainInformationRead,
+  type PersonnelRead, type DocumentsRead, type CertificatesRead, type ProductsRead, type ProductionRead,
   type SectionKind,
   type SectionRead,
 } from "@imbc/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router";
 import { useTranslations } from "use-intl";
+import type { ReactNode } from "react";
+import type { z } from "zod";
 import { PageTitle } from "@/components/app/page-title";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -22,6 +26,13 @@ import {
   EditorState,
 } from "@/features/profile/editor-feedback";
 import { LegalInformationCard, MainInformationForm } from "@/features/profile/main-form";
+import { PersonnelForm } from "@/features/profile/personnel-form";
+import { DocumentsForm } from "@/features/profile/documents-form";
+import { ProductsForm } from "@/features/profile/products-form";
+import { ProductionForm } from "@/features/profile/production-form";
+import { ProfileFileHistory } from "@/features/profile/file-history";
+import { mergeFileObservations } from "@/features/profile/file-observations";
+import { CertificatesForm } from "@/features/profile/certificates-form";
 import { routeSection } from "@/features/profile/profile-data";
 import { UnsavedDialog } from "@/features/profile/unsaved-dialog";
 import { useSectionDraft } from "@/features/profile/section-draft";
@@ -29,21 +40,23 @@ import { useFormat } from "@/i18n/format";
 import { api } from "@/lib/api";
 import { NotFoundPage } from "@/routes/not-found";
 
+type ImplementedRead = MainInformationRead | ContactsRead | PersonnelRead | DocumentsRead | CertificatesRead | ProductsRead | ProductionRead;
+
 export function ProfileSectionPage() {
   const { section } = useParams();
   const kind = routeSection(section);
   const t = useTranslations("profileEditor");
-  const available = kind === "main_information" || kind === "contacts";
+  const available = Boolean(kind);
   const query = useQuery({
     queryKey: ["profile", "sections", kind],
-    queryFn: () => api<SectionRead<MainInformationRead | ContactsRead>>(`/v1/profiles/own/sections/${kind}`),
+    queryFn: () => api<SectionRead<ImplementedRead>>(`/v1/profiles/own/sections/${kind}`),
     enabled: available,
     refetchOnWindowFocus: false,
     refetchInterval: (state) =>
       kind === "main_information" &&
       (state.state.data?.data as MainInformationRead | undefined)?.source?.state === "waiting"
         ? 5000
-        : false,
+        : hasPendingFiles(state.state.data?.data) ? 3000 : false,
   });
   if (!kind) return <NotFoundPage />;
   if (!available)
@@ -60,9 +73,13 @@ export function ProfileSectionPage() {
       {query.data ? (
         kind === "main_information" ? (
           <MainEditor key={kind} initial={query.data as SectionRead<MainInformationRead>} />
-        ) : (
+        ) : kind === "contacts" ? (
           <ContactsEditor key={kind} initial={query.data as SectionRead<ContactsRead>} />
-        )
+        ) : kind === "personnel" ? <PersonnelEditor initial={query.data as SectionRead<PersonnelRead>} />
+          : kind === "documents" ? <DocumentsEditor initial={query.data as SectionRead<DocumentsRead>} />
+          : kind === "certificates" ? <CertificatesEditor initial={query.data as SectionRead<CertificatesRead>} />
+          : kind === "products" ? <ProductsEditor initial={query.data as SectionRead<ProductsRead>} />
+          : <ProductionEditor initial={query.data as SectionRead<ProductionRead>} />
       ) : (
         <>
           <PageTitle title={t(`sections.${kind}`)} />
@@ -85,6 +102,56 @@ export function ProfileSectionPage() {
 }
 const mainEditable = (data: MainInformationRead) => data.editable;
 const contactsEditable = (data: ContactsRead) => data;
+const personnelEditable = (data: PersonnelRead) => data.editable;
+const documentsEditable = (data: DocumentsRead) => data.editable;
+const certificatesEditable = (data: CertificatesRead) => data.editable;
+const productsEditable = (data: ProductsRead) => data.editable;
+const productionEditable = (data: ProductionRead) => data.editable;
+
+function hasPendingFiles(data: unknown): boolean {
+  if (typeof data !== "object" || data === null) return false;
+  if ("scanState" in data && data.scanState === "pending") return true;
+  return Object.values(data).some(hasPendingFiles);
+}
+
+function PersonnelEditor({ initial }: { initial: SectionRead<PersonnelRead> }) {
+  return <AdditionalEditor kind="personnel" initial={initial} editable={personnelEditable} schema={personnelWriteSchema}
+    form={(props) => <PersonnelForm {...props} />} />;
+}
+function DocumentsEditor({ initial }: { initial: SectionRead<DocumentsRead> }) {
+  return <AdditionalEditor kind="documents" initial={initial} editable={documentsEditable} schema={documentsWriteSchema}
+    form={(props) => <DocumentsForm {...props} />} />;
+}
+function CertificatesEditor({ initial }: { initial: SectionRead<CertificatesRead> }) {
+  return <AdditionalEditor kind="certificates" initial={initial} editable={certificatesEditable} schema={certificatesWriteSchema}
+    form={(props) => <CertificatesForm {...props} />} />;
+}
+function ProductsEditor({ initial }: { initial: SectionRead<ProductsRead> }) {
+  return <AdditionalEditor kind="products" initial={initial} editable={productsEditable} schema={productsWriteSchema}
+    form={(props) => <ProductsForm {...props} />} />;
+}
+function ProductionEditor({ initial }: { initial: SectionRead<ProductionRead> }) {
+  return <AdditionalEditor kind="production" initial={initial} editable={productionEditable} schema={productionWriteSchema}
+    form={(props) => <ProductionForm {...props} />} />;
+}
+function AdditionalEditor<Read, Write>({ kind, initial, editable, schema, form }: {
+  kind: SectionKind; initial: SectionRead<Read>; editable: (data: Read) => Write; schema: z.ZodType<Write>;
+  form: (props: { value: Write; source: Read; onChange: (value: Write) => void; disabled: boolean; errors: Record<string, string> }) => ReactNode;
+}) {
+  const editor = useSectionDraft(kind, initial, editable, schema);
+  const label = useMissingLabel(kind);
+  return <>
+    <EditorHeading kind={kind} section={editor.server} /><EditorState {...editor.server} />
+    <form noValidate onSubmit={(event) => { event.preventDefault(); if (!editor.disabled) void editor.save(); }}>
+      {form({ value: editor.draft, source: mergeFileObservations(editor.server.data, initial.data), onChange: editor.change, disabled: editor.disabled, errors: editor.errors })}
+    </form>
+    <EditorMissing section={editor.server} fieldLabel={label} />
+    <ProfileFileHistory kind={kind} />
+    <EditorResult failure={editor.failure} saved={editor.saved} reload={() => void editor.reload()} />
+    <EditorSaveBar {...editor} readOnly={initial.readOnly} save={() => void editor.save()} edit={() => editor.setEditing(true)} />
+    <UnsavedDialog {...editor.navigationGuard} />
+  </>;
+}
 
 function MainEditor({ initial }: { initial: SectionRead<MainInformationRead> }) {
   const editor = useSectionDraft("main_information", initial, mainEditable, mainInformationWriteSchema);
@@ -158,12 +225,22 @@ function ContactsEditor({ initial }: { initial: SectionRead<ContactsRead> }) {
 function useMissingLabel(kind: SectionKind) {
   const t = useTranslations("profileEditor");
   const format = useFormat();
+  const personnel = useTranslations("profilePersonnel");
+  const documents = useTranslations("profileDocuments");
+  const certificates = useTranslations("profileCertificates");
+  const products = useTranslations("profileProducts");
+  const production = useTranslations("profileProduction");
   return (path: string) => {
     const [list, index, field] = path.split(".");
     if (list === "sites" && field)
       return `${t("siteNumber", { number: format.number(Number(index) + 1) })} — ${t(field === "address" ? "productionAddress" : field === "regionId" ? "region" : "city")}`;
     if (list === "contacts" && field)
       return `${t("contactNumber", { number: format.number(Number(index) + 1) })} — ${t(field === "roleId" ? "role" : (field as "fullName" | "position" | "email" | "phone"))}`;
+    if (kind === "personnel") return personnel(["managersCount", "engineersCount", "productionWorkersCount", "nonresidentCount"].includes(list) ? list : list === "cvFileIds" ? "cvs" : "organisationCharts");
+    if (kind === "documents") return /^\d+$/.test(index ?? "") ? documents("requiredNumber", { number: format.number(Number(index) + 1) }) : documents("title");
+    if (kind === "certificates") return /^\d+$/.test(index ?? "") ? certificates("requiredNumber", { number: format.number(Number(index) + 1) }) : certificates("title");
+    if (kind === "products") return list === "products" && /^\d+$/.test(index ?? "") ? products("number", { number: format.number(Number(index) + 1) }) : products("title");
+    if (kind === "production") return production("equipment");
     return t(path === "companyPhone" ? "companyPhone" : kind === "contacts" ? "contactsTitle" : "sitesTitle");
   };
 }

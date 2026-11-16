@@ -17,6 +17,8 @@ export interface AppFormat {
   dateTime(value: DateInput): string;
   /** Число: «1 234 567,5» (kk, ru), «1,234,567.5» (en). */
   number(value: number): string;
+  /** Exact decimal from PostgreSQL numeric, without conversion to a floating-point number. */
+  decimal(value: string | null | undefined): string;
 }
 
 /**
@@ -37,6 +39,7 @@ export function useFormat(): AppFormat {
     date: (value) => withDate(value, (date) => format.dateTime(date, { dateStyle: "medium" })),
     dateTime: (value) => withDate(value, (date) => format.dateTime(date, { dateStyle: "short", timeStyle: "short" })),
     number: (value) => format.number(value),
+    decimal: (value) => exactDecimal(value, locale),
   };
 }
 
@@ -80,6 +83,17 @@ function almatyFields(date: Date) {
 /** Неразрывный пробел (U+00A0) между разрядами, как в русской локали. */
 const GROUP_SEPARATOR = "\u00a0";
 
+/** Preserve every digit, including capacities above Number.MAX_SAFE_INTEGER. */
+function exactDecimal(value: string | null | undefined, locale: string): string {
+  if (value == null || !/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)) return NO_DATE;
+  const negative = value.startsWith("-");
+  const [whole, fraction] = (negative ? value.slice(1) : value).split(".");
+  const separator = locale === "en" ? "," : GROUP_SEPARATOR;
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, separator);
+  const sign = negative && /[1-9]/.test(value) ? "-" : "";
+  return `${sign}${grouped}${fraction === undefined ? "" : `${locale === "en" ? "." : ","}${fraction}`}`;
+}
+
 /** Число по правилам русской локали: до трёх знаков дроби, неразрывный пробел между разрядами. */
 function kazakhNumber(value: number): string {
   if (!Number.isFinite(value)) return String(value);
@@ -98,4 +112,5 @@ const KAZAKH: AppFormat = {
       return `${date}, ${time}`;
     }),
   number: kazakhNumber,
+  decimal: (value) => exactDecimal(value, "kk"),
 };

@@ -20,12 +20,16 @@ export function useFieldMessage(code: string | undefined) {
     "site_invalid",
     "duplicate_site",
     "text_format",
+    "nonresident_exceeds_total", "duplicate_file", "duplicate_document", "custom_name_not_allowed",
+    "file_invalid", "identity_invalid", "duplicate_certificate", "date_range_invalid",
+    "absence_fields_not_empty", "absence_not_allowed", "absence_conflict", "certificate_in_use", "decimal_format", "decimal_precision", "percent_range", "duplicate_product", "duplicate_reference",
+    "product_source_locked", "product_in_use", "certificate_invalid", "product_invalid",
   ];
   return code ? t(`errors.${known.includes(code) ? code : "validation"}`) : null;
 }
 export function useProfileChoices(
-  kind: "region" | "contact_role",
-  selected: MainInformationRead["selectedRegions"] = [],
+  kind: "region" | "contact_role" | "document_type" | "certificate_type",
+  selected: readonly (MainInformationRead["selectedRegions"][number] & { customNameAllowed?: boolean })[] = [],
 ) {
   const locale = useLocale() as "kk" | "ru" | "en";
   const query = useQuery({
@@ -42,15 +46,18 @@ export function useProfileChoices(
       return { ...first, items: [...items.values()] };
     },
   });
-  const choices = (query.data?.items ?? []).map((item) => ({ value: item.id, label: item.name, disabled: false }));
+  const choices = (query.data?.items ?? []).map((item) => ({ value: item.id, label: item.name, code: item.code,
+    customNameAllowed: item.customNameAllowed ?? false, disabled: false }));
   for (const item of selected)
     if (!choices.some((choice) => choice.value === item.id))
-      choices.push({ value: item.id, label: entryDisplayName(item.names, locale, item.code), disabled: true });
+      choices.push({ value: item.id, label: entryDisplayName(item.names, locale, item.code), code: item.code,
+        customNameAllowed: item.customNameAllowed ?? false, disabled: true });
   return { ...query, choices };
 }
 
 export function moveRow<T>(rows: readonly T[], from: number, to: number): T[] {
   const copy = [...rows];
+  if (from < 0 || from >= copy.length || to < 0 || to >= copy.length) return copy;
   const [item] = copy.splice(from, 1);
   if (item !== undefined) copy.splice(to, 0, item);
   return copy;
