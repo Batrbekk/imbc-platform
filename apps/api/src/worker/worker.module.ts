@@ -20,6 +20,9 @@ import { EOndirisWorkerModule } from '../modules/e-ondiris/e-ondiris-worker.modu
 import { EOndirisWorker } from '../modules/e-ondiris/worker.js';
 import { MainSourceWorkerModule } from '../modules/profiles/main-source-worker.module.js';
 import { MainSourceWorker } from '../modules/profiles/main-source-worker.js';
+import { DiligenceWorker } from '../modules/due-diligence/diligence-worker.js';
+import { DiligenceWorkerModule } from '../modules/due-diligence/diligence-worker.module.js';
+import { CatalogProjectionRefreshService } from '../modules/due-diligence/catalog-projection-refresh.service.js';
 import { ManufacturerOnboardingService } from '../modules/registration/onboarding.service.js';
 import { ANTIVIRUS, ClamdAntivirus } from '../modules/files/antivirus.js';
 import { orgChartSamplePassed } from '../modules/files/org-chart-sample.rules.js';
@@ -60,9 +63,11 @@ import { JobHandlers } from './handlers.service.js';
     AuditModule,
     EOndirisWorkerModule,
     MainSourceWorkerModule,
+    DiligenceWorkerModule,
   ],
   providers: [
     JobHandlers,
+    CatalogProjectionRefreshService,
     MailService,
     KeycloakAdminService,
     SessionService,
@@ -103,6 +108,8 @@ export class WorkerModule implements OnApplicationBootstrap {
     private readonly fileCleanup: FileCleanupJob,
     private readonly eOndiris: EOndirisWorker,
     private readonly mainSource: MainSourceWorker,
+    private readonly diligence: DiligenceWorker,
+    private readonly catalogProjection: CatalogProjectionRefreshService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -134,7 +141,7 @@ export class WorkerModule implements OnApplicationBootstrap {
       [QUEUES.certificateExpiry]: () => h.certificateExpiry(),
       [QUEUES.purgeSessions]: () => h.purgeSessions(),
       [QUEUES.purgeExportFiles]: () => h.purgeExportFiles(),
-      [QUEUES.refreshCatalog]: () => h.todo(QUEUES.refreshCatalog),
+      [QUEUES.refreshCatalog]: (d) => this.catalogProjection.refresh(d),
       [QUEUES.buildExport]: () => h.todo(QUEUES.buildExport),
       [QUEUES.updateStatus]: () => h.todo(QUEUES.updateStatus),
       [QUEUES.keycloakEvents]: () => h.keycloakEvents(),
@@ -146,6 +153,7 @@ export class WorkerModule implements OnApplicationBootstrap {
       [QUEUES.eOndirisDaily]: () => this.eOndiris.daily(),
       [QUEUES.eOndirisProfileRefresh]: () => this.eOndiris.refreshPending(),
       [QUEUES.mainSourceRefresh]: () => this.mainSource.refreshPending(),
+      [QUEUES.diligenceRefresh]: () => this.diligence.refreshPending(),
     };
 
     for (const [queue, run] of Object.entries(routes) as [QueueName, (data: never) => Promise<unknown>][]) {

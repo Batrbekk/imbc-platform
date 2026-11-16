@@ -72,6 +72,8 @@ describe('worker: письма событий', () => {
         refreshPending: async () => ({ processed: 0, deferred: 0, ambiguous: 0, failed: 0 }),
       } as never,
       { refreshPending: async () => ({ processed: 0, deferred: 0, failed: 0 }) } as never,
+      { refreshPending: async () => ({ processed: 0, deferred: 0, failed: 0 }) } as never,
+      { refresh: async () => false } as never,
     );
     await worker.onApplicationBootstrap();
 

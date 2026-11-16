@@ -71,7 +71,7 @@
 - [x] Product-source reconciliation по имени+TN VED, stable identity/local associations сохраняются, включая явно снятую связь с площадкой; порядок разных кодов не угадывает связи. Runtime/browser acceptance полного Stage4b остаётся.
 - [x] Audited refresh legal/OKED/founders, per-field contact/site ownership и suppression, exact source pins, terminal callback/recovery и immutable COW0026. Astra independently63/63 +4 planner controls, shared-site P2 закрыт;429 distinct source/affected cases имеют отдельные gates. [Срез](2026-11-16-stage4b-main-source-ownership.md).
 - [ ] Полная Stage4b role/browser/runtime/load и live source acceptance на предназначенной поставке; локальные PostgreSQL проверки её не заменяют.
-- [ ] DD current record/checklist с атомарным full before/after, ordered checks и SME override; оплаченные модули и source contracts подтверждены до live acceptance.
+- [x] Canonical DD current/checklist0027, full atomic before/after, ordered checks, SME override/enhanced, exact report versions и en/ru/kk UI. Upload COMMIT-ACK compensation и independent current/attempt/history mock provenance приняты bounded GPT-6 Astra;58 DD PG/HTTP +488 web +12 DD contracts. Полное покрытие provider modules и реальная приёмка остаются в открытых пунктах выше; paid module/source contracts должны быть подтверждены до live acceptance.
 
 ## 5/6/6б. Рабочие кабинеты
 

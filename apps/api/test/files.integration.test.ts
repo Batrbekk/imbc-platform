@@ -29,6 +29,7 @@ import { Auth } from '../src/modules/auth/guards.js';
 import { denyAll, FILE_READ_RULES, manufacturerFileRule } from '../src/modules/files/file-access.js';
 import { FilesController } from '../src/modules/files/files.controller.js';
 import { orgChartSampleReadRule } from '../src/modules/files/org-chart-sample.rules.js';
+import { diligenceReportReadRule } from '../src/modules/due-diligence/report-files.js';
 import type { Antivirus } from '../src/modules/files/antivirus.js';
 import { FILE_ROUTES, FilesService } from '../src/modules/files/files.service.js';
 import { type AcceptedUpload, acceptUpload, uploadInterceptor } from '../src/modules/files/upload.js';
@@ -357,10 +358,12 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
     let stagedKey = '';
     storage.failNext('remove');
     await expect(
-      service.withStagedObject(secret, async (storageKey) => {
-        stagedKey = storageKey;
-        throw new Error('сбой действия');
-      }),
+      service.withStagedObject(secret, (storageKey) =>
+        withQueueTransaction(pool, async () => {
+          stagedKey = storageKey;
+          throw new Error('сбой действия');
+        }),
+      ),
     ).rejects.toThrow('сбой действия');
     expect(storage.keys(QUARANTINE)).toEqual([stagedKey]);
     expect(warn).toHaveBeenCalled();
@@ -684,7 +687,9 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
           ? manufacturerFileRule
           : purpose === 'organisation_chart_sample'
             ? orgChartSampleReadRule
-            : denyAll,
+            : purpose === 'due_diligence_report' || purpose === 'enhanced_due_diligence_report'
+              ? diligenceReportReadRule
+              : denyAll,
       );
 
     const cv = await createFile({ purpose: 'cv' });

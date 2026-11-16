@@ -566,7 +566,10 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     expect(attempt.completedAt).not.toBeNull();
     expect(attempt.pollToken).not.toBeNull();
     expect(JSON.stringify(attempt.value)).not.toContain(TOKEN);
-    expect((attempt.value as { note: string }).note).toBe('echo [redacted]');
+    expect(Object.keys(attempt.value as object).sort()).toEqual(['basic', 'founders', 'kzCoContact']);
+    expect(Object.hasOwn(attempt.value as object, 'note')).toBe(false);
+    expect(JSON.stringify(attempt.value)).not.toContain('director_iin');
+    expect(JSON.stringify(attempt.value)).not.toContain('founder_uin');
     expect((attempt.value as { basic: { biin: string } }).basic.biin).toBe(m.bin);
     expect(stub.requests.filter((r) => r.bin === m.bin).map((r) => r.kind)).toEqual([
       'start',
@@ -605,9 +608,13 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     expect(await mainRefreshOf(m.profileId)).toMatchObject([{ organization_id: m.organizationId, requested_attempt_id: attemptId, state: 'pending' }]);
     expect(await profileContentOf(m)).toEqual(before);
     const outbox = await mainRefreshOf(m.profileId);
+    const snapshots = (await pool.query('select id,terminal_state,normalized_state,is_test_data from diligence_source_snapshot where attempt_id=$1', [attemptId])).rows;
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]).toMatchObject({ terminal_state: state, is_test_data: false });
     const calls = callsFor(m.bin);
     await prefillJob(over).run({ attemptId });
     expect(await mainRefreshOf(m.profileId)).toEqual(outbox);
+    expect((await pool.query('select id,terminal_state,normalized_state,is_test_data from diligence_source_snapshot where attempt_id=$1', [attemptId])).rows).toEqual(snapshots);
     expect(callsFor(m.bin)).toBe(calls);
     expect(startsFor(m.bin)).toBe(state === 'received' || state === 'unavailable' ? 1 : 0);
   });
@@ -625,6 +632,7 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
       expect((first.error as Error).message).toContain('(P0001)');
       expect(await attemptOf(m.profileId)).toMatchObject({ state: state === 'received' || state === 'unavailable' ? 'polling' : 'queued', value: null, completedAt: null });
       expect(await mainRefreshOf(m.profileId)).toEqual([]);
+      expect((await pool.query('select id from diligence_source_snapshot where attempt_id=$1', [attemptId])).rows).toEqual([]);
       expect(await db.select().from(schema.prefilledValue).where(eq(schema.prefilledValue.attemptId, attemptId))).toEqual([]);
       expect(await db.select().from(schema.auditEntries).where(and(eq(schema.auditEntries.action, 'adata.read_completed'), eq(schema.auditEntries.objectId, attemptId)))).toEqual([]);
       expect(await profileContentOf(m)).toEqual(before);
@@ -649,6 +657,7 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     expect((await db.select().from(schema.externalCheckAttempt).where(eq(schema.externalCheckAttempt.id, attemptId)))[0]?.state).toBe('received');
     expect((await db.select().from(schema.externalCheck).where(eq(schema.externalCheck.id, old.externalCheckId)))[0]?.latestAttemptId).toBe(latest!.id);
     expect(await mainRefreshOf(m.profileId)).toEqual([]);
+    expect((await pool.query('select id from diligence_source_snapshot where attempt_id=$1', [attemptId])).rows).toEqual([]);
   });
 
   it.each([
@@ -666,6 +675,93 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     expect(await mainRefreshOf(m.profileId)).toMatchObject([{ requested_attempt_id: attemptId, state: 'pending' }]);
     expect(startsFor(m.bin)).toBe(1);
     expect(await db.select().from(schema.auditEntries).where(and(eq(schema.auditEntries.action, 'adata.read_completed'), eq(schema.auditEntries.objectId, attemptId)))).toMatchObject([{ outcome: 'failed', diff: { state: 'unavailable', failure: 'malformed' } }]);
+  });
+
+  it('actual HTTP decimal lexemes reach separate immutable DD evidence while only allowed Main facts are stored', async () => {
+    const m = await manufacturer();
+    const attemptId = await schedule(m);
+    const before = await profileContentOf(m);
+    let starts = 0;
+    const http: typeof fetch = async input => {
+      if (String(input).includes('/check/')) return new Response(`{"message":"ready","data":{"basic":{"biin":"${m.bin}","name_ru":"Synthetic DD company","director_iin":"synthetic-private"},"contract":{"total_count":90071992547409930001,"total_sum":9007199254740993.0010,"details":["synthetic-private"]},"unrelated":{"names":"synthetic-private"}}}`);
+      starts++;
+      return new Response('{"success":true,"token":"synthetic-poll"}');
+    };
+    await prefillJob({}, http).run({ attemptId });
+    expect(await attemptOf(m.profileId)).toMatchObject({ state: 'received' });
+    const [snapshot] = (await pool.query(`select s.*,s.completed_at=a.completed_at as exact_completion
+      from diligence_source_snapshot s join external_check_attempt a on a.id=s.attempt_id where s.attempt_id=$1`, [attemptId])).rows;
+    expect(snapshot).toMatchObject({ terminal_state: 'received', normalized_state: 'received', is_test_data: false, exact_completion: true, evidence: [{ kind: 'contracts', count: '90071992547409930001', sum: '9007199254740993.0010' }], evaluation: { automaticResult: 'amber' } });
+    const attempt = await attemptOf(m.profileId);
+    expect(Object.keys(attempt.value as object).sort()).toEqual(['basic', 'founders', 'kzCoContact']);
+    expect(JSON.stringify(attempt.value)).not.toContain('contract');
+    expect(JSON.stringify(attempt.value)).not.toContain('synthetic-private');
+    expect(JSON.stringify(snapshot)).not.toContain('synthetic-private');
+    expect(await profileContentOf(m)).toEqual(before);
+    expect((await pool.query('select * from due_diligence_record where profile_id=$1', [m.profileId])).rows).toEqual([]);
+    expect((await pool.query('select requested_snapshot_id,state from diligence_refresh_outbox where profile_id=$1', [m.profileId])).rows).toMatchObject([{ requested_snapshot_id: snapshot.id, state: 'pending' }]);
+    await prefillJob({}, http).run({ attemptId });
+    expect((await pool.query('select id from diligence_source_snapshot where attempt_id=$1', [attemptId])).rows).toEqual([{ id: snapshot.id }]);
+    expect(starts).toBe(1);
+    await expect(pool.query("update diligence_source_snapshot set schema_version='changed' where id=$1", [snapshot.id])).rejects.toMatchObject({ code: '23514' });
+  });
+
+  it.each([{}, { basic: null, founders: null, kzCoContact: null }])('a no-data HTTP response produces a no-answer receipt with no automatic result', async data => {
+    const m = await manufacturer();
+    const attemptId = await schedule(m, { kind: 'ready', afterPolls: 0, body: { message: 'ready', data } });
+    await prefillJob().run({ attemptId });
+    expect(await attemptOf(m.profileId)).toMatchObject({ state: 'received', value: { basic: null, founders: null, kzCoContact: null } });
+    expect((await pool.query('select normalized_state,evidence,evaluation from diligence_source_snapshot where attempt_id=$1', [attemptId])).rows).toMatchObject([{ normalized_state: 'no_answer', evidence: [], evaluation: null }]);
+    expect((await pool.query('select * from due_diligence_record where profile_id=$1', [m.profileId])).rows).toEqual([]);
+  });
+
+  it('valid Main facts survive a malformed DD check while no raw malformed evidence is stored', async () => {
+    const m = await manufacturer();
+    const data = { basic: { biin: m.bin, name_ru: 'Synthetic valid legal name' }, riskFactor: { company: { bankrupt: 'synthetic-private' } } };
+    const attemptId = await schedule(m, { kind: 'ready', afterPolls: 0, body: { message: 'ready', data } });
+    await prefillJob().run({ attemptId });
+    expect(await attemptOf(m.profileId)).toMatchObject({ state: 'received', value: { basic: { name_ru: 'Synthetic valid legal name' } } });
+    expect((await pool.query('select normalized_state,evidence,evaluation from diligence_source_snapshot where attempt_id=$1', [attemptId])).rows).toMatchObject([{ normalized_state: 'malformed', evidence: [], evaluation: null }]);
+    expect(JSON.stringify((await attemptOf(m.profileId)).value)).not.toContain('synthetic-private');
+  });
+
+  it('a credential reflected in DD evidence is quarantined without leaking it to storage or logs', async () => {
+    const m = await manufacturer();
+    const data = { basic: { biin: m.bin, name_ru: 'Synthetic legal name' }, riskFactor: { company: { tax_risk_degree: TOKEN } } };
+    const attemptId = await schedule(m, { kind: 'ready', afterPolls: 0, body: { message: 'ready', data } });
+    const result = await captured(() => prefillJob().run({ attemptId }));
+    expect(result.error).toBeUndefined();
+    expect(result.output).not.toContain(TOKEN);
+    const rows = (await pool.query('select normalized_state,evidence,evaluation from diligence_source_snapshot where attempt_id=$1', [attemptId])).rows;
+    expect(rows).toMatchObject([{ normalized_state: 'malformed', evidence: [], evaluation: null }]);
+    expect(JSON.stringify(rows)).not.toContain(TOKEN);
+    expect(JSON.stringify((await attemptOf(m.profileId)).value)).not.toContain(TOKEN);
+  });
+
+  it('a DD outbox failure rolls back source/Main/prefills/audit atomically and recovery never sends a second Get', async () => {
+    const m = await manufacturer();
+    const data = { basic: { biin: m.bin, name_ru: 'Synthetic legal name' }, riskFactor: { company: { bankrupt: false } } };
+    const attemptId = await schedule(m, { kind: 'ready', afterPolls: 0, body: { message: 'ready', data } });
+    try {
+      await pool.query(`create function adata_dd_outbox_reject() returns trigger language plpgsql as $$
+        begin raise exception 'isolated DD outbox failure' using errcode='P0001'; end $$`);
+      await pool.query('create trigger adata_dd_outbox_reject before insert on diligence_refresh_outbox for each row execute function adata_dd_outbox_reject()');
+      const first = await captured(() => prefillJob().run({ attemptId }));
+      expect((first.error as Error).message).toContain('(P0001)');
+      expect(await attemptOf(m.profileId)).toMatchObject({ state: 'polling', completedAt: null, value: null });
+      expect((await pool.query('select id from diligence_source_snapshot where attempt_id=$1', [attemptId])).rows).toEqual([]);
+      expect((await pool.query('select * from diligence_refresh_outbox where profile_id=$1', [m.profileId])).rows).toEqual([]);
+      expect(await mainRefreshOf(m.profileId)).toEqual([]);
+      expect(await db.select().from(schema.prefilledValue).where(eq(schema.prefilledValue.attemptId, attemptId))).toEqual([]);
+      expect(await db.select().from(schema.auditEntries).where(and(eq(schema.auditEntries.action, 'adata.read_completed'), eq(schema.auditEntries.objectId, attemptId)))).toEqual([]);
+    } finally {
+      await pool.query('drop trigger if exists adata_dd_outbox_reject on diligence_refresh_outbox');
+      await pool.query('drop function if exists adata_dd_outbox_reject()');
+    }
+    await prefillJob().run({ attemptId });
+    expect(await attemptOf(m.profileId)).toMatchObject({ state: 'received' });
+    expect((await pool.query('select normalized_state,evaluation from diligence_source_snapshot where attempt_id=$1', [attemptId])).rows).toMatchObject([{ normalized_state: 'received', evaluation: { automaticResult: 'green' } }]);
+    expect(startsFor(m.bin)).toBe(1);
   });
 
   it('один Get Request на БИН: повтор, параллель, два входа, рестарт посреди опроса (IMBC-07)', async () => {
@@ -856,9 +952,7 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     expect(startsFor(m.bin)).toBe(1);
   });
 
-  const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
-
-  it('ответ с NUL и одиночным суррогатом в значениях сохраняется: received, в value и prefilled_value их нет', async () => {
+  it('unrepresentable checked legal text is unavailable/malformed without silently rewriting its spelling', async () => {
     const m = await manufacturer();
     const basic = {
       ...(ADATA_FIXTURE.data.basic as object),
@@ -874,16 +968,10 @@ describe.skipIf(!databaseUrl)('чтение Adata при установке па
     const { error } = await captured(() => throughQueue(prefillJob()));
     expect(error).toBeUndefined();
     const attempt = await attemptOf(m.profileId);
-    expect(attempt.state).toBe('received');
-    const stored = JSON.stringify(attempt.value);
-    expect(stored.includes('\u0000') || /\\u0000/.test(stored)).toBe(false);
-    expect(LONE_SURROGATE.test(stored)).toBe(false);
+    expect(attempt).toMatchObject({ state: 'unavailable', failure: 'malformed', value: null });
     const values = await db.select().from(schema.prefilledValue).where(eq(schema.prefilledValue.attemptId, attemptId));
-    expect(new Set(values.map((v) => v.field)).size).toBe(9);
-    for (const v of values) {
-      expect(v.value.includes('\u0000')).toBe(false);
-      expect(LONE_SURROGATE.test(v.value)).toBe(false);
-    }
+    expect(values).toEqual([]);
+    expect((await pool.query('select terminal_state,normalized_state,evidence,evaluation from diligence_source_snapshot where attempt_id=$1', [attemptId])).rows).toMatchObject([{ terminal_state: 'unavailable', normalized_state: 'malformed', evidence: [], evaluation: null }]);
     expect(startsFor(m.bin)).toBe(1);
   });
 

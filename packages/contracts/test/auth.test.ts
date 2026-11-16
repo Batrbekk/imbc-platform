@@ -65,6 +65,7 @@ describe('страница после входа: destinationFor', () => {
     ['/admin/accounts', 'accounts.manage'],
     ['/references', 'reference.read'],
     ['/lps', 'lps.read'],
+    ['/imbc', 'imbc_records.read'],
   ];
 
   it.each(ROLES)('без сохранённого адреса %s попадает на стартовую страницу', (role) => {
@@ -78,6 +79,14 @@ describe('страница после входа: destinationFor', () => {
       for (const saved of [path, `${path}?q=steel&page=2#results`, `${path}/`, `${path}//`, `${path}/123?tab=docs`])
         expect(destinationFor(role, saved), saved).toBe(allowed ? saved : roleHome(role));
     }
+  });
+
+  it('IMBC Class C pages admit expert/director and refuse every other role across router aliases', () => {
+    for (const role of ROLES) {
+      for (const saved of ['/imbc/profiles/00000000-0000-4000-8000-000000000001/due-diligence', '/imbc/', '/%69mbc/profiles/x?tab=history#report'])
+        expect(destinationFor(role, saved)).toBe(role === 'expert' || role === 'director' ? saved : roleHome(role));
+    }
+    expect(destinationFor('manufacturer', '/imbc-more')).toBe('/imbc-more');
   });
 
   it('/profile только у производителя: у остальных ролей — стартовая страница', () => {

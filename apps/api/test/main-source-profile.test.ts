@@ -159,7 +159,8 @@ describe.skipIf(!url)('Stage 4b actual Main source pins, per-field saves and COW
       throw new Error('Isolated source database required');
     pool = new pg.Pool({ connectionString: url, max: 8 });
     await resetDatabase(pool);
-    await migrateThrough(pool, '0026_stage4b_main_source_ownership');
+    // These cases call the current terminal worker, including its registered DD receipt dependency.
+    await migrateThrough(pool);
     db = drizzle(pool, { schema, casing: 'snake_case' });
     const audit = new AuditService(db);
     sections = new ProfileSectionsService(pool, audit, submissionHandlers());

@@ -5,6 +5,7 @@ import { policyForTransaction } from '../../common/policy.js';
 import type { AuthContext } from '../auth/auth.types.js';
 import { orgChartSampleReadRule } from './org-chart-sample.rules.js';
 import { manufacturerFileOwners } from './file-owner.js';
+import { diligenceReportReadRule } from '../due-diligence/report-files.js';
 
 /** Allowed selection, not just a boolean: a frozen owner must never fall back to the global latest version. */
 export type FileReadDecision =
@@ -63,8 +64,8 @@ export const FILE_READ_RULES: Record<FilePurpose, FileReadRule> = {
   certificate_file: manufacturerFileRule,
   document_file: manufacturerFileRule,
   site_survey_report: denyAll,
-  due_diligence_report: denyAll,
-  enhanced_due_diligence_report: denyAll,
+  due_diligence_report: diligenceReportReadRule,
+  enhanced_due_diligence_report: diligenceReportReadRule,
   operator_visit_file: denyAll,
   technical_requirements: denyAll,
   agar_cdp_report: denyAll,

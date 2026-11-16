@@ -7,19 +7,24 @@ const SRC = fileURLToPath(new URL('../src/', import.meta.url));
 /** Таблицы попыток и предзаполненных значений: в них ответ Adata с ФИО руководителя и учредителями. */
 const IDENTIFIERS = /\b(prefilledValue|externalCheckAttempt|prefilled_value|external_check_attempt)\b/;
 
-/** Кто вправе их читать: схема, модуль Adata, задание worker и чтение своего профиля. */
+/** Reviewed exact readers: Main source/COW and Class C DD use normalized snapshots or attempt metadata. */
 const ALLOWED = [
   /^database\/schema\//,
   /^modules\/adata\//,
   /^worker\/adata-prefill\.job\.ts$/,
   /^modules\/profiles\/profiles\.service\.ts$/,
   /^modules\/profiles\/main-source\.ts$/,
+  /^modules\/profiles\/main-source-materializer\.ts$/,
+  /^modules\/profiles\/main-source-refresh\.service\.ts$/,
+  /^modules\/due-diligence\/diligence-run\.service\.ts$/,
+  /^modules\/due-diligence\/diligence\.service\.ts$/,
+  /^modules\/due-diligence\/source-snapshot-store\.ts$/,
 ];
 
-// Значения Adata не попадают в каталог, страницу компании, выгрузки и ответы администратора (GEN-11, ADM-06):
-// ни один другой модуль не называет их таблиц.
+// Raw source/attempt tables cannot be referenced by catalog, public company, export or administrator modules.
+// Their views receive only explicitly permitted checked projections (GEN-11, ADM-06), never raw reports.
 describe('граница модулей', () => {
-  it('таблицы Adata называют только схема, модуль adata, задание worker и адаптеры своего профиля (GEN-11, ADM-06)', () => {
+  it('таблицы Adata называют только точные разрешённые source/DD readers, worker и схема (GEN-11, ADM-06)', () => {
     const files = readdirSync(SRC, { recursive: true, encoding: 'utf8' })
       .map((file) => file.split('\\').join('/'))
       .filter((file) => file.endsWith('.ts'));

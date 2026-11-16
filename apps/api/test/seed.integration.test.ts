@@ -86,13 +86,16 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
       commodity_group: 5,
       commodity_type: 0,
       contact_role: 3,
+      country: 1,
       certificate_type: 9,
       document_type: 4,
       equipment_type: 0,
       kpved: 0,
       legal_form: 3,
+      lps_status: 4,
       oked: 0,
       process: 0,
+      programme: 2,
       region: 0,
       tn_ved: 0,
       unit: 4,
@@ -133,8 +136,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
         )
       ).rows[0]!.n;
     const auditAfterFirst = await audit();
-    // Шесть списков release и семь временных.
-    expect(auditAfterFirst).toBe(13);
+    // Девять списков release, включая LPS country/status/programme, и семь временных.
+    expect(auditAfterFirst).toBe(16);
     await seedDemo(pool);
     expect(await perDictionary()).toEqual(demo);
     expect(await audit()).toBe(auditAfterFirst);
@@ -253,7 +256,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
     await pool.query(`update manufacturer_profiles set has_pending_changes = true where status <> 'verified'`);
     await seedDemo(pool);
     expect(await queue(), 'повторный').toEqual(expected);
-    const pending = await pool.query(`select 1 from manufacturer_profiles where status <> 'verified' and has_pending_changes`);
+    const pending = await pool.query(
+      `select 1 from manufacturer_profiles where status <> 'verified' and has_pending_changes`,
+    );
     expect(pending.rowCount, 'has_pending_changes после повторного запуска').toBe(0);
     // У новых организаций нет аккаунтов.
     const accounts = await pool.query(

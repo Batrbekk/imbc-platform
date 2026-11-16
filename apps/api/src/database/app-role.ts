@@ -42,6 +42,11 @@ export async function applyAppRoleGrants(pool: pg.Pool, role: string): Promise<v
       await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON adata_main_snapshot FROM ${name}`);
       await client.query(`REVOKE DELETE, TRUNCATE ON main_source_refresh_outbox FROM ${name}`);
     }
+    const diligence = await client.query<{ exists: boolean }>("SELECT to_regclass('diligence_operation') IS NOT NULL AS exists");
+    if (diligence.rows[0]?.exists) {
+      await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON diligence_source_snapshot, diligence_operation FROM ${name}`);
+      await client.query(`REVOKE DELETE, TRUNCATE ON diligence_refresh_outbox FROM ${name}`);
+    }
     // Журнал аудита (AUD-02) и принятия NDA (FC-02, DBML: append-only) — только добавление:
     // у роли приложения нет UPDATE/DELETE.
     await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON audit_entries FROM ${name}`);

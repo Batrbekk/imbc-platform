@@ -58,6 +58,11 @@ import { ProfileUploadService } from './modules/profiles/profile-upload.service.
 import { defineSectionHandler, PROFILE_SECTION_HANDLERS } from './modules/profiles/section-handler.js';
 import { EOndirisModule } from './modules/e-ondiris/e-ondiris.module.js';
 import { LpsModule } from './modules/lps/lps.module.js';
+import { DiligenceModule } from './modules/due-diligence/diligence.module.js';
+import { DiligenceUploadController, DiligenceUploadGuard } from './modules/due-diligence/diligence-upload.controller.js';
+import { DiligenceUploadService } from './modules/due-diligence/diligence-upload.service.js';
+import { DiligenceRunController } from './modules/due-diligence/diligence-run.controller.js';
+import { DiligenceRunService } from './modules/due-diligence/diligence-run.service.js';
 import { ManufacturerOnboardingService } from './modules/registration/onboarding.service.js';
 import { RegistrationController } from './modules/registration/registration.controller.js';
 import { CurrentNdaController } from './modules/registration/current-nda.controller.js';
@@ -78,6 +83,7 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     AuditModule,
     EOndirisModule,
     LpsModule,
+    DiligenceModule,
   ],
   controllers: [
     HealthController,
@@ -98,6 +104,8 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     DictionariesController,
     FilesController,
     OrgChartSampleController,
+    DiligenceUploadController,
+    DiligenceRunController,
   ],
   providers: [
     OidcService,
@@ -112,6 +120,9 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     ProfileReviewDetailsService,
     ProfileUploadService,
     ProfileUploadGuard,
+    DiligenceUploadGuard,
+    DiligenceUploadService,
+    DiligenceRunService,
     MainInformationHandler,
     ContactsHandler,
     PersonnelHandler,

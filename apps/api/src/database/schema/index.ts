@@ -17,3 +17,4 @@ export * from './e-ondiris.js';
 export * from './e-ondiris-outbox.js';
 export * from './main-source-ownership.js';
 export * from './lps.js';
+export * from './due-diligence.js';

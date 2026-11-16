@@ -55,6 +55,7 @@ const GUARDED_PAGES = new Map<string, Action>([
   ['/admin/accounts', 'accounts.manage'],
   ['/references', 'reference.read'],
   ['/lps', 'lps.read'],
+  ['/imbc', 'imbc_records.read'],
 ]);
 
 /**

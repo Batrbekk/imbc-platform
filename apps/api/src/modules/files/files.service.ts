@@ -10,7 +10,7 @@ import { ProblemException } from '../../common/problem.js';
 import { ENV, type Env } from '../../config/env.js';
 import { DB, type Database } from '../../database/database.module.js';
 import { fileObject, fileVersion } from '../../database/schema/index.js';
-import type { QueueDb } from '../../database/transaction.js';
+import { type QueueDb, transactionWasRolledBack } from '../../database/transaction.js';
 import { QUEUE } from '../../infra/infra.module.js';
 import { type FileScanJobData, QUEUES } from '../../jobs/queues.js';
 import type { AuthContext } from '../auth/auth.types.js';
@@ -70,8 +70,9 @@ export class FilesService {
 
   /**
    * Байты — в карантин под новым UUID (без имени файла, NFR-09), затем `run(storageKey)` — транзакция
-   * действия. Исключение `run` (откат, отказ прав, сбой) удаляет объект и выходит наружу; сбой удаления —
-   * предупреждение без ключа и имени (объект остаётся в карантине, ни одна строка на него не ссылается).
+   * действия. Подтверждённый rollback и отсутствие зарегистрированной версии позволяют удалить объект.
+   * Неизвестный исход COMMIT/ROLLBACK сохраняет байты до reconciliation. Сбой удаления — предупреждение
+   * без ключа и имени. `run` должен дождаться единственной регистрирующей транзакции действия.
    * Хранилище не приняло объект — 503 `storage_unavailable`, `run` не вызывается; объект, который хранилище
    * могло записать до сбоя ответа, тоже удаляется.
    */
@@ -87,7 +88,20 @@ export class FilesService {
     try {
       return await run(storageKey);
     } catch (error) {
-      await this.discardStaged(storageKey);
+      // A rejected COMMIT acknowledgement does not prove a rollback. Keep the bytes until
+      // later reconciliation; only a confirmed rollback and an authoritative absence permit cleanup.
+      if (transactionWasRolledBack(error)) {
+        try {
+          const exists = await this.db
+            .select({ id: fileVersion.id })
+            .from(fileVersion)
+            .where(eq(fileVersion.storageKey, storageKey))
+            .limit(1);
+          if (exists.length === 0) await this.discardStaged(storageKey);
+        } catch {
+          this.logger.warn('File upload: quarantine bytes retained while registration is unknown');
+        }
+      } else this.logger.warn('File upload: quarantine bytes retained while transaction outcome is unknown');
       throw error;
     }
   }

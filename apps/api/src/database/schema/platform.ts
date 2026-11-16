@@ -1,6 +1,7 @@
 import { type SQL, sql } from 'drizzle-orm';
 import {
   boolean,
+  bigint,
   date,
   index,
   inet,
@@ -92,7 +93,8 @@ export const catalogVisible = pgTable(
     certificateTypes: text('certificate_types').array().notNull(),
     certificatesValidUntil: jsonb('certificates_valid_until').notNull(),
     mainTnved: text('main_tnved'),
-    headcountTotal: smallint('headcount_total'),
+    // Three canonical INTEGER personnel components can sum above INTEGER, still safely below JS 2^53.
+    headcountTotal: bigint('headcount_total', { mode: 'number' }),
     siteSurveyed: boolean('site_surveyed').notNull().default(false),
     /** Тир профиля (IMBC-19, IMBC-20): вычисляется из site_surveyed, отдельно не записывается. */
     tier: profileTier('tier')

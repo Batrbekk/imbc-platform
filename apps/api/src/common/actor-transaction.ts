@@ -7,7 +7,7 @@ import type { Database } from '../database/database.module.js';
 import { boundLockWaits, lockWaitExceeded } from '../database/lock-waits.js';
 import { databaseErrorSummary } from '../database/pg-errors.js';
 import { userAccounts } from '../database/schema/index.js';
-import { type QueueDb, withQueueTransaction } from '../database/transaction.js';
+import { type QueueDb, withQueueTransaction, copyTransactionOutcome } from '../database/transaction.js';
 import type { AuthUser } from '../modules/auth/auth.types.js';
 import type { AuditService } from './audit.service.js';
 import { ProblemException } from './problem.js';
@@ -117,7 +117,7 @@ export async function actorTransaction<T>(
           return run(tx, queueDb);
         });
       } catch (error) {
-        if (lockWaitExceeded(error)) throw busy();
+        if (lockWaitExceeded(error)) throw copyTransactionOutcome(error, busy());
         throw error;
       }
     },

@@ -3,7 +3,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { AuditService } from '../common/audit.service.js';
 import { ENV, type Env } from '../config/env.js';
 import { DB, type Database } from '../database/database.module.js';
-import { externalCheck, externalCheckAttempt, prefilledValue } from '../database/schema/index.js';
+import { externalCheck, externalCheckAttempt, organizations, prefilledValue } from '../database/schema/index.js';
 import type { AdataPrefillJob as AdataPrefillJobData } from '../jobs/queues.js';
 import {
   ADATA_BASE_URL,
@@ -15,7 +15,10 @@ import {
   type AdataTiming,
 } from '../modules/adata/adata.client.js';
 import { allowancePeriodStart, reserveAllowance } from '../modules/adata/allowance.js';
-import { companyInfoMatchesBin, extractPrefill } from '../modules/adata/company-info.js';
+import { extractPrefill } from '../modules/adata/company-info.js';
+import { sanitizeAdataMainPrefill } from '../modules/adata/main-prefill-sanitizer.js';
+import { normalizedDiligenceReceipt, unavailableDiligenceReceipt, type DiligenceSourceReceipt } from '../modules/due-diligence/source-receipt.js';
+import { recordDiligenceSourceReceipt } from '../modules/due-diligence/source-snapshot-store.js';
 import { requestMainSourceRefresh } from '../modules/profiles/main-source-refresh.service.js';
 
 export const ADATA_CLIENT_FACTORY = Symbol('ADATA_CLIENT_FACTORY');
@@ -37,6 +40,8 @@ interface Attempt {
   pollToken: string | null;
   profileId: string;
   organizationId: string;
+  companyName: string;
+  isTestData: boolean;
 }
 
 type Ready = { ready: true; data: Record<string, unknown> } | { ready: false; failure: AdataFailure };
@@ -72,7 +77,8 @@ class AdataJobDatabaseError extends Error {
  * Один БИН — один Get Request: единица квоты резервируется и polling фиксируется до вызова; повтор
  * задания продолжает опрос по сохранённому токену проверки, но Get Request не повторяет.
  * Ответы и сбои Adata — состояние попытки, а не исключение: исключение pg-boss записал бы в output
- * задания. Бросает только на сбоях своей БД — их повторяет pg-boss. due_diligence_record не пишется.
+ * задания. Бросает только на сбоях своей БД — их повторяет pg-boss. Терминальная транзакция сохраняет
+ * отдельный normalized DD receipt; его current record/history обновляет независимый recovery worker.
  */
 @Injectable()
 export class AdataPrefillJob {
@@ -120,9 +126,12 @@ export class AdataPrefillJob {
         pollToken: externalCheckAttempt.pollToken,
         profileId: externalCheck.profileId,
         organizationId: externalCheck.organizationId,
+        companyName: organizations.name,
+        isTestData: externalCheckAttempt.isTestData,
       })
       .from(externalCheckAttempt)
       .innerJoin(externalCheck, eq(externalCheck.id, externalCheckAttempt.externalCheckId))
+      .innerJoin(organizations, eq(organizations.id, externalCheck.organizationId))
       .where(eq(externalCheckAttempt.id, attemptId));
     return row;
   }
@@ -146,6 +155,10 @@ export class AdataPrefillJob {
           .set({ state, completedAt: sql`now()`, failure: null })
           .where(eq(externalCheckAttempt.id, attempt.id));
         await requestMainSourceRefresh(tx, attempt.profileId, attempt.organizationId, attempt.id);
+        await recordDiligenceSourceReceipt(tx, {
+          profileId: attempt.profileId, organizationId: attempt.organizationId, attemptId: attempt.id,
+          ...unavailableDiligenceReceipt(state, attempt.isTestData),
+        });
         await this.audit.record(
           {
             organizationId: attempt.organizationId,
@@ -212,7 +225,7 @@ export class AdataPrefillJob {
   }
 
   /**
-   * Ответ и девять значений — одной транзакцией; value и prefilled_value — из копии без токена.
+   * Разрешённый Main subset, девять значений и отдельный normalized DD receipt — одной транзакцией.
    * Ответ разбирается до транзакции: любое исключение разбора (например, RangeError глубокой
    * вложенности) — ответ непригоден, попытка закрывается malformed. В транзакции ответ уже только
    * строки, поэтому исключение там — сбой своей БД либо отказ БД принять данные.
@@ -220,11 +233,20 @@ export class AdataPrefillJob {
   private async received(attempt: Attempt, data: Record<string, unknown>, token: string): Promise<void> {
     let json: string;
     let rows: ReturnType<typeof extractPrefill>;
+    let receipt: DiligenceSourceReceipt;
     try {
-      if (!companyInfoMatchesBin(data, attempt.bin)) return this.unavailable(attempt, 'malformed');
-      const value = redactToken(data, token);
+      const value = sanitizeAdataMainPrefill(data, attempt.bin, token);
       json = JSON.stringify(value);
       rows = extractPrefill(value);
+      const basic = value.basic as { name_ru?: unknown; name_kz?: unknown } | null;
+      const sourceName = [basic?.name_ru, basic?.name_kz].find(name => typeof name === 'string' && name.trim());
+      receipt = normalizedDiligenceReceipt(data, {
+        bin: attempt.bin, companyName: typeof sourceName === 'string' ? sourceName : attempt.companyName,
+        isTestData: attempt.isTestData,
+      });
+      // A reflected credential must never enter normalized evidence; quarantine that DD packet.
+      if (JSON.stringify(redactToken(receipt, token)) !== JSON.stringify(receipt))
+        receipt = unavailableDiligenceReceipt('malformed', attempt.isTestData);
     } catch {
       // Текст исключения не пишется: в нём может быть фрагмент ответа.
       return this.unavailable(attempt, 'malformed');
@@ -262,6 +284,9 @@ export class AdataPrefillJob {
             )
             .onConflictDoNothing();
         await requestMainSourceRefresh(tx, attempt.profileId, attempt.organizationId, attempt.id);
+        await recordDiligenceSourceReceipt(tx, {
+          profileId: attempt.profileId, organizationId: attempt.organizationId, attemptId: attempt.id, ...receipt,
+        });
         await this.audit.record(
           {
             organizationId: attempt.organizationId,
@@ -293,6 +318,11 @@ export class AdataPrefillJob {
           .returning({ id: externalCheckAttempt.id });
         if (!row) return false;
         await requestMainSourceRefresh(tx, attempt.profileId, attempt.organizationId, attempt.id);
+        const state = failure === 'module_off' ? 'modules_not_connected' : failure === 'malformed' ? 'malformed' : 'unavailable';
+        await recordDiligenceSourceReceipt(tx, {
+          profileId: attempt.profileId, organizationId: attempt.organizationId, attemptId: attempt.id,
+          ...unavailableDiligenceReceipt(state, attempt.isTestData),
+        });
         await this.audit.record(
           {
             organizationId: attempt.organizationId,

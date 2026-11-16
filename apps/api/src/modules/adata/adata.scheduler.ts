@@ -28,7 +28,7 @@ const NOT_SENT = ['not_configured', 'quota_exhausted'] as const;
  * Одно чтение Adata, когда профиль производителя появился: пароль установлен (MAN-03, NOT-23) или,
  * если событие Keycloak ещё не пришло, первый вход. Регистрация, повтор письма и открытие профиля
  * сюда не обращаются: БИН регистрации, не ставшей профилем, не читается (IMBC-07).
- * Попытка profile_created у профиля одна; строка профиля блокируется for update, поэтому событие
+ * Попытка profile_created у профиля одна; строка профиля блокируется for no key update, поэтому событие
  * пароля и вход не ставят двух попыток. Токен Adata планировщику не нужен — его читает только worker.
  */
 @Injectable()
@@ -84,7 +84,8 @@ export class AdataScheduler {
           eq(manufacturerProfiles.source, 'manual'),
         ),
       )
-      .for('update', { of: manufacturerProfiles });
+      // Profile identity never changes; terminal snapshot FKs need compatible KEY SHARE.
+      .for('no key update', { of: manufacturerProfiles });
     if (!target?.bin) return 'skipped';
 
     const [existing] = await tx

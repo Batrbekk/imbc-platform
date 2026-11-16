@@ -29,6 +29,7 @@ import {
 } from './profile-publication-graph.js';
 import { ownSections, type StoredSection } from './profile-store.js';
 import { validateFrozenSubmissionFiles } from './submission-file-evidence.js';
+import { rebuildVerifiedCatalogProjection } from '../due-diligence/catalog-projection.js';
 
 const forbidden = () => new ProblemException(403, 'forbidden', 'Нет прав на это рассмотрение.');
 const changed = () => new ProblemException(409, 'assignment_changed', 'Это рассмотрение уже изменилось или завершено.');
@@ -521,6 +522,7 @@ export class ProfileReviewService {
         .update(reviewAssignment)
         .set({ closedAt, closedBy: actor.id, closeReason: 'review_result' })
         .where(eq(reviewAssignment.id, assignmentId));
+      await rebuildVerifiedCatalogProjection(tx, { profileId: graph.profile.id, organizationId: graph.profile.organizationId });
       await this.audit.record(
         {
           userId: actor.id,

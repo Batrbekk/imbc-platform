@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DATA_CLASSES, DICTIONARY_CODES, FILE_PURPOSES, FILE_SCAN_STATES, LOCALES } from '@imbc/contracts';
+import { DATA_CLASSES, FILE_PURPOSES, FILE_SCAN_STATES, LOCALES } from '@imbc/contracts';
 import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { applyAppRoleGrants } from '../src/database/app-role.js';
@@ -12,6 +12,21 @@ const MIGRATIONS = fileURLToPath(new URL('../drizzle', import.meta.url));
 const BEFORE = '0008_reference_organizations';
 const EXPAND = '0009_stage2_foundation';
 const DATA = '0010_stage2_reference_data';
+/** Historical 0010 inventory is fixed; later unit/LPS dictionaries belong to later migrations. */
+const STAGE2_DICTIONARIES = [
+  'region',
+  'legal_form',
+  'oked',
+  'tn_ved',
+  'kpved',
+  'commodity_group',
+  'commodity_type',
+  'process',
+  'equipment_type',
+  'contact_role',
+  'certificate_type',
+  'document_type',
+];
 const migrationText = (tag: string) => readFileSync(join(MIGRATIONS, `${tag}.sql`), 'utf8');
 const statements = (tag: string) =>
   migrationText(tag)
@@ -225,9 +240,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('этап 2: миграции 00
 
     it('0010: двенадцать справочников с кодами DBML в порядке ADM-08, семнадцать правил; повторный прогон SQL 0010 ничего не добавляет', async () => {
       const dictionaries = await pool.query<{ code: string; name: string }>('select code, name from dictionary');
-      expect(dictionaries.rows.map((d) => d.code).sort()).toEqual(
-        DICTIONARY_CODES.filter((code) => code !== 'unit').sort(),
-      );
+      expect(dictionaries.rows.map((d) => d.code).sort()).toEqual([...STAGE2_DICTIONARIES].sort());
       for (const d of dictionaries.rows) expect(d.name, d.code).toMatch(/^\S.*\S$/);
       const rules = await pool.query(
         'select code, event, recipient_rule, enabled from notification_rule order by code',
