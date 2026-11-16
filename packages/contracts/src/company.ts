@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { COMMODITY_GROUPS, PROFILE_TIERS, UPDATE_STATUSES } from './enums.js';
+import { diligencePublicSummarySchema } from './diligence.js';
 
 /** Контактное лицо компании (focal point). Видят роли с `focal_point.read`, наблюдатель — нет (GEN-13). */
 export const companyContactSchema = z.object({
@@ -15,6 +16,8 @@ export const companyCardDataSchema = z.object({
   companyPhone: z.string().nullable(),
   companyEmail: z.string().nullable(),
   focalPoint: companyContactSchema.nullable(),
+  /** Legacy cards may predate this summary; no DD result, checks or reports are public. */
+  diligence: diligencePublicSummarySchema.optional(),
 });
 export type CompanyCardData = z.infer<typeof companyCardDataSchema>;
 
@@ -46,5 +49,6 @@ export const companyPageSchema = z.object({
   companyPhone: z.string().nullable(),
   companyEmail: z.string().nullable(),
   focalPoint: companyContactSchema.nullable().optional(),
+  diligence: diligencePublicSummarySchema.optional(),
 });
 export type CompanyPage = z.infer<typeof companyPageSchema>;

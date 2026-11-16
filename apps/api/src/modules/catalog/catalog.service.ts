@@ -205,6 +205,7 @@ export class CatalogService {
       verifiedAt: verifiedAt.toISOString(),
       companyPhone: contacts.companyPhone,
       companyEmail: contacts.companyEmail,
+      ...(contacts.diligence ? { diligence: contacts.diligence } : {}),
     };
     const policy = await policyForTransaction(this.db);
     if (policy.can(role, 'focal_point.read')) page.focalPoint = contacts.focalPoint;

@@ -72,11 +72,13 @@ export class InvalidDiligenceEvidence extends Error {
 const invalid = (reason: string): never => {
   throw new InvalidDiligenceEvidence(reason);
 };
-function sourceText(value: unknown): string {
+/** Adapter input is <=10,000 characters; expanding scientific notation adds <=1,000 digits. */
+const MAX_NUMERIC_LENGTH = 12_000;
+function sourceText(value: unknown, maxLength = 10_000): string {
   if (
     typeof value !== 'string' ||
     !value.trim() ||
-    value.length > 10_000 ||
+    value.length > maxLength ||
     value.includes('\0') ||
     /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(value)
   )
@@ -85,12 +87,12 @@ function sourceText(value: unknown): string {
   return value;
 }
 function count(value: string): boolean {
-  if (typeof value !== 'string' || value.length > 1000 || !/^\d+$/u.test(value)) return invalid('invalid_count');
+  if (typeof value !== 'string' || value.length > MAX_NUMERIC_LENGTH || !/^\d+$/u.test(value)) return invalid('invalid_count');
   return /[1-9]/u.test(value);
 }
 function decimal(value: string | null): string | null {
   if (value === null) return null;
-  if (typeof value !== 'string' || value.length > 1000 || !/^[+-]?\d+(?:\.\d+)?$/u.test(value))
+  if (typeof value !== 'string' || value.length > MAX_NUMERIC_LENGTH || !/^[+-]?\d+(?:\.\d+)?$/u.test(value))
     return invalid('invalid_decimal');
   return value;
 }
@@ -118,7 +120,7 @@ function score(
   if (line.kind === 'no_answer') return noAnswer();
   if (line.kind === 'boolean') {
     if (typeof line.value !== 'boolean') return invalid('invalid_boolean');
-    const value = line.recordedValue === undefined ? String(line.value) : sourceText(line.recordedValue);
+    const value = line.recordedValue === undefined ? String(line.value) : sourceText(line.recordedValue, MAX_NUMERIC_LENGTH);
     // IMBC-10: newly added yes/no checks are scored, except exact known shown-only titles.
     if (definition?.policy === 'shown_only' || isDiligenceShownOnlyTitle(line.checkName))
       return attentionValue(value, line.value);

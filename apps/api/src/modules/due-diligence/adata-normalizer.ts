@@ -1,4 +1,5 @@
 import { diligenceDefinition, type DiligenceGroup } from './catalog.js';
+import { InvalidAdataJson, parseAdataJson } from '../adata/numeric-json.js';
 import { evaluateReceivedDiligence, InvalidDiligenceEvidence, type DiligenceEvaluation, type DiligenceEvidence } from './scoring.js';
 
 /** Reviewed operation schemas in Abay's pinned snapshot; no provider requests are made here. */
@@ -23,16 +24,11 @@ function at(data: unknown, path: string): unknown {
 
 /** Preserve JSON number lexemes before JS can round money or large counters. No raw body is retained. */
 export function parseAdataDiligenceJson(body: string): unknown {
-  if (typeof body !== 'string' || Buffer.byteLength(body) > 5 * 1024 * 1024) return invalid('invalid_body_size');
   try {
-    return JSON.parse(body, (_key: string, value: unknown, context?: { source?: string }) => {
-      if (typeof value !== 'number') return value;
-      if (typeof context?.source !== 'string') return invalid('number_lexeme_unavailable');
-      return context.source;
-    }) as unknown;
+    return parseAdataJson(body);
   } catch (error) {
-    if (error instanceof InvalidAdataDiligenceData) throw error;
-    return invalid('invalid_json');
+    if (error instanceof InvalidAdataJson) return invalid(error.reason);
+    throw error;
   }
 }
 

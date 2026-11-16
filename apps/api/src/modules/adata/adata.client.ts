@@ -5,6 +5,7 @@
  * и HTTP-статусом (EXT-02, NFR-10). Без БД и без логгера.
  */
 import { setTimeout as delay } from 'node:timers/promises';
+import { parseAdataJson } from './numeric-json.js';
 
 export const ADATA_BASE_URL = 'https://api.adata.kz';
 
@@ -175,7 +176,7 @@ export class AdataClient {
     // Большое тело 5xx — всё равно сбой сервера (на проверке временный); тело не хранится.
     if (text === null) throw new AdataCallError(status >= 500 ? 'http_5xx' : 'malformed', status);
     try {
-      return { status, body: JSON.parse(text) as unknown };
+      return { status, body: parseAdataJson(text) };
     } catch {
       return { status, body: NOT_JSON };
     }

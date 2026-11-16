@@ -36,6 +36,10 @@ beforeEach(() => {
 const fastSleep = (ms: number) => delay(Math.min(ms, 5)).then(() => undefined);
 /** Срок с запасом для ожидаемого ответа (паузы — fastSleep); тесты срока передают короткий явно. */
 const GENEROUS_DEADLINE_MS = 10_000;
+/** Existing integer-only fixtures now expose transport numbers as exact strings. */
+const fixtureData = (value: unknown) => JSON.parse(JSON.stringify(value), (key, item: unknown) =>
+  typeof item === 'number' && key !== 'biin' ? String(item) : item,
+) as unknown;
 const poll = (pollToken: string, deadlineMs = GENEROUS_DEADLINE_MS) =>
   pollCompanyInfo(client, pollToken, { deadlineAt: Date.now() + deadlineMs, timing: TIMING, sleep: fastSleep });
 
@@ -247,7 +251,7 @@ describe('AdataClient: два шага с опросом (EXT-02, IMBC-07)', () 
         : new Response(bom('{"success":true,"token":"1"}'), { status: 200 });
     const c = new AdataClient({ baseUrl: stub.baseUrl, token: TOKEN, requestTimeoutMs: 1_000, fetch: withBom });
     expect(await c.startCompanyInfo(nextBin())).toEqual({ pollToken: '1' });
-    expect(await c.checkCompanyInfo('1')).toEqual({ ready: true, data: ADATA_FIXTURE.data });
+    expect(await c.checkCompanyInfo('1')).toEqual({ ready: true, data: fixtureData(ADATA_FIXTURE.data) });
   });
 
   it('тело больше 5 МБ на 5xx — http_5xx: на проверке временный сбой, опрос доходит до ready', async () => {
@@ -268,7 +272,7 @@ describe('AdataClient: два шага с опросом (EXT-02, IMBC-07)', () 
       timing: TIMING,
       sleep: async () => {},
     });
-    expect(result).toEqual({ ready: true, data: ADATA_FIXTURE.data });
+    expect(result).toEqual({ ready: true, data: fixtureData(ADATA_FIXTURE.data) });
     expect(checks).toBe(2);
   });
 
@@ -290,7 +294,7 @@ describe('AdataClient: два шага с опросом (EXT-02, IMBC-07)', () 
       timing: TIMING,
       sleep: async () => {},
     });
-    expect(result).toEqual({ ready: true, data: ADATA_FIXTURE.data });
+    expect(result).toEqual({ ready: true, data: fixtureData(ADATA_FIXTURE.data) });
     expect(checks).toBe(3);
     // Только 429 до срока — последний временный сбой.
     const always: typeof fetch = async () => new Response('{}', { status: 429 });
@@ -344,7 +348,7 @@ describe('AdataClient: два шага с опросом (EXT-02, IMBC-07)', () 
     const { pollToken } = await client.startCompanyInfo(bin);
     expect(pollToken).toMatch(/^\d{10}$/);
     const result = await poll(pollToken);
-    expect(result).toEqual({ ready: true, data: adataFixtureForBin(bin).data });
+    expect(result).toEqual({ ready: true, data: fixtureData(adataFixtureForBin(bin).data) });
     expect(stub.requests.filter((r) => r.kind === 'start')).toHaveLength(1);
     expect(stub.requests.filter((r) => r.kind === 'check')).toHaveLength(4);
   });
@@ -452,7 +456,7 @@ describe('AdataClient: два шага с опросом (EXT-02, IMBC-07)', () 
     const bin = nextBin();
     stub.scenario(bin, { kind: 'check_flaky', failures: 2 });
     const { pollToken } = await client.startCompanyInfo(bin);
-    expect(await poll(pollToken)).toEqual({ ready: true, data: adataFixtureForBin(bin).data });
+    expect(await poll(pollToken)).toEqual({ ready: true, data: fixtureData(adataFixtureForBin(bin).data) });
     expect(stub.requests.filter((r) => r.kind === 'check')).toHaveLength(3);
   });
 
