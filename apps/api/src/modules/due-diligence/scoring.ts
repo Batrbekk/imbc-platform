@@ -18,6 +18,8 @@ interface EvidenceContext {
   sourceOrder: number;
   catalogId: string | null;
   checkName: string;
+  /** The source's own period label, when one catalog rule has separate period checks. */
+  period?: string;
 }
 export type DiligenceEvidence = EvidenceContext &
   (
@@ -31,7 +33,7 @@ export type DiligenceEvidence = EvidenceContext &
         administrative: string | null;
         appk: string | null;
       }
-    | { kind: 'contracts'; count: string; sum: string | null }
+    | { kind: 'contracts'; count: string | null; sum: string | null }
     | { kind: 'tax_payment'; year: number; tax: string | null; payroll: string | null; total: string | null }
     | { kind: 'tax_regime'; value: string }
     | { kind: 'risk_degree'; value: string; recordedValue?: string }
@@ -138,6 +140,7 @@ function score(
     const tax = decimal(line.tax),
       payroll = decimal(line.payroll),
       total = decimal(line.total);
+    if (tax === null && payroll === null && total === null) return noAnswer();
     const adataValue = JSON.stringify({ year: line.year, tax, payroll, total });
     if (line.year !== latestTaxYear) return shown(adataValue, false);
     // A returned partial year remains a row with its exact available amounts. It is not a
@@ -164,8 +167,11 @@ function score(
   if (line.kind === 'contracts') {
     if (definition?.title !== 'Concluded contracts' && line.checkName !== 'Concluded contracts')
       return invalid('contract_catalog_mismatch');
+    const sum = decimal(line.sum);
+    if (line.count === null)
+      return sum === null ? noAnswer() : shown(JSON.stringify({ count: null, sum }), false);
     const positive = count(line.count);
-    return attentionValue(JSON.stringify({ count: line.count, sum: decimal(line.sum) }), positive);
+    return attentionValue(JSON.stringify({ count: line.count, sum }), positive);
   }
   return invalid('unsupported_evidence_kind');
 }
@@ -190,6 +196,7 @@ export function evaluateReceivedDiligence(evidence: readonly DiligenceEvidence[]
     if (line.group.startsWith('company_') && line.subjectIndex !== 0) return invalid('multiple_company_subjects');
     sourceText(line.subjectName);
     sourceText(line.checkName);
+    if (line.period !== undefined) sourceText(line.period);
     const subjectKey = `${line.group}:${line.subjectIndex}`;
     if (subjects.has(subjectKey) && subjects.get(subjectKey) !== line.subjectName)
       return invalid('subject_name_conflict');
@@ -199,6 +206,7 @@ export function evaluateReceivedDiligence(evidence: readonly DiligenceEvidence[]
       subjectKey,
       definition?.id ?? line.checkName,
       line.kind === 'tax_payment' ? line.year : null,
+      line.period ?? null,
     ]);
     if (lineKeys.has(lineKey)) return invalid('duplicate_check');
     lineKeys.add(lineKey);

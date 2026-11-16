@@ -40,6 +40,10 @@ const tax = (year: number, total: string | null): DiligenceEvidence => ({
 });
 
 describe('IMBC-10/11/14 canonical diligence data and scoring', () => {
+  it('marks a returned tax year without any sums no-answer while retaining its labelled year', () => {
+    const evidence = { ...tax(2026, null), tax: null, payroll: null, checkName: 'Tax payments — 2026' };
+    expect(evaluateReceivedDiligence([evidence]).checks).toMatchObject([{ checkName: 'Tax payments — 2026', adataValue: null, mark: 'no_answer', attention: false }]);
+  });
   it('matches every ordered title and policy in the current canonical specification, including all founder checks', () => {
     const text = readFileSync(
       new URL('../../../docs/analyst/2026-11-13/specification-v1.4.md', import.meta.url),
