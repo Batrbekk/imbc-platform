@@ -19,6 +19,7 @@ import { fileVersion, orgChartSample } from '../../database/schema/index.js';
 import type { AuthContext, AuthUser } from '../auth/auth.types.js';
 import { type FileDescription, FilesService, type OpenedFile } from './files.service.js';
 import { orgChartSampleAccess } from './org-chart-sample.rules.js';
+import { policyForTransaction } from '../../common/policy.js';
 import type { AcceptedUpload } from './upload.js';
 
 /** Маршруты образца, как их пишут в аудит отказ SessionGuard (`req.route.path`) и `actorTransaction`. */
@@ -119,7 +120,8 @@ export class OrgChartSampleService {
    * Текущего нет (в том числе только загрузки на проверке или отклонённые) — `current: null`.
    */
   async current(user: AuthUser, ip: string | null): Promise<OrgChartSampleCurrent> {
-    if (!orgChartSampleAccess(user.role)) await this.deny(user, ORG_CHART_SAMPLE_ROUTES.current, ip);
+    if (!orgChartSampleAccess(user.role, await policyForTransaction(this.db)))
+      await this.deny(user, ORG_CHART_SAMPLE_ROUTES.current, ip);
     const row = await this.findCurrent();
     return parseResponse(
       orgChartSampleCurrentSchema,
@@ -154,7 +156,8 @@ export class OrgChartSampleService {
   }
 
   private async locateCurrent(user: AuthUser, ip: string | null) {
-    if (!orgChartSampleAccess(user.role)) await this.deny(user, ORG_CHART_SAMPLE_ROUTES.currentContent, ip);
+    if (!orgChartSampleAccess(user.role, await policyForTransaction(this.db)))
+      await this.deny(user, ORG_CHART_SAMPLE_ROUTES.currentContent, ip);
     const current = await this.findCurrent();
     if (!current) throw notFound();
     return current;

@@ -1,13 +1,14 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import type pg from 'pg';
 import { AuditService } from '../../common/audit.service.js';
 import { PG_POOL } from '../../database/database.module.js';
 import { boundLockWaits } from '../../database/lock-waits.js';
-import { manufacturerProfiles, ndaVersion, organizations, userAccounts } from '../../database/schema/index.js';
+import { manufacturerProfiles, organizations, userAccounts } from '../../database/schema/index.js';
 import { withQueueTransaction } from '../../database/transaction.js';
 import { AdataScheduler, type AdataReadOrigin } from '../adata/adata.scheduler.js';
 import { ProfilesService } from '../profiles/profiles.service.js';
+import { accountNdaLinksInsert } from './nda-evidence.js';
 
 export type OnboardingResult = {
   profile: 'created' | 'existing' | 'skipped';
@@ -17,17 +18,12 @@ export type OnboardingResult = {
 const SKIPPED: OnboardingResult = { profile: 'skipped', adata: 'skipped' };
 
 /**
- * Перенос принятия NDA, ждавшего у аккаунта, в `nda_acceptance` (FC-02): время и версия — регистрации,
- * IP — адрес запроса регистрации текстом (`host`, без маски). Таблица только для добавления: у роли
- * приложения нет UPDATE, поэтому повтор — ON CONFLICT DO NOTHING, и ни одной блокировки строк принятия.
+ * Связь всех неизменяемых согласий аккаунта с профилем (FC-02/03), включая до-парольные версии.
+ * Блокируются account/profile parents; readonly consent rows не требуют UPDATE. Исходные время/IP
+ * не заменяются временем установки пароля; повтор не меняет существующую связь.
  */
 export function ndaAcceptanceInsert(profileId: string, accountId: string) {
-  return sql`insert into nda_acceptance (profile_id, nda_version_id, accepted_at, ip_address)
-    select ${profileId}::uuid, a.registration_nda_version_id, a.registration_nda_accepted_at, host(a.registration_ip)
-    from user_accounts a
-    where a.id = ${accountId}::uuid and a.registration_nda_version_id is not null
-    on conflict do nothing
-    returning id`;
+  return accountNdaLinksInsert(profileId, accountId);
 }
 
 /**
@@ -58,24 +54,30 @@ export class ManufacturerOnboardingService {
           state: userAccounts.state,
           bin: organizations.bin,
           heardAboutUs: userAccounts.registrationHeardAboutUs,
-          ndaVersionId: userAccounts.registrationNdaVersionId,
-          ndaVersionNumber: ndaVersion.versionNumber,
+          organizationType: organizations.type,
         })
         .from(userAccounts)
         .innerJoin(organizations, eq(organizations.id, userAccounts.organizationId))
-        .leftJoin(ndaVersion, eq(ndaVersion.id, userAccounts.registrationNdaVersionId))
         .where(eq(userAccounts.id, accountId))
         .for('update', { of: userAccounts });
       // Заблокированный IMBC аккаунт не получает ни профиля, ни квоты Adata: их создаст вход после разблокировки.
-      if (!account || account.role !== 'manufacturer' || !account.bin || account.state === 'blocked') return SKIPPED;
+      if (
+        !account ||
+        account.role !== 'manufacturer' ||
+        account.organizationType !== 'manufacturer' ||
+        !account.bin ||
+        account.state === 'blocked'
+      )
+        return SKIPPED;
 
       const [existing] = await tx
         .select({ id: manufacturerProfiles.id })
         .from(manufacturerProfiles)
         .where(eq(manufacturerProfiles.organizationId, account.organizationId));
       let profile: OnboardingResult['profile'] = 'existing';
+      let profileId = existing?.id;
       if (!existing) {
-        const profileId = await this.profiles.ensureDraft(account.organizationId, accountId, {
+        profileId = await this.profiles.ensureDraft(account.organizationId, accountId, {
           heardAboutUs: account.heardAboutUs,
           registeredAt: at,
           outer: tx,
@@ -91,32 +93,30 @@ export class ManufacturerOnboardingService {
           },
           tx,
         );
-        if (account.ndaVersionId) {
-          const { rows } = await tx.execute<{ id: string }>(ndaAcceptanceInsert(profileId, accountId));
-          if (rows[0])
-            await this.audit.record(
-              {
-                userId: accountId,
-                organizationId: account.organizationId,
-                action: 'nda.accepted',
-                objectType: 'nda_acceptance',
-                objectId: rows[0].id,
-                diff: { version: account.ndaVersionNumber },
-              },
-              tx,
-            );
-        }
-        await tx
-          .update(userAccounts)
-          .set({
-            registrationNdaVersionId: null,
-            registrationNdaAcceptedAt: null,
-            registrationIp: null,
-            registrationHeardAboutUs: null,
-          })
-          .where(eq(userAccounts.id, accountId));
         profile = 'created';
       }
+      // Existing migrated/verified profiles link every durable version without changing profile state/evidence.
+      const { rows: links } = await tx.execute<{ id: string }>(ndaAcceptanceInsert(profileId!, accountId));
+      for (const link of links)
+        await this.audit.record(
+          {
+            userId: accountId,
+            organizationId: account.organizationId,
+            action: 'nda.linked',
+            objectType: 'nda_acceptance',
+            objectId: link.id,
+          },
+          tx,
+        );
+      await tx
+        .update(userAccounts)
+        .set({
+          registrationNdaVersionId: null,
+          registrationNdaAcceptedAt: null,
+          registrationIp: null,
+          ...(profile === 'created' ? { registrationHeardAboutUs: null } : {}),
+        })
+        .where(eq(userAccounts.id, accountId));
       // Регистрации до этапа 1 уже имеют Draft: им — только чтение, принятия NDA у них нет.
       const adata = await this.adata.requestInTransaction(tx, queueDb, accountId, origin);
       return { profile, adata };

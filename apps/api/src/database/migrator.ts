@@ -4,6 +4,7 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import type pg from 'pg';
+import { applyReleasePolicyRules } from './policy-data.js';
 
 /**
  * Предел ожидания блокировки в сеансе мигратора (NFR-06). Миграции drizzle идут одной транзакцией, и внешние
@@ -33,6 +34,7 @@ export async function applyMigrations(
     // Расширения создаются до миграций: pg_trgm нужен индексам каталога.
     await client.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
     await migrate(drizzle(client), { migrationsFolder });
+    await applyReleasePolicyRules(client);
     // Reinstall guards against the complete FK graph after every future expand migration as well (DATA-05/07).
     const guards = await client.query<{ exists: boolean }>(
       "SELECT to_regprocedure('install_file_binding_guards()') IS NOT NULL AS exists",

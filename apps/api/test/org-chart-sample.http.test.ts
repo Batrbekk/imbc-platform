@@ -14,6 +14,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, type Mock, vi } 
 import { ProblemException } from '../src/common/problem.js';
 import { OrgChartSampleController } from '../src/modules/files/org-chart-sample.controller.js';
 import { orgChartSampleAccess } from '../src/modules/files/org-chart-sample.rules.js';
+import { TEST_POLICY } from './support/policy.js';
 import { ORG_CHART_SAMPLE_ROUTES, OrgChartSampleService } from '../src/modules/files/org-chart-sample.service.js';
 import { headerLines, type HttpStand, startHttp } from './support/http.js';
 
@@ -116,7 +117,7 @@ describe('образец оргструктуры: просмотр и загр�
   });
 
   it('orgChartSampleAccess: администратор и директор — any, производитель — current, SME, оператор и наблюдатель — null (MAN-19, расхождение 2 плана этапа 2)', () => {
-    expect(Object.fromEntries(ROLES.map((role) => [role, orgChartSampleAccess(role)]))).toEqual({
+    expect(Object.fromEntries(ROLES.map((role) => [role, orgChartSampleAccess(role, TEST_POLICY)]))).toEqual({
       manufacturer: 'current',
       expert: null,
       administrator: 'any',

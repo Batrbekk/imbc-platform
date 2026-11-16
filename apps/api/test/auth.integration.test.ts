@@ -609,6 +609,7 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
       createUser: vi.fn(async () => randomUUID()),
       deleteUser: vi.fn(),
       sendPasswordEmail: vi.fn().mockRejectedValueOnce(new Error('SMTP unavailable')).mockResolvedValue(undefined),
+      awaitingInitialPasswordSetup: vi.fn(async () => true),
     };
     const body = registrationBody();
     expect(await registration(keycloak).register(body, { ip: '127.0.0.3' } as never)).toEqual({
@@ -635,7 +636,7 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
       keycloak as never,
       sessions,
       {} as never,
-      {} as never,
+      pool,
       {} as never,
     );
     const reader = new PgBoss({
@@ -671,30 +672,34 @@ describe.skipIf(!databaseUrl)('auth on real PostgreSQL', () => {
   });
 
   it('returns one success and one precise conflict for simultaneous duplicate BIN registration', async () => {
-    let created = 0;
+    let started!: () => void;
+    const creating = new Promise<void>((resolve) => {
+      started = resolve;
+    });
     let release!: () => void;
     const barrier = new Promise<void>((resolve) => {
       release = resolve;
     });
     const keycloak = {
       createUser: vi.fn(async () => {
-        if (++created === 2) release();
+        started();
         await barrier;
         return randomUUID();
       }),
       deleteUser: vi.fn().mockResolvedValue(undefined),
     };
     const bin = validBin();
-    const results = await Promise.allSettled(
-      [registrationBody(bin), registrationBody(bin)].map((body) =>
-        registration(keycloak).register(body, { ip: '127.0.0.5' } as never),
-      ),
-    );
+    const first = registration(keycloak).register(registrationBody(bin), { ip: '127.0.0.5' } as never);
+    await creating;
+    const second = registration(keycloak).register(registrationBody(bin), { ip: '127.0.0.5' } as never);
+    release();
+    const results = await Promise.allSettled([first, second]);
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
     const failure = results.find((result) => result.status === 'rejected') as PromiseRejectedResult;
     expect(failure.reason).toBeInstanceOf(ProblemException);
     expect(failure.reason.code).toBe('bin_exists');
-    expect(keycloak.deleteUser).toHaveBeenCalledTimes(1);
+    expect(keycloak.createUser).toHaveBeenCalledTimes(1);
+    expect(keycloak.deleteUser).not.toHaveBeenCalled();
     await boss.deleteAllJobs(QUEUES.sendPasswordEmail);
   });
 

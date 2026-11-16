@@ -1,8 +1,9 @@
-import { can, type Role } from '@imbc/contracts';
+import { type Role } from '@imbc/contracts';
 import { Logger } from '@nestjs/common';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { auditEntries, orgChartSample } from '../../database/schema/index.js';
 import type { ScanPassedHook } from '../../worker/file-scan.job.js';
+import { policyForTransaction, type PolicyEngine } from '../../common/policy.js';
 import type { FileReadRule } from './file-access.js';
 
 /*
@@ -18,9 +19,9 @@ export type OrgChartSampleAccess = 'any' | 'current' | null;
  * директор) — любой образец; роль, у которой `profile.edit` равен `own` (производитель), — только текущий; SME,
  * оператор и наблюдатель — никакой. Одна функция для правила чтения файла и маршрутов текущего образца.
  */
-export function orgChartSampleAccess(role: Role): OrgChartSampleAccess {
-  if (can(role, 'reference.read')) return 'any';
-  if (can(role, 'profile.edit') === 'own') return 'current';
+export function orgChartSampleAccess(role: Role, policy: Pick<PolicyEngine, 'can'>): OrgChartSampleAccess {
+  if (policy.can(role, 'reference.read')) return 'any';
+  if (policy.can(role, 'profile.edit') === 'own') return 'current';
   return null;
 }
 
@@ -30,7 +31,7 @@ export function orgChartSampleAccess(role: Role): OrgChartSampleAccess {
  * проверяет затем `FilesService` (DATA-07).
  */
 export const orgChartSampleReadRule: FileReadRule = async ({ tx, auth, file }) => {
-  const access = orgChartSampleAccess(auth.user.role);
+  const access = orgChartSampleAccess(auth.user.role, await policyForTransaction(tx));
   if (access === 'any') return { allowed: true, versions: 'latest' };
   if (access !== 'current') return { allowed: false };
   const [sample] = await tx

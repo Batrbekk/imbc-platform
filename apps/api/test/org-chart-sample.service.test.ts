@@ -9,10 +9,11 @@ import { databaseErrorSummary } from '../src/database/pg-errors.js';
 import type { AuthContext, AuthUser } from '../src/modules/auth/auth.types.js';
 import type { FilesService } from '../src/modules/files/files.service.js';
 import { ORG_CHART_SAMPLE_ROUTES, OrgChartSampleService } from '../src/modules/files/org-chart-sample.service.js';
+import { TEST_POLICY_ROWS } from './support/policy.js';
 
 // Отказ роли без доступа к образцам на маршрутах текущего образца (MAN-19, GEN-08, AUD-01): запись `file.read`
-// `denied` называет маршрут — как отказ SessionGuard по @Can; сбой записи не подменяет 403. База и файлы не нужны:
-// отказ решается до поиска образца.
+// `denied` называет маршрут — как отказ SessionGuard по @Can; сбой записи не подменяет403.
+// GEN-10: explicit SQL policy fixture; no sample/file lookup is reached by the denied roles.
 const USER_ID = '00000000-0000-4000-8000-0000000000b1';
 const ORG_ID = '00000000-0000-4000-8000-0000000000b2';
 const IP = '192.0.2.40';
@@ -30,7 +31,7 @@ const auth = (role: Role) => ({ user: user(role) }) as AuthContext;
 
 function service(record: (event: AuditEvent) => Promise<void>) {
   return new OrgChartSampleService(
-    {} as Database,
+    { execute: vi.fn(async () => ({ rows: TEST_POLICY_ROWS })) } as unknown as Database,
     {} as pg.Pool,
     {} as FilesService,
     { record: vi.fn(record) } as unknown as AuditService,

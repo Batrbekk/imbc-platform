@@ -392,11 +392,18 @@ describe.skipIf(!databaseUrl)('регистрация v1.3 и профиль п�
         (section) => section.organizationId === organization.id && section.workingRevisionId !== null,
       ),
     ).toBe(true);
+    const [canonical] = await db
+      .select()
+      .from(schema.accountNdaAcceptance)
+      .where(eq(schema.accountNdaAcceptance.userAccountId, account.id));
     expect(await acceptancesOf(organization.id)).toEqual([
       {
         id: expect.any(String),
         profileId: profile!.id,
         ndaVersionId: nda.id,
+        organizationId: organization.id,
+        accountNdaAcceptanceId: canonical!.id,
+        linkedAt: expect.any(Date),
         acceptedAt: account.registrationNdaAcceptedAt,
         ipAddress: '203.0.113.7',
       },
@@ -418,9 +425,11 @@ describe.skipIf(!databaseUrl)('регистрация v1.3 и профиль п�
       [{ origin: 'password_set' }, profile!.id, null],
     ]);
     const accepted = await auditOf(organization.id, 'nda.accepted');
-    expect(accepted.map((e) => [e.diff, e.isAccountEvent])).toEqual([[{ version: 1 }, false]]);
+    expect(accepted.map((e) => [e.diff, e.isAccountEvent])).toEqual([[{ version: 1 }, true]]);
     // IP — персональные данные: в diff записей аудита его нет.
-    const diffs = JSON.stringify((await auditOf(organization.id, 'adata.read_requested')).concat(accepted));
+    const diffs = JSON.stringify(
+      (await auditOf(organization.id, 'adata.read_requested')).concat(accepted).map((entry) => entry.diff),
+    );
     expect(diffs).not.toContain('203.0.113.7');
     await boss.deleteAllJobs(QUEUES.sendPasswordEmail);
   });

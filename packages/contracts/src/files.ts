@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ALLOWED_FILE_TYPES } from './enums.js';
+import { POLICY_DATA_CLASSES } from './policy-actions.js';
 
 /**
  * Файлы платформы (DATA-05, DATA-06, DATA-07, GEN-09). Значения — перечисления DBML `file_purpose`,
@@ -29,15 +30,8 @@ export const FILE_PURPOSES = [
 ] as const;
 export type FilePurpose = (typeof FILE_PURPOSES)[number];
 
-/** Класс данных (архитектура §9): A — реестр, B — производитель, C — IMBC, D — оператор, E — администрирование, F — прогноз. */
-export const DATA_CLASSES = [
-  'a_register',
-  'b_manufacturer',
-  'c_imbc',
-  'd_operator',
-  'e_administration',
-  'f_forecast',
-] as const;
+/** Класс данных v1.4: A — реестр, B — производитель, C — IMBC, D — оператор, E — администрирование, F — прогноз, G — LPS. */
+export const DATA_CLASSES = POLICY_DATA_CLASSES;
 export type DataClass = (typeof DATA_CLASSES)[number];
 
 /**

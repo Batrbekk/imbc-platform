@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Database } from '../src/database/database.module.js';
 import type { AuthContext } from '../src/modules/auth/auth.types.js';
 import { manufacturerFileRule } from '../src/modules/files/file-access.js';
+import { PgDialect } from 'drizzle-orm/pg-core';
+import { TEST_POLICY_ROWS } from './support/policy.js';
 
 const ORG = '00000000-0000-4000-8000-000000000001';
 const FILE = '00000000-0000-4000-8000-000000000002';
@@ -18,7 +20,11 @@ const owner = (state = 'working', submittedAt: Date | null = null) => ({
 const txWith = (...rows: unknown[][]) => {
   const execute = vi.fn();
   for (const result of rows) execute.mockResolvedValueOnce({ rows: result });
-  return { tx: { execute } as unknown as Database, execute };
+  const query = (statement: Parameters<PgDialect['sqlToQuery']>[0]) =>
+    new PgDialect().sqlToQuery(statement).sql.includes('from policy_rule')
+      ? Promise.resolve({ rows: TEST_POLICY_ROWS })
+      : execute(statement);
+  return { tx: { execute: query } as unknown as Database, execute };
 };
 
 describe('manufacturer file selection: saved owner and frozen snapshot (GEN-09, DATA-07)', () => {

@@ -20,10 +20,23 @@ export async function applyAppRoleGrants(pool: pg.Pool, role: string): Promise<v
     await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${name}`);
     // DATA-01: TRUNCATE bypasses row-level frozen-revision triggers and is never an application operation.
     await client.query(`REVOKE TRUNCATE ON ALL TABLES IN SCHEMA public FROM ${name}`);
+    // GEN-10: policy rows change only through a release owner, never runtime CRUD or UI.
+    const policy = await client.query<{ exists: boolean }>("SELECT to_regclass('policy_rule') IS NOT NULL AS exists");
+    if (policy.rows[0]?.exists)
+      await client.query(`REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON policy_rule FROM ${name}`);
     // Журнал аудита (AUD-02) и принятия NDA (FC-02, DBML: append-only) — только добавление:
     // у роли приложения нет UPDATE/DELETE.
     await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON audit_entries FROM ${name}`);
     await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON nda_acceptance FROM ${name}`);
+    const consent = await client.query<{ exists: boolean }>(
+      "SELECT to_regclass('account_nda_acceptance') IS NOT NULL AS exists",
+    );
+    if (consent.rows[0]?.exists) {
+      await client.query(
+        `REVOKE UPDATE, DELETE, TRUNCATE ON account_nda_acceptance, nda_acceptance_bridge FROM ${name}`,
+      );
+      await client.query(`REVOKE INSERT, UPDATE, DELETE ON nda_evidence_migration_report FROM ${name}`);
+    }
     // Also usable during compatibility checks against the pre-history expand boundary.
     const history = await client.query<{ exists: boolean }>(
       "SELECT to_regclass('profile_file_history') IS NOT NULL AS exists",

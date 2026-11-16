@@ -1,4 +1,4 @@
-import { type Action, can } from '@imbc/contracts';
+import { type Action } from '@imbc/contracts';
 import { Logger } from '@nestjs/common';
 import { asc, inArray } from 'drizzle-orm';
 import type pg from 'pg';
@@ -11,6 +11,7 @@ import { type QueueDb, withQueueTransaction } from '../database/transaction.js';
 import type { AuthUser } from '../modules/auth/auth.types.js';
 import type { AuditService } from './audit.service.js';
 import { ProblemException } from './problem.js';
+import { policyForTransaction } from './policy.js';
 
 export type { QueueDb } from '../database/transaction.js';
 
@@ -50,7 +51,9 @@ export async function lockActor(tx: Database, actorId: string, targetId?: string
     .orderBy(asc(userAccounts.id))
     .for('no key update');
   const actor = rows.find((r) => r.id === actorId);
-  if (!actor || actor.state !== 'active' || can(actor.role, action) === null) throw new ActorDenied();
+  if (!actor || actor.state !== 'active') throw new ActorDenied();
+  const policy = await policyForTransaction(tx);
+  if (policy.can(actor.role, action) === null) throw new ActorDenied();
   return targetId ? rows.find((r) => r.id === targetId) : undefined;
 }
 

@@ -1,6 +1,5 @@
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -34,10 +33,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
     beforeAll(async () => {
       pool = openTestPool();
       await resetDatabase(pool);
-      await migrateThrough(pool, '0019_profile_units');
-      await pool.query(
-        readFileSync(new URL('../drizzle/0021_submission_requirement_serialization.sql', import.meta.url), 'utf8'),
-      );
+      // Current administrator service also requires the authoritative0023 policy, loaded from SQL.
+      await migrateThrough(pool);
       db = drizzle(pool, { schema });
       await loadReferenceDirectory(db, join(REFERENCE_DATA_DIR, 'release'), 'release');
     });

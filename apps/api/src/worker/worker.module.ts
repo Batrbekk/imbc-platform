@@ -4,6 +4,7 @@ import { LoggerModule } from 'nestjs-pino';
 import { httpLoggerOptions } from '../common/logging.js';
 import type { PgBoss } from 'pg-boss';
 import { AuditModule } from '../common/audit.service.js';
+import { PolicyModule } from '../common/policy.js';
 import { ConfigModule } from '../config/config.module.js';
 import { ENV, type Env } from '../config/env.js';
 import { DatabaseModule } from '../database/database.module.js';
@@ -50,6 +51,7 @@ import { JobHandlers } from './handlers.service.js';
       }),
     }),
     DatabaseModule,
+    PolicyModule,
     InfraModule,
     AuditModule,
   ],

@@ -14,6 +14,8 @@ import { SessionGuard } from '../../src/modules/auth/guards.js';
 import { SessionService } from '../../src/modules/auth/session.service.js';
 import { UPLOAD_SLOTS, UploadSlots } from '../../src/modules/files/upload-slots.js';
 import { ORGANIZATION_TYPE } from './organization-type.js';
+import { POLICY } from '../../src/common/policy.js';
+import { TEST_POLICY } from './policy.js';
 
 const COOKIE = 'imbc-session';
 const ORIGIN = 'https://imbc.example.kz';
@@ -78,6 +80,7 @@ export async function startHttp(options: {
     controllers: options.controllers,
     providers: [
       { provide: UPLOAD_SLOTS, useValue: new UploadSlots({ process: 4, account: 2 }) },
+      { provide: POLICY, useValue: TEST_POLICY },
       ...(options.providers ?? []),
       { provide: SessionService, useValue: { resolve } },
       { provide: AuditService, useValue: audit },

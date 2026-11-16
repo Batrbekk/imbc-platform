@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 import { AuditModule } from './common/audit.service.js';
+import { PolicyModule } from './common/policy.js';
 import { httpLoggerOptions } from './common/logging.js';
 import { ProblemDetailsFilter } from './common/problem.js';
 import { ConfigModule } from './config/config.module.js';
@@ -57,6 +58,8 @@ import { ProfileUploadService } from './modules/profiles/profile-upload.service.
 import { defineSectionHandler, PROFILE_SECTION_HANDLERS } from './modules/profiles/section-handler.js';
 import { ManufacturerOnboardingService } from './modules/registration/onboarding.service.js';
 import { RegistrationController } from './modules/registration/registration.controller.js';
+import { CurrentNdaController } from './modules/registration/current-nda.controller.js';
+import { CurrentNdaService } from './modules/registration/current-nda.service.js';
 import { ReviewsController } from './modules/reviews/reviews.controller.js';
 import { ReviewsService } from './modules/reviews/reviews.service.js';
 
@@ -68,6 +71,7 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
       useFactory: (env: Env) => ({ pinoHttp: httpLoggerOptions(env) }),
     }),
     DatabaseModule,
+    PolicyModule,
     InfraModule,
     AuditModule,
   ],
@@ -75,6 +79,7 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     HealthController,
     AuthController,
     RegistrationController,
+    CurrentNdaController,
     CatalogController,
     ProfilesController,
     ProfileSectionsController,
@@ -158,6 +163,7 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     AdataScheduler,
     IdentityProvisioningService,
     ManufacturerOnboardingService,
+    CurrentNdaService,
     { provide: APP_GUARD, useClass: SessionGuard },
     { provide: APP_FILTER, useClass: ProblemDetailsFilter },
   ],

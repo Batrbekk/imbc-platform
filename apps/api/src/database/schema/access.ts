@@ -73,9 +73,9 @@ export const userAccounts = pgTable(
     platformTermsAcceptedAt: timestamp('platform_terms_accepted_at', { withTimezone: true }),
     personalDataAcceptedAt: timestamp('personal_data_accepted_at', { withTimezone: true }),
     /**
-     * Не в DBML: принятие NDA при регистрации, пока профиля нет (FC-02, MAN-01). DBML требует у
-     * `nda_acceptance` профиль, а профиль появляется, когда задан пароль (MAN-03): при его создании
-     * принятие переносится в `nda_acceptance`, колонки очищаются. Три колонки — все или ни одной.
+     * R1 compatibility triplet, retained until retirement. Canonical account_nda_acceptance records
+     * every original tick immediately and survives clearing these columns after profile linkage.
+     * A DB bridge captures old-writer inserts/updates too. Three columns — all or none.
      */
     registrationNdaVersionId: uuid('registration_nda_version_id').references((): AnyPgColumn => ndaVersion.id),
     registrationNdaAcceptedAt: timestamp('registration_nda_accepted_at', { withTimezone: true }),
@@ -89,6 +89,7 @@ export const userAccounts = pgTable(
   },
   (t) => [
     uniqueIndex('user_accounts_email_uq').on(sql`lower(${t.email})`),
+    uniqueIndex('user_accounts_id_org_uq').on(t.id, t.organizationId),
     uniqueIndex('user_accounts_idp_subject_uq').on(t.idpSubject),
     index('user_accounts_org_idx').on(t.organizationId),
     // DBML: «one row where the organisation type is manufacturer». Частичный индекс не видит тип

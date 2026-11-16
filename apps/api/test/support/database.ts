@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
+import { applyReleasePolicyRules } from '../../src/database/policy-data.js';
 
 const MIGRATIONS = fileURLToPath(new URL('../../drizzle', import.meta.url));
 
@@ -43,6 +44,12 @@ export async function migrateThrough(pool: pg.Pool, lastTag?: string): Promise<v
     for (const { tag } of entries) copyFileSync(join(MIGRATIONS, `${tag}.sql`), join(folder, `${tag}.sql`));
     writeFileSync(join(folder, 'meta/_journal.json'), JSON.stringify({ ...journal, entries }));
     await migrate(drizzle(pool), { migrationsFolder: folder });
+    const policyClient = await pool.connect();
+    try {
+      await applyReleasePolicyRules(policyClient);
+    } finally {
+      policyClient.release();
+    }
     const guards = await pool.query<{ exists: boolean }>(
       "SELECT to_regprocedure('install_file_binding_guards()') IS NOT NULL AS exists",
     );

@@ -1,4 +1,4 @@
-import { can, type Action } from '@imbc/contracts';
+import { type Action } from '@imbc/contracts';
 import {
   type CanActivate,
   createParamDecorator,
@@ -11,6 +11,7 @@ import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { AuditService } from '../../common/audit.service.js';
 import { ProblemException } from '../../common/problem.js';
+import { POLICY, PolicyEngine } from '../../common/policy.js';
 import { ENV, type Env } from '../../config/env.js';
 import type { AuthContext } from './auth.types.js';
 import { SessionService } from './session.service.js';
@@ -51,6 +52,7 @@ export class SessionGuard implements CanActivate {
     private readonly sessions: SessionService,
     private readonly audit: AuditService,
     @Inject(ENV) private readonly env: Env,
+    @Inject(POLICY) private readonly policy: PolicyEngine,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -74,7 +76,7 @@ export class SessionGuard implements CanActivate {
 
     const action = meta<Action>(ACTION);
     if (action) {
-      const scope = can(auth.user.role, action);
+      const scope = this.policy.can(auth.user.role, action);
       if (!scope) {
         await this.audit.record({
           userId: auth.user.id,

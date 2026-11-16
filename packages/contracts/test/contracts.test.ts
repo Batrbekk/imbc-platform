@@ -98,6 +98,7 @@ describe('файлы и справочники (DBML, ADM-08, DATA-05, DATA-07)'
       'd_operator',
       'e_administration',
       'f_forecast',
+      'g_lps',
     ]);
     // DBML `scan_state` — тип БД с тем же именем (с 0011; до неё — file_scan_state).
     expect(FILE_SCAN_STATES).toEqual(['pending', 'passed', 'rejected']);
@@ -432,17 +433,33 @@ describe('регистрация производителя (MAN-01, FC-02, GEN-
   });
 
   it('маркер временного текста: три начальные фразы с длинным тире; дефис или другие слова — не заглушка (FC-02)', () => {
-    for (const text of ['PLACEHOLDER — NOT A LEGAL TEXT.', 'ВРЕМЕННЫЙ ТЕКСТ — НЕ ЮРИДИЧЕСКИЙ ДОКУМЕНТ.', 'УАҚЫТША МӘТІН — ЗАҢДЫҚ ҚҰЖАТ ЕМЕС.'])
+    for (const text of [
+      'PLACEHOLDER — NOT A LEGAL TEXT.',
+      'ВРЕМЕННЫЙ ТЕКСТ — НЕ ЮРИДИЧЕСКИЙ ДОКУМЕНТ.',
+      'УАҚЫТША МӘТІН — ЗАҢДЫҚ ҚҰЖАТ ЕМЕС.',
+    ])
       expect(text, text).toMatch(LEGAL_PLACEHOLDER_MARKER);
-    for (const text of ['PLACEHOLDER - NOT A LEGAL TEXT.', 'ВРЕМЕННЫЙ ТЕКСТ – НЕ ДОКУМЕНТ.', 'Настоящий текст соглашения.', ' PLACEHOLDER — с пробелом впереди.'])
+    for (const text of [
+      'PLACEHOLDER - NOT A LEGAL TEXT.',
+      'ВРЕМЕННЫЙ ТЕКСТ – НЕ ДОКУМЕНТ.',
+      'Настоящий текст соглашения.',
+      ' PLACEHOLDER — с пробелом впереди.',
+    ])
       expect(text, text).not.toMatch(LEGAL_PLACEHOLDER_MARKER);
   });
 
   it('форма читает текст условий нестрого: новое поле API не мешает, неверная форма ответа — отказ (FC-02, NFR-06)', () => {
-    expect(registrationTermsReadSchema.parse({ nda: { version: 2, body: 'Текст', publishedAt: 'x' }, extra: 1 })).toEqual({
+    expect(
+      registrationTermsReadSchema.parse({ nda: { version: 2, body: 'Текст', publishedAt: 'x' }, extra: 1 }),
+    ).toEqual({
       nda: { version: 2, body: 'Текст' },
     });
-    for (const body of [{}, { nda: { body: 'Текст' } }, { nda: { version: 0, body: 'Текст' } }, { nda: { version: 1, body: '' } }])
+    for (const body of [
+      {},
+      { nda: { body: 'Текст' } },
+      { nda: { version: 0, body: 'Текст' } },
+      { nda: { version: 1, body: '' } },
+    ])
       expect(registrationTermsReadSchema.safeParse(body).success, JSON.stringify(body)).toBe(false);
   });
 });
@@ -637,7 +654,14 @@ describe('свой профиль производителя (MAN-41, MAN-46, IM
 
   it('свой профиль: updateStatus и tier null до верификации', () => {
     expect(ownProfileSchema.parse(verified)).toEqual(verified);
-    const draft = { ...verified, status: 'draft', updateStatus: null, tier: null, completenessPct: 40, verifiedAt: null };
+    const draft = {
+      ...verified,
+      status: 'draft',
+      updateStatus: null,
+      tier: null,
+      completenessPct: 40,
+      verifiedAt: null,
+    };
     expect(ownProfileSchema.parse(draft)).toEqual(draft);
     expect(ownProfileSchema.safeParse({ ...verified, tier: 'tier_3' }).success).toBe(false);
     expect(ownProfileSchema.safeParse({ ...verified, completenessPct: 101 }).success).toBe(false);
@@ -747,6 +771,9 @@ describe('PolicyMatrix (раздел 4 v1.3; GEN-03, GEN-04, GEN-10, GEN-13)', (
       'tier.read_products': 'all',
       'tier.edit': 'all',
       'focal_point.read': 'all',
+      'lps.read': 'all',
+      'lps.edit': 'all',
+      'lps.dashboard': 'all',
     },
     administrator: {
       'review.assign': 'all', // Assign reviews: assign
@@ -776,6 +803,8 @@ describe('PolicyMatrix (раздел 4 v1.3; GEN-03, GEN-04, GEN-10, GEN-13)', (
       'tier.read': 'all', // Tier, AGAR, and CDP: view
       'tier.read_products': 'all',
       'focal_point.read': 'all',
+      'lps.read': 'all',
+      'lps.dashboard': 'all',
     },
     operator: {
       'catalog.search': 'visible', // Search and company page: visible verified only
@@ -791,6 +820,8 @@ describe('PolicyMatrix (раздел 4 v1.3; GEN-03, GEN-04, GEN-10, GEN-13)', (
       'tier.read': 'visible', // Tier, and which products are tier 3
       'tier.read_products': 'visible',
       'focal_point.read': 'visible',
+      'lps.read': 'all',
+      'lps.dashboard': 'all',
     },
     observer: {
       'catalog.search': 'visible', // Search and company page: visible verified only, without the focal point

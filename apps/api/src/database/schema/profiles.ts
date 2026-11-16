@@ -1,7 +1,9 @@
 import { sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   date,
+  foreignKey,
   index,
   inet,
   integer,
@@ -17,6 +19,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { createdAt, id, updatedAt } from './_shared.js';
 import { ndaVersion, organizations, userAccounts } from './access.js';
+import { accountNdaAcceptance } from './account-nda.js';
 import {
   capacityUnit,
   commodityGroup,
@@ -49,10 +52,62 @@ export const ndaAcceptance = pgTable(
     ndaVersionId: uuid('nda_version_id')
       .notNull()
       .references(() => ndaVersion.id),
+    organizationId: uuid('organization_id').notNull(),
+    /** Nullable only for explicitly unresolved R1 history; normal new writes always reference canonical evidence. */
+    accountNdaAcceptanceId: uuid('account_nda_acceptance_id'),
+    linkedAt: timestamp('linked_at', { withTimezone: true }),
     acceptedAt: timestamp('accepted_at', { withTimezone: true }).notNull(),
     ipAddress: text('ip_address').notNull(),
   },
-  (t) => [uniqueIndex('nda_acceptance_uq').on(t.profileId, t.ndaVersionId)],
+  (t) => [
+    uniqueIndex('nda_acceptance_uq').on(t.profileId, t.ndaVersionId),
+    uniqueIndex('nda_acceptance_id_profile_org_version_uq').on(t.id, t.profileId, t.organizationId, t.ndaVersionId),
+    uniqueIndex('nda_acceptance_source_uq').on(t.accountNdaAcceptanceId),
+    foreignKey({
+      name: 'nda_acceptance_profile_org_fk',
+      columns: [t.profileId, t.organizationId],
+      foreignColumns: [manufacturerProfiles.id, manufacturerProfiles.organizationId],
+    }),
+    foreignKey({
+      name: 'nda_acceptance_source_org_version_fk',
+      columns: [t.accountNdaAcceptanceId, t.organizationId, t.ndaVersionId],
+      foreignColumns: [accountNdaAcceptance.id, accountNdaAcceptance.organizationId, accountNdaAcceptance.ndaVersionId],
+    }),
+    check('nda_acceptance_link_ck', sql`(${t.accountNdaAcceptanceId} is null) = (${t.linkedAt} is null)`),
+  ],
+);
+
+/** Expand-only sidecar: a NEW tick resolves an old unbound profile/version without rewriting old evidence. */
+export const ndaAcceptanceBridge = pgTable(
+  'nda_acceptance_bridge',
+  {
+    id: id(),
+    ndaAcceptanceId: uuid('nda_acceptance_id').notNull(),
+    profileId: uuid('profile_id').notNull(),
+    organizationId: uuid('organization_id').notNull(),
+    ndaVersionId: uuid('nda_version_id').notNull(),
+    accountNdaAcceptanceId: uuid('account_nda_acceptance_id').notNull(),
+    linkedAt: timestamp('linked_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('nda_acceptance_bridge_legacy_uq').on(t.ndaAcceptanceId),
+    uniqueIndex('nda_acceptance_bridge_source_uq').on(t.accountNdaAcceptanceId),
+    foreignKey({
+      name: 'nda_acceptance_bridge_legacy_scope_fk',
+      columns: [t.ndaAcceptanceId, t.profileId, t.organizationId, t.ndaVersionId],
+      foreignColumns: [
+        ndaAcceptance.id,
+        ndaAcceptance.profileId,
+        ndaAcceptance.organizationId,
+        ndaAcceptance.ndaVersionId,
+      ],
+    }),
+    foreignKey({
+      name: 'nda_acceptance_bridge_source_scope_fk',
+      columns: [t.accountNdaAcceptanceId, t.organizationId, t.ndaVersionId],
+      foreignColumns: [accountNdaAcceptance.id, accountNdaAcceptance.organizationId, accountNdaAcceptance.ndaVersionId],
+    }),
+  ],
 );
 
 /**

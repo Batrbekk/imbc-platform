@@ -11,3 +11,5 @@ export * from './profile.js';
 export * from './profile-content.js';
 export * from './profile-file-history.js';
 export * from './profile-review.js';
+export * from './account-nda.js';
+export * from './policy-rules.js';

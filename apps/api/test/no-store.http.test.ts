@@ -5,6 +5,8 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AuditService } from '../src/common/audit.service.js';
 import { configureHttp } from '../src/common/http.js';
+import { POLICY } from '../src/common/policy.js';
+import { TEST_POLICY } from './support/policy.js';
 import { ProblemDetailsFilter } from '../src/common/problem.js';
 import { ENV } from '../src/config/env.js';
 import { DB } from '../src/database/database.module.js';
@@ -49,6 +51,7 @@ const ndaQuery = { from: () => ({ where: async () => [{ version: 3, body: 'NDA (
 @Module({
   controllers: [CatalogController, AuthController, RegistrationController],
   providers: [
+    { provide: POLICY, useValue: TEST_POLICY },
     { provide: CatalogService, useValue: { search: async () => ({ items: [], total: 0, page: 1, pageSize: 25 }) } },
     { provide: SessionService, useValue: { resolve } },
     { provide: AuditService, useValue: { record: vi.fn() } },

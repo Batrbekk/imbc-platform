@@ -155,6 +155,8 @@ export const NOTIFY_QUEUE_OPTIONS = {
 
 export interface IdentityJob {
   subject: string;
+  /** MAN-02 retry: re-check unfinished initial password setup at delivery, never turn it into a reset. */
+  initialOnly?: boolean;
 }
 
 /**

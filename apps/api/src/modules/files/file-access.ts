@@ -1,6 +1,7 @@
-import { can, type DataClass, type FilePurpose } from '@imbc/contracts';
+import { type DataClass, type FilePurpose } from '@imbc/contracts';
 import { sql } from 'drizzle-orm';
 import type { Database } from '../../database/database.module.js';
+import { policyForTransaction } from '../../common/policy.js';
 import type { AuthContext } from '../auth/auth.types.js';
 import { orgChartSampleReadRule } from './org-chart-sample.rules.js';
 import { manufacturerFileOwners } from './file-owner.js';
@@ -27,7 +28,7 @@ export type FileReadRule = (ctx: {
  */
 export const manufacturerFileRule: FileReadRule = async ({ tx, auth, file }) => {
   if (file.organizationId === null || file.dataClass !== 'b_manufacturer') return { allowed: false };
-  const scope = can(auth.user.role, 'profile.read');
+  const scope = (await policyForTransaction(tx)).can(auth.user.role, 'profile.read');
   if (scope === 'own')
     return file.organizationId === auth.user.organizationId
       ? { allowed: true, versions: 'latest' }

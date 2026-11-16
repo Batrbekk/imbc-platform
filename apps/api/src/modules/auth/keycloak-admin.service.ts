@@ -130,6 +130,57 @@ export class KeycloakAdminService {
   }
 
   /**
+   * MAN-02 needs credential presence, not its date: a password with an absent/malformed createdDate
+   * is still a password. Unknown credential representations fail closed rather than proving absence.
+   */
+  async hasPasswordCredential(subject: string): Promise<boolean> {
+    const response = await this.call(`/users/${encodeURIComponent(subject)}/credentials`);
+    if (!response.ok) throw new KeycloakRequestError(response.status, 'credentials');
+    const credentials: unknown = await response.json();
+    if (!Array.isArray(credentials)) throw new Error('Keycloak credentials: invalid response');
+    if (credentials.some((c) => c !== null && typeof c === 'object' && c.type === 'password')) return true;
+    if (
+      credentials.some(
+        (c) => c === null || typeof c !== 'object' || Array.isArray(c) || typeof c.type !== 'string' || !c.type.trim(),
+      )
+    )
+      throw new Error('Keycloak credentials: invalid response');
+    return false;
+  }
+
+  /** Strict IdP evidence for an initial invitation; caller also locks/checks the persisted account. */
+  async awaitingInitialPasswordSetup(subject: string, loginEmail: string): Promise<boolean> {
+    if (await this.hasPasswordCredential(subject)) return false;
+    const response = await this.call(`/users/${encodeURIComponent(subject)}`);
+    if (!response.ok) throw new KeycloakRequestError(response.status, 'invitation user');
+    const user: unknown = await response.json();
+    if (
+      user === null ||
+      typeof user !== 'object' ||
+      Array.isArray(user) ||
+      !('id' in user) ||
+      typeof user.id !== 'string' ||
+      !('enabled' in user) ||
+      typeof user.enabled !== 'boolean' ||
+      !('email' in user) ||
+      typeof user.email !== 'string' ||
+      !('username' in user) ||
+      typeof user.username !== 'string' ||
+      !('requiredActions' in user) ||
+      !Array.isArray(user.requiredActions) ||
+      user.requiredActions.some((action) => typeof action !== 'string')
+    )
+      throw new Error('Keycloak invitation user: invalid response');
+    return (
+      user.id === subject &&
+      user.enabled &&
+      user.email.toLowerCase() === loginEmail.toLowerCase() &&
+      user.username.toLowerCase() === loginEmail.toLowerCase() &&
+      user.requiredActions.includes('UPDATE_PASSWORD')
+    );
+  }
+
+  /**
    * Частичное обновление пользователя (`PUT /users/{id}`): включён ли он, почта-логин и её подтверждение,
    * обязательные действия. Поля вне `patch` Keycloak не меняет; при `registrationEmailAsUsername` username
    * следует за почтой. Почта и субъект в текст ошибки не попадают.

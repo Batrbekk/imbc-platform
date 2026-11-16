@@ -6,6 +6,7 @@ import { ProblemException } from '../src/common/problem.js';
 import type { AuthContext } from '../src/modules/auth/auth.types.js';
 import { Can, Public, SessionGuard } from '../src/modules/auth/guards.js';
 import { ORGANIZATION_TYPE } from './support/organization-type.js';
+import { TEST_POLICY } from './support/policy.js';
 
 class Routes {
   @Public() open() {}
@@ -48,7 +49,7 @@ function auth(role: AuthContext['user']['role'], over: Partial<AuthContext> = {}
 function guard(resolved: AuthContext | null) {
   const audit = { record: vi.fn().mockResolvedValue(undefined) };
   const sessions = { resolve: vi.fn().mockResolvedValue(resolved) };
-  return { g: new SessionGuard(new Reflector(), sessions as never, audit as never, env), audit };
+  return { g: new SessionGuard(new Reflector(), sessions as never, audit as never, env, TEST_POLICY), audit };
 }
 
 async function code(p: Promise<unknown>): Promise<string> {
@@ -103,9 +104,7 @@ describe('SessionGuard', () => {
   it('прямой запрос наблюдателя на выгрузку отклоняется и пишется в аудит (GEN-08, GEN-13)', async () => {
     const { g, audit } = guard(auth('observer'));
     expect(await code(g.canActivate(ctx('exportResults', {})))).toBe('forbidden');
-    expect(audit.record).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: 'denied', action: 'catalog.export' }),
-    );
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'denied', action: 'catalog.export' }));
   });
 
   it('отклоняет изменяющий запрос с чужого Origin', async () => {

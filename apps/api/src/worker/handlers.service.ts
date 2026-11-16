@@ -6,9 +6,11 @@ import type { PgBoss } from 'pg-boss';
 import { AuditService } from '../common/audit.service.js';
 import { ENV, type Env } from '../config/env.js';
 import { DB, type Database, PG_POOL } from '../database/database.module.js';
+import { boundLockWaits } from '../database/lock-waits.js';
 import { withQueueTransaction } from '../database/transaction.js';
 import {
   certificates,
+  organizations,
   exportFiles,
   otpCodes,
   sessions,
@@ -21,6 +23,7 @@ import {
 } from '../database/schema/index.js';
 import { QUEUE, S3 } from '../infra/infra.module.js';
 import { KeycloakAdminService, KeycloakRequestError } from '../modules/auth/keycloak-admin.service.js';
+import { lockRegistrationIdentity } from '../modules/auth/identity-provisioning.service.js';
 import { SessionService } from '../modules/auth/session.service.js';
 import { sha256 } from '../modules/auth/crypto.js';
 import { ManufacturerOnboardingService } from '../modules/registration/onboarding.service.js';
@@ -82,14 +85,51 @@ export class JobHandlers {
     await this.db.delete(revokedIdpSessions).where(lt(revokedIdpSessions.expiresAt, now));
   }
 
-  async sendPasswordEmail({ subject }: IdentityJob): Promise<void> {
-    const account = await this.db.query.userAccounts.findFirst({ where: eq(userAccounts.idpSubject, subject) });
-    if (account?.state === 'invited') await this.keycloak.sendPasswordEmail(subject);
+  async sendPasswordEmail({ subject, initialOnly }: IdentityJob): Promise<void> {
+    await withQueueTransaction(this.pool, async (tx) => {
+      await boundLockWaits(tx);
+      const [account] = await tx.select().from(userAccounts).where(eq(userAccounts.idpSubject, subject)).for('update');
+      if (!account || account.state !== 'invited') return;
+      // Legacy manufacturer jobs may lack the flag, including an original job deduplicated by a retry.
+      // Their current role is checked under the same lock as delivery, so they cannot become resets.
+      if (initialOnly || account.role === 'manufacturer') {
+        if (
+          account.role !== 'manufacturer' ||
+          account.lastSignInAt !== null ||
+          account.credentialsChangedAt !== null ||
+          account.inactiveSince !== null
+        )
+          return;
+        const [org] = await tx
+          .select()
+          .from(organizations)
+          .where(eq(organizations.id, account.organizationId))
+          .for('share');
+        if (org?.type !== 'manufacturer') return;
+        let pending: boolean;
+        try {
+          pending = await this.keycloak.awaitingInitialPasswordSetup(subject, account.email);
+        } catch {
+          // Unknown proof is retryable; no IdP response body or account data goes into job output.
+          throw new Error('Initial invitation evidence unavailable');
+        }
+        if (!pending) return;
+      }
+      await this.keycloak.sendPasswordEmail(subject);
+    });
   }
 
   async cleanupIdentity({ subject }: IdentityJob): Promise<void> {
-    const account = await this.db.query.userAccounts.findFirst({ where: eq(userAccounts.idpSubject, subject) });
-    if (!account) await this.keycloak.deleteUser(subject);
+    await withQueueTransaction(this.pool, async (tx) => {
+      await tx.execute(sql`set transaction isolation level read committed`);
+      await boundLockWaits(tx);
+      await lockRegistrationIdentity(tx, subject);
+      const [account] = await tx
+        .select({ id: userAccounts.id })
+        .from(userAccounts)
+        .where(eq(userAccounts.idpSubject, subject));
+      if (!account) await this.keycloak.deleteUser(subject);
+    });
   }
 
   /**

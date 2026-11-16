@@ -23,6 +23,7 @@ import { QUEUES } from '../../jobs/queues.js';
 import { Public } from '../auth/guards.js';
 import { IdentityProvisioningService, provisioningConflict } from '../auth/identity-provisioning.service.js';
 import { AuthRateLimitService } from '../auth/rate-limit.service.js';
+import { recordAccountNdaAcceptance } from './nda-evidence.js';
 
 const ndaUnavailable = () =>
   new ProblemException(503, 'nda_unavailable', 'Регистрация временно недоступна. Попробуйте позже.');
@@ -53,10 +54,12 @@ function requestIp(req: Request): string | null {
   return ip && isIP(ip) !== 0 && !ip.includes('%') ? ip : null;
 }
 
+const binExists = () =>
+  new ProblemException(409, 'bin_exists', 'Компания с этим БИН уже зарегистрирована', 'Обратитесь в IMBC');
+
 /**
- * Саморегистрация производителя по v1.3 (MAN-01…MAN-03, FC-02, AUTH-01). Организация и аккаунт с двумя
- * согласиями и ожидающим принятием текущей NDA; профиля нет, пока не задан пароль (NOT-23,
- * `ManufacturerOnboardingService`). Пароля в форме нет. Существующий БИН — отказ «обратитесь в IMBC».
+ * Manufacturer registration, v1.4 MAN-01…03 / NOT-23. An exact BIN + login retry may resend an
+ * unfinished initial invitation; it never creates consent, changes an account, or resets a migrated profile.
  */
 @ApiTags('registration')
 @Controller('v1/registrations')
@@ -98,29 +101,52 @@ export class RegistrationController {
     // Форма показала одну версию NDA, а текущей стала другая: отказ до Keycloak (FC-02).
     if ((await currentNda(this.db)).version !== input.ndaVersion) throw ndaVersionChanged();
 
-    const [binTaken, emailTaken] = await Promise.all([
-      this.db.query.organizations.findFirst({ where: sql`${organizations.bin} = ${bin.bin}` }),
-      this.db.query.userAccounts.findFirst({ where: sql`lower(${userAccounts.email}) = lower(${input.email})` }),
-    ]);
-    if (binTaken) {
-      throw new ProblemException(409, 'bin_exists', 'Компания с этим БИН уже зарегистрирована', 'Обратитесь в IMBC');
-    }
-    if (emailTaken) throw new ProblemException(409, 'email_exists', 'Этот email уже используется');
-
     try {
-      await this.provisioning.provision(
+      await this.provisioning.provisionRegistration(
         { email: input.email, firstName: null, locale: input.locale },
+        bin.bin,
+        async (tx) => {
+          // Lookups occur after the BIN advisory lock. Mutable identity fields stay locked through enqueue.
+          const [org] = await tx.select().from(organizations).where(eq(organizations.bin, bin.bin)).for('share');
+          if (org) {
+            const [account] = await tx
+              .select()
+              .from(userAccounts)
+              .where(eq(userAccounts.organizationId, org.id))
+              .for('update');
+            if (
+              org.type !== 'manufacturer' ||
+              !account ||
+              account.role !== 'manufacturer' ||
+              account.email.toLowerCase() !== input.email ||
+              account.state !== 'invited' ||
+              !account.idpSubject ||
+              account.lastSignInAt !== null ||
+              account.credentialsChangedAt !== null ||
+              account.inactiveSince !== null
+            )
+              throw binExists();
+            return { subject: account.idpSubject, email: account.email };
+          }
+          const [emailTaken] = await tx
+            .select({ id: userAccounts.id })
+            .from(userAccounts)
+            .where(sql`lower(${userAccounts.email}) = ${input.email}`);
+          if (emailTaken) throw new ProblemException(409, 'email_exists', 'Этот email уже используется');
+          return null;
+        },
         async (tx, subject) => {
           // Чужая транзакция на строке версии не держит регистрацию: отказ — 503 после удаления пользователя IdP.
           await boundLockWaits(tx);
           // Версия сверяется ещё раз под блокировкой: смена текущей версии ждёт фиксации регистрации.
           // Пусто под блокировкой — версию сменили, пока ждали (текущая была проверена до Keycloak).
           const [accepted] = await tx
-            .select({ id: ndaVersion.id, versionNumber: ndaVersion.versionNumber })
+            .select({ id: ndaVersion.id, versionNumber: ndaVersion.versionNumber, body: ndaVersion.body })
             .from(ndaVersion)
             .where(eq(ndaVersion.isCurrent, true))
             .for('share');
           if (accepted?.versionNumber !== input.ndaVersion) throw ndaVersionChanged();
+          if (!accepted.body.trim()) throw ndaUnavailable();
 
           const [org] = await tx
             .insert(organizations)
@@ -142,7 +168,27 @@ export class RegistrationController {
               registrationIp: ip,
               registrationHeardAboutUs: input.heardAboutUs,
             })
-            .returning({ id: userAccounts.id });
+            .returning();
+          const consent = await recordAccountNdaAcceptance(tx, {
+            accountId: account!.id,
+            organizationId: org!.id,
+            ndaVersionId: accepted.id,
+            acceptedAt: account!.registrationNdaAcceptedAt!,
+            ip,
+          });
+          await this.audit.record(
+            {
+              userId: account!.id,
+              organizationId: org!.id,
+              action: 'nda.accepted',
+              objectType: 'account_nda_acceptance',
+              objectId: consent.acceptance.id,
+              diff: { version: accepted.versionNumber },
+              isAccountEvent: true,
+              ip,
+            },
+            tx,
+          );
           await this.audit.record(
             {
               userId: account!.id,
@@ -162,8 +208,7 @@ export class RegistrationController {
       if (lockWaitExceeded(error)) throw registrationUnavailable();
       const conflict = provisioningConflict(error);
       if (conflict === 'email_exists') throw new ProblemException(409, conflict, 'Этот email уже используется');
-      if (conflict === 'bin_exists')
-        throw new ProblemException(409, conflict, 'Компания с этим БИН уже зарегистрирована', 'Обратитесь в IMBC');
+      if (conflict === 'bin_exists') throw binExists();
       throw error;
     }
 

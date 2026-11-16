@@ -334,7 +334,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('этап 2: миграции 00
       const range = async (type: string) =>
         (await pool.query<{ v: string[] }>(`select enum_range(null::${type})::text[] as v`)).rows[0]!.v;
       expect(await range('file_purpose')).toEqual([...FILE_PURPOSES]);
-      expect(await range('data_class')).toEqual([...DATA_CLASSES]);
+      // This test stops at0009; G is introduced only by the later0023 release-policy expand.
+      expect(await range('data_class')).toEqual(DATA_CLASSES.filter((value) => value !== 'g_lps'));
       expect(await range('file_scan_state')).toEqual([...FILE_SCAN_STATES]);
       expect(await range('locale')).toEqual([...LOCALES]);
     });

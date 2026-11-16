@@ -1,5 +1,4 @@
 import {
-  can,
   type CatalogFilter,
   type CatalogPage,
   type CompanyCardData,
@@ -16,6 +15,7 @@ import { and, arrayOverlaps, asc, desc, eq, gte, inArray, lte, type SQL, sql } f
 import type { Redis } from 'ioredis';
 import { z } from 'zod';
 import { ProblemException } from '../../common/problem.js';
+import { policyForTransaction } from '../../common/policy.js';
 import { DB, type Database } from '../../database/database.module.js';
 import { catalogVisible } from '../../database/schema/index.js';
 import { VALKEY } from '../../infra/infra.module.js';
@@ -206,7 +206,8 @@ export class CatalogService {
       companyPhone: contacts.companyPhone,
       companyEmail: contacts.companyEmail,
     };
-    if (can(role, 'focal_point.read')) page.focalPoint = contacts.focalPoint;
+    const policy = await policyForTransaction(this.db);
+    if (policy.can(role, 'focal_point.read')) page.focalPoint = contacts.focalPoint;
     return page;
   }
 
