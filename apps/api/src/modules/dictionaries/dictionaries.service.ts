@@ -41,6 +41,7 @@ import { parseResponse } from '../../common/response.js';
 import { DB, type Database, PG_POOL } from '../../database/database.module.js';
 import { sqlState } from '../../database/lock-waits.js';
 import { dictionary, dictionaryEntry, dictionaryEntryTranslation } from '../../database/schema/index.js';
+import { lockSubmissionRequirementDictionary } from '../../database/submission-requirement-lock.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { entryInUse } from './usage.js';
 
@@ -88,8 +89,12 @@ function known(code: string): DictionaryCode {
 
 /** MAN-35/37: these requirements must remain available even if their optional admin flag is changed. */
 const fixedProfileRequirement = (dictionaryCode: DictionaryCode, code: string): boolean => {
-  const values: readonly string[] = dictionaryCode === 'certificate_type' ? COMPANY_ISO_CODES
-    : dictionaryCode === 'document_type' ? DOCUMENT_REQUIRED_CODES : [];
+  const values: readonly string[] =
+    dictionaryCode === 'certificate_type'
+      ? COMPANY_ISO_CODES
+      : dictionaryCode === 'document_type'
+        ? DOCUMENT_REQUIRED_CODES
+        : [];
   return values.some((value) => value.toLowerCase() === code.toLowerCase());
 };
 
@@ -427,7 +432,10 @@ export class DictionariesService {
 
   /** Изменяющее действие: `actorTransaction` с правом `reference.manage` и путём маршрута для отказа. */
   private mutate<T>(actor: AuthUser, route: string, ip: string | null, run: (tx: Database) => Promise<T>): Promise<T> {
-    return actorTransaction(this.pool, this.audit, actor, { route, ip, action: 'reference.manage' }, (tx) => run(tx));
+    return actorTransaction(this.pool, this.audit, actor, { route, ip, action: 'reference.manage' }, async (tx) => {
+      await lockSubmissionRequirementDictionary(tx);
+      return run(tx);
+    });
   }
 
   /** Запись аудита в транзакции действия (AUD-01): не событие аккаунта; IP — только колонка `ip`. */

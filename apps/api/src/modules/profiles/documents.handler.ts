@@ -1,5 +1,6 @@
 import {
   DOCUMENT_REQUIRED_CODES,
+  documentEditorChoicesSchema,
   documentsReadSchema,
   documentsWriteSchema,
   type CompletenessInput,
@@ -8,7 +9,7 @@ import {
   type ProfileDocumentType,
 } from '@imbc/contracts';
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { Database } from '../../database/database.module.js';
 import {
   dictionary,
@@ -22,12 +23,15 @@ import {
 import { profileFileComplete, profileFiles, validateProfileFileBindings } from './profile-files.js';
 import { sectionFieldError } from './section-errors.js';
 import type { SectionContext, TypedSectionHandler } from './section-handler.js';
+import { currentRequirementIds } from './submission-requirements.js';
+import { profileItemReviews, profileItemStatus } from './profile-item-review.js';
 
 /** MAN-37–40 / ADM-09: ordered partial drafts, stable own-profile identities and immutable submitted requirements. */
 @Injectable()
 export class DocumentsHandler implements TypedSectionHandler<DocumentsWrite, DocumentsRead> {
   readonly kind = 'documents' as const;
   readonly readSchema = documentsReadSchema;
+  readonly editorChoicesSchema = documentEditorChoicesSchema;
 
   parse(input: unknown): DocumentsWrite {
     return documentsWriteSchema.parse(input);
@@ -92,6 +96,12 @@ export class DocumentsHandler implements TypedSectionHandler<DocumentsWrite, Doc
     return result;
   }
 
+  async editorChoices(tx: Database) {
+    const ids = await currentRequirementIds(tx, 'documents');
+    const types = await this.types(tx, ids);
+    return { requiredTypes: ids.flatMap((id) => (types.get(id) ? [types.get(id)!] : [])) };
+  }
+
   async read(tx: Database, context: SectionContext): Promise<DocumentsRead> {
     const rows = await this.rows(tx, context);
     const [revision] = await tx
@@ -103,20 +113,7 @@ export class DocumentsHandler implements TypedSectionHandler<DocumentsWrite, Doc
     const isWorking = revision?.state === 'working' && revision.submittedAt === null;
     // Mandatory flags are read only for a new working submission. Frozen membership comes solely from its capture.
     const requirements = isWorking
-      ? await tx
-          .select({ id: dictionaryEntry.id })
-          .from(dictionaryEntry)
-          .innerJoin(dictionary, eq(dictionary.id, dictionaryEntry.dictionaryId))
-          .where(
-            and(
-              eq(dictionary.code, 'document_type'),
-              or(
-                inArray(sql`lower(${dictionaryEntry.code})`, [...DOCUMENT_REQUIRED_CODES]),
-                and(eq(dictionaryEntry.mandatory, true), isNull(dictionaryEntry.retiredAt)),
-              ),
-            ),
-          )
-          .orderBy(asc(dictionaryEntry.sortOrder), asc(dictionaryEntry.code), asc(dictionaryEntry.id))
+      ? (await currentRequirementIds(tx, 'documents')).map((id) => ({ id }))
       : await tx
           .select({ id: submissionRequirement.dictionaryEntryId })
           .from(submissionRequirement)
@@ -143,12 +140,19 @@ export class DocumentsHandler implements TypedSectionHandler<DocumentsWrite, Doc
         )
       ).map((file) => [file.fileId, file]),
     );
+    const reviews = isWorking ? new Map() : await profileItemReviews(tx, context, 'document');
     return {
       editable: { documents: rows.map(({ status: _status, ...row }) => row) },
       documents: rows.map((row) => ({
         identityId: row.identityId,
         documentType: row.documentTypeId ? (types.get(row.documentTypeId) ?? null) : null,
-        status: row.fileId === null ? 'missing' : revision?.state === 'submitted' ? 'under_review' : row.status,
+        status: profileItemStatus({
+          fileId: row.fileId,
+          file: row.fileId ? (files.get(row.fileId) ?? null) : null,
+          state: revision?.state,
+          legacyStatus: row.status,
+          review: reviews.get(row.identityId),
+        }),
         file: row.fileId ? (files.get(row.fileId) ?? null) : null,
       })),
       requiredTypes: requirements.flatMap(({ id }) => (types.get(id) ? [types.get(id)!] : [])),

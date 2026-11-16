@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import { SECTION_KINDS, ownSectionsOverviewSchema, sectionReadSchema, type Role } from '@imbc/contracts';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import type pg from 'pg';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -216,6 +216,107 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       expect(stored!.completenessPct).toBe(33);
     });
 
+    it('reads the rejected sent candidate after unlock and copies that candidate when correcting it', async () => {
+      await save('Published contact');
+      const published = await read();
+      await db.transaction(async (tx) => {
+        await tx
+          .update(s.profileSection)
+          .set({ workingRevisionId: null })
+          .where(eq(s.profileSection.profileId, profile.id));
+        await tx
+          .update(s.sectionRevision)
+          .set({ state: 'submitted', submittedAt: new Date() })
+          .where(eq(s.sectionRevision.organizationId, profile.organizationId));
+        await tx
+          .update(s.sectionRevision)
+          .set({ state: 'verified' })
+          .where(eq(s.sectionRevision.organizationId, profile.organizationId));
+        await tx.execute(sql`update profile_section section set verified_revision_id=revision.id
+          from section_revision revision where revision.profile_section_id=section.id and section.profile_id=${profile.id}`);
+        await tx
+          .update(s.manufacturerProfile)
+          .set({ status: 'verified' })
+          .where(eq(s.manufacturerProfile.id, profile.id));
+      });
+      expect((await save('Last sent candidate', published.editVersion)).status).toBe(200);
+      const sent = await read();
+      const at = new Date();
+      await db.transaction(async (tx) => {
+        const sections = await tx.select().from(s.profileSection).where(eq(s.profileSection.profileId, profile.id));
+        const contact = sections.find((section) => section.kind === 'contacts')!;
+        await tx.update(s.profileSection).set({ workingRevisionId: null }).where(eq(s.profileSection.id, contact.id));
+        await tx
+          .update(s.sectionRevision)
+          .set({ state: 'submitted', submittedAt: at })
+          .where(eq(s.sectionRevision.id, sent.revisionId!));
+        await tx.update(s.sectionRevision).set({ state: 'rejected' }).where(eq(s.sectionRevision.id, sent.revisionId!));
+        const [assignment] = await tx
+          .insert(s.reviewAssignment)
+          .values({
+            profileId: profile.id,
+            organizationId: profile.organizationId,
+            submittedBy: manufacturerId,
+            receivedAt: at,
+            accuracyConfirmedAt: at,
+            submissionMode: 'verified_changes',
+            operationKey: randomUUID(),
+            requestFingerprint: 'a'.repeat(64),
+          })
+          .returning();
+        await tx.insert(s.reviewAssignmentSection).values(
+          sections.map((section) => ({
+            reviewAssignmentId: assignment!.id,
+            profileId: profile.id,
+            organizationId: profile.organizationId,
+            profileSectionId: section.id,
+            sectionRevisionId: section.id === contact.id ? sent.revisionId! : section.verifiedRevisionId!,
+            reviewRequired: true,
+          })),
+        );
+        await tx
+          .insert(s.profileSectionCandidate)
+          .values({
+            profileSectionId: contact.id,
+            organizationId: profile.organizationId,
+            reviewAssignmentId: assignment!.id,
+            sectionRevisionId: sent.revisionId!,
+          });
+        await tx
+          .update(s.reviewAssignment)
+          .set({
+            closedAt: at,
+            closedBy: manufacturerId,
+            closeReason: 'manufacturer_unlock',
+            closeOperationKey: randomUUID(),
+          })
+          .where(eq(s.reviewAssignment.id, assignment!.id));
+      });
+      expect(await read()).toMatchObject({
+        revisionId: sent.revisionId,
+        revisionState: 'rejected',
+        data: { value: 'Last sent candidate' },
+        readOnly: false,
+      });
+      expect(
+        await (await otherHttp.get(`${ROOT}/contacts?profileId=${profile.id}`, 'manufacturer')).json(),
+      ).toMatchObject({ data: { value: '' } });
+      expect((await save('Corrected candidate', sent.editVersion)).status).toBe(200);
+      const corrected = await read();
+      expect(corrected).toMatchObject({ revisionState: 'working', data: { value: 'Corrected candidate' } });
+      expect(corrected.revisionId).not.toBe(sent.revisionId);
+      const retained = await pool.query(
+        'select r.id,r.state,c.full_name from section_revision r join contact c on c.section_revision_id=r.id where r.id=any($1::uuid[])',
+        [[published.revisionId, sent.revisionId]],
+      );
+      expect(retained.rows).toEqual(
+        expect.arrayContaining([
+          { id: published.revisionId, state: 'verified', full_name: 'Published contact' },
+          { id: sent.revisionId, state: 'rejected', full_name: 'Last sent candidate' },
+        ]),
+      );
+    });
+
     it('scopes reads and writes to the account organisation and rejects selectors/readonly data in a write', async () => {
       await save('First private contact');
       expect(
@@ -354,7 +455,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
         .where(eq(s.manufacturerProfile.id, profile.id));
       expect(profileNow).toMatchObject({ status: 'verified', hasPendingChanges: false });
       // Exact R1 queue predicate: rollback and mixed versions must exclude unsent working changes too.
-      const legacyQueue = await pool.query('select id from manufacturer_profiles where status = $1 and has_pending_changes = true', ['verified']);
+      const legacyQueue = await pool.query(
+        'select id from manufacturer_profiles where status = $1 and has_pending_changes = true',
+        ['verified'],
+      );
       expect(legacyQueue.rows.map((row) => row.id)).not.toContain(profile.id);
       expect(await (await http.get(ROOT, 'manufacturer')).json()).toMatchObject({ hasPendingChanges: false });
       // MAN-45 / reply 29: saving a working copy is not sending it to SME.

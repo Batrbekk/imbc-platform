@@ -1,6 +1,13 @@
 import { and, asc, eq, ne } from 'drizzle-orm';
 import type { Database } from '../database/database.module.js';
-import { manufacturerProfiles, organizations, userAccounts } from '../database/schema/index.js';
+import {
+  contact,
+  manufacturerProfile,
+  organizations,
+  reviewAssignment,
+  userAccounts,
+} from '../database/schema/index.js';
+import { profileCandidateRevisions, profileSubmissionRevisions } from '../modules/profiles/profile-candidate.js';
 import type { NotifyJob } from './enqueue.js';
 import { PermanentNotificationError } from './errors.js';
 import type { RecipientPart } from './rules.js';
@@ -19,20 +26,6 @@ export interface Recipient {
 
 export type RecipientResolver = (db: Database, job: NotifyJob) => Promise<Recipient[]>;
 
-/**
- * Часть получателей, данные которой появятся на своём этапе: письмо не уходит никому, задание завершается
- * без повторов со строкой журнала (отказ постоянный).
- */
-export class RecipientPartNotReady extends PermanentNotificationError {
-  constructor(
-    readonly part: RecipientPart,
-    readonly stage: '3' | '5',
-  ) {
-    super(`notification: часть получателей ${part} появится на этапе ${stage}`);
-    this.name = 'RecipientPartNotReady';
-  }
-}
-
 export const RECIPIENT_RESOLVERS = Symbol('RECIPIENT_RESOLVERS');
 
 const accountRecipient = (account: { id: string; email: string }): Recipient => ({
@@ -44,25 +37,110 @@ const accountRecipient = (account: { id: string; email: string }): Recipient => 
 
 const accountColumns = { id: userAccounts.id, email: userAccounts.email };
 
-const notReady =
-  (part: RecipientPart, stage: '3' | '5'): RecipientResolver =>
-  async () => {
-    throw new RecipientPartNotReady(part, stage);
-  };
-
 /** Организация события: явно или через профиль производителя. */
 async function eventOrganization(db: Database, job: NotifyJob): Promise<string | null> {
-  if (job.organizationId) return job.organizationId;
+  if (!job.profileId && job.organizationId) return job.organizationId;
   if (!job.profileId)
     throw new PermanentNotificationError(
       `notification ${job.rule}: manufacturer_account без organizationId и profileId`,
     );
   const [profile] = await db
-    .select({ organizationId: manufacturerProfiles.organizationId })
-    .from(manufacturerProfiles)
-    .where(eq(manufacturerProfiles.id, job.profileId));
+    .select({ organizationId: manufacturerProfile.organizationId })
+    .from(manufacturerProfile)
+    .where(eq(manufacturerProfile.id, job.profileId));
+  if (job.organizationId && profile?.organizationId !== job.organizationId)
+    throw new PermanentNotificationError(`notification ${job.rule}: profile вне organization контекста`);
   return profile?.organizationId ?? null;
 }
+
+/** Контакты принадлежат каноническому профилю производителя, а не одному UUID организации. */
+async function eventProfile(db: Database, job: NotifyJob) {
+  if (!job.profileId && !job.organizationId)
+    throw new PermanentNotificationError(`notification ${job.rule}: контакты без profileId и organizationId`);
+  const [profile] = await db
+    .select({ profileId: manufacturerProfile.id, organizationId: manufacturerProfile.organizationId })
+    .from(manufacturerProfile)
+    .innerJoin(organizations, eq(organizations.id, manufacturerProfile.organizationId))
+    .where(
+      and(
+        job.profileId ? eq(manufacturerProfile.id, job.profileId) : undefined,
+        job.organizationId ? eq(manufacturerProfile.organizationId, job.organizationId) : undefined,
+        eq(organizations.type, 'manufacturer'),
+      ),
+    );
+  if (!profile) throw new PermanentNotificationError(`notification ${job.rule}: profile вне organization контекста`);
+  return profile;
+}
+
+/** Исторические события несут ID назначения: закрытие/новый цикл не меняют адресата этого события. */
+function assignmentId(job: NotifyJob): string {
+  if (job.related?.type !== 'review_assignment')
+    throw new PermanentNotificationError(`notification ${job.rule}: review_assignment без related.id`);
+  return job.related.id;
+}
+
+async function eventAssignment(db: Database, job: NotifyJob) {
+  const id = assignmentId(job);
+  const context = await eventProfile(db, job);
+  const [assignment] = await db
+    .select({ expertId: reviewAssignment.expertId })
+    .from(reviewAssignment)
+    .where(
+      and(
+        eq(reviewAssignment.id, id),
+        eq(reviewAssignment.profileId, context.profileId),
+        eq(reviewAssignment.organizationId, context.organizationId),
+      ),
+    );
+  if (!assignment)
+    throw new PermanentNotificationError(`notification ${job.rule}: review_assignment вне profile контекста`);
+  return { ...context, assignmentId: id, expertId: assignment.expertId };
+}
+
+const contactRecipients =
+  (focalPointOnly: boolean): RecipientResolver =>
+  async (db, job) => {
+    // NOT-05 cannot use an edited focal point after a later unlock or Send.
+    const historical = job.rule === 'NOT-05' || job.related?.type === 'review_assignment';
+    const assignment = historical ? await eventAssignment(db, job) : null;
+    const context = assignment ?? (await eventProfile(db, job));
+    const revisions = assignment
+      ? await profileSubmissionRevisions(db, assignment)
+      : await profileCandidateRevisions(db, context);
+    const revisionId = revisions.find((section) => section.kind === 'contacts')?.revisionId;
+    if (!revisionId)
+      throw new PermanentNotificationError(`notification ${job.rule}: отсутствует точная редакция contacts`);
+    const [manufacturer] = await db
+      .select({ id: userAccounts.id })
+      .from(userAccounts)
+      .where(and(eq(userAccounts.organizationId, context.organizationId), eq(userAccounts.role, 'manufacturer')));
+    const rows = await db
+      .select({ email: contact.email })
+      .from(contact)
+      .where(
+        and(
+          eq(contact.sectionRevisionId, revisionId),
+          eq(contact.organizationId, context.organizationId),
+          focalPointOnly ? eq(contact.isFocalPoint, true) : undefined,
+        ),
+      )
+      .orderBy(asc(contact.positionInList), asc(contact.id));
+    return rows.flatMap(({ email }) => {
+      const address = email?.trim();
+      return address
+        ? [{ email: address, source: 'contact' as const, accountId: null, languageAccountId: manufacturer?.id ?? null }]
+        : [];
+    });
+  };
+
+const imbcMailbox: RecipientResolver = async (db) => {
+  const [imbc] = await db
+    .select({ mailbox: organizations.notificationMailbox })
+    .from(organizations)
+    .where(eq(organizations.type, 'imbc'));
+  const mailbox = imbc?.mailbox?.trim();
+  return mailbox ? [{ email: mailbox, source: 'imbc_mailbox', accountId: null, languageAccountId: null }] : [];
+};
 
 /** Части получателей правил раздела 8.2. Адреса читаются из БД при отправке, в задании их нет. */
 export const DEFAULT_RECIPIENT_RESOLVERS: Record<RecipientPart, RecipientResolver> = {
@@ -84,18 +162,21 @@ export const DEFAULT_RECIPIENT_RESOLVERS: Record<RecipientPart, RecipientResolve
         .where(and(eq(userAccounts.organizationId, organizationId), eq(userAccounts.role, 'manufacturer')))
     ).map(accountRecipient);
   },
-  focal_point: notReady('focal_point', '3'),
-  manufacturer_contacts: notReady('manufacturer_contacts', '3'),
+  focal_point: contactRecipients(true),
+  manufacturer_contacts: contactRecipients(false),
   /** Ящик IMBC, который задаёт администратор (раздел 8.2); не задан — никого. */
-  imbc_mailbox: async (db) => {
-    const [imbc] = await db
-      .select({ mailbox: organizations.notificationMailbox })
-      .from(organizations)
-      .where(eq(organizations.type, 'imbc'));
-    const mailbox = imbc?.mailbox?.trim();
-    return mailbox ? [{ email: mailbox, source: 'imbc_mailbox', accountId: null, languageAccountId: null }] : [];
+  imbc_mailbox: imbcMailbox,
+  assigned_sme_or_imbc_mailbox: async (db, job) => {
+    const { expertId } = await eventAssignment(db, job);
+    if (!expertId) return imbcMailbox(db, job);
+    const [expert] = await db
+      .select(accountColumns)
+      .from(userAccounts)
+      .innerJoin(organizations, eq(organizations.id, userAccounts.organizationId))
+      .where(and(eq(userAccounts.id, expertId), eq(userAccounts.role, 'expert'), eq(organizations.type, 'imbc')));
+    if (!expert) throw new PermanentNotificationError(`notification ${job.rule}: назначенный SME вне IMBC контекста`);
+    return [accountRecipient(expert)];
   },
-  assigned_sme_or_imbc_mailbox: notReady('assigned_sme_or_imbc_mailbox', '5'),
   /** Аккаунты организаций-операторов, кроме blocked: invited и inactive тоже (NOT-11). */
   operator_accounts_not_blocked: async (db) =>
     (

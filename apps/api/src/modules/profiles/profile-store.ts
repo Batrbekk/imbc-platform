@@ -1,8 +1,15 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, getTableColumns, inArray, isNull, sql } from 'drizzle-orm';
 import type { Database } from '../../database/database.module.js';
-import { manufacturerProfile, profileSection, sectionRevision, userAccounts } from '../../database/schema/index.js';
+import {
+  manufacturerProfile,
+  profileSection,
+  reviewAssignment,
+  sectionRevision,
+  userAccounts,
+} from '../../database/schema/index.js';
 import { ProblemException } from '../../common/problem.js';
 import type { AuthUser } from '../auth/auth.types.js';
+import { selectedCandidateRevisionId } from './profile-candidate.js';
 
 export class OwnProfileDenied extends ProblemException {
   constructor() {
@@ -24,12 +31,29 @@ export async function ownProfile(tx: Database, actor: AuthUser) {
     .where(eq(manufacturerProfile.organizationId, account.organizationId))
     .for('no key update');
   if (!profile) throw new ProblemException(404, 'not_found', 'Профиль не найден.');
-  return profile;
+  // Separate statement AFTER the profile lock wait: a newly committed all-retained Send may have
+  // no submitted pending pointer and keep status Verified, but still globally locks this profile.
+  const [assignment] = await tx
+    .select({ id: reviewAssignment.id })
+    .from(reviewAssignment)
+    .where(
+      and(
+        eq(reviewAssignment.profileId, profile.id),
+        eq(reviewAssignment.organizationId, profile.organizationId),
+        isNull(reviewAssignment.closedAt),
+      ),
+    );
+  return { ...profile, activeAssignmentId: assignment?.id ?? null };
 }
 
 export async function ownSections(tx: Database, profileId: string, organizationId: string) {
   return tx
-    .select()
+    .select({
+      ...getTableColumns(profileSection),
+      candidateRevisionId: sql<string | null>`
+      (select c.section_revision_id from profile_section_candidate c
+        where c.profile_section_id=${profileSection.id} and c.organization_id=${profileSection.organizationId})`,
+    })
     .from(profileSection)
     .where(and(eq(profileSection.profileId, profileId), eq(profileSection.organizationId, organizationId)))
     .orderBy(asc(profileSection.kind))
@@ -58,13 +82,17 @@ export type StoredSection = Awaited<ReturnType<typeof ownSections>>[number];
 export type StoredRevision = Awaited<ReturnType<typeof ownRevisions>>[number];
 
 export function selectedRevision(section: StoredSection, revisions: readonly StoredRevision[]): StoredRevision | null {
-  const revisionId = section.workingRevisionId ?? section.pendingRevisionId ?? section.verifiedRevisionId;
+  const revisionId = selectedCandidateRevisionId(section);
   return revisions.find((revision) => revision.id === revisionId && revision.profileSectionId === section.id) ?? null;
 }
 
 /** MAN-43, MAN-45: pending pointers denote sent changes, not a manufacturer's unsubmitted working copy. */
-export function profileIsLocked(profile: StoredProfile, sections: readonly StoredSection[]): boolean {
+export function profileIsLocked(
+  profile: Pick<StoredProfile, 'status'> & { activeAssignmentId?: string | null },
+  sections: readonly Pick<StoredSection, 'pendingRevisionId'>[],
+): boolean {
   return (
+    profile.activeAssignmentId != null ||
     profile.status === 'submitted' ||
     profile.status === 'under_review' ||
     (profile.status === 'verified' && sections.some((section) => section.pendingRevisionId !== null))

@@ -51,5 +51,7 @@ export const documentsReadSchema = z.strictObject({
   requirementSource: z.enum(['current', 'submission']),
 });
 export type DocumentsRead = z.infer<typeof documentsReadSchema>;
+export const documentEditorChoicesSchema = documentsReadSchema.pick({ requiredTypes: true });
+export type DocumentEditorChoices = z.infer<typeof documentEditorChoicesSchema>;
 export const ownDocumentsSchema = sectionReadSchema(documentsReadSchema);
 export const saveDocumentsSchema = sectionSaveInputSchema(documentsWriteSchema);

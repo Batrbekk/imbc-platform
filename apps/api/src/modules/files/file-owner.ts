@@ -85,7 +85,8 @@ export async function revisionOwnedFiles(
 ): Promise<RevisionOwnedFile[]> {
   const { rows } = await tx.execute<RevisionOwnedFile>(sql`
     select o.file_object_id as "fileObjectId",
-           coalesce(f.purpose::text = any(o.purposes) and f.data_class = 'b_manufacturer', false) as valid
+           coalesce(f.purpose::text = any(o.purposes) and f.data_class = 'b_manufacturer'
+             and f.purge_requested_at is null, false) as valid
     ${ownerRevisions}
     left join file_object f on f.id = o.file_object_id and f.organization_id = o.organization_id
     where r.id = ${sectionRevisionId} and r.organization_id = ${organizationId}`);

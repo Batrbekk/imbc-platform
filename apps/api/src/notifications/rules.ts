@@ -34,8 +34,8 @@ export const ACCOUNT_SECURITY_RULES: readonly NotificationRuleCode[] = ['NOT-01'
 
 /**
  * Части получателей `notification_rule.recipient_rule` (через `+`). Как часть находит адреса — резолвер
- * (`recipients.ts`); `focal_point`, `manufacturer_contacts` появятся с контактами (этап 3),
- * `assigned_sme_or_imbc_mailbox` — с назначением SME (этап 5).
+ * (`recipients.ts`). Review events resolve the exact immutable assignment graph; other profile events
+ * resolve the current manufacturer candidate. No addresses are stored in the queued event.
  */
 export const RECIPIENT_PARTS = [
   'person',

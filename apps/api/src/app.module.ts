@@ -37,6 +37,14 @@ import { ProfilesController } from './modules/profiles/profiles.controller.js';
 import { ProfilesService } from './modules/profiles/profiles.service.js';
 import { ProfileSectionsController } from './modules/profiles/profile-sections.controller.js';
 import { ProfileSectionsService } from './modules/profiles/profile-sections.service.js';
+import { ProfileSubmitController } from './modules/profiles/profile-submit.controller.js';
+import { ProfileSubmitService } from './modules/profiles/profile-submit.service.js';
+import { ProfileUnlockController } from './modules/profiles/profile-unlock.controller.js';
+import { ProfileUnlockService } from './modules/profiles/profile-unlock.service.js';
+import { ProfileSubmissionStateController } from './modules/profiles/profile-submission-state.controller.js';
+import { ProfileSubmissionStateService } from './modules/profiles/profile-submission-state.service.js';
+import { ProfileReviewDetailsController } from './modules/profiles/profile-review-details.controller.js';
+import { ProfileReviewDetailsService } from './modules/profiles/profile-review-details.service.js';
 import { MainInformationHandler } from './modules/profiles/main-information.handler.js';
 import { ContactsHandler } from './modules/profiles/contacts.handler.js';
 import { PersonnelHandler } from './modules/profiles/personnel.handler.js';
@@ -70,6 +78,10 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     CatalogController,
     ProfilesController,
     ProfileSectionsController,
+    ProfileSubmitController,
+    ProfileUnlockController,
+    ProfileSubmissionStateController,
+    ProfileReviewDetailsController,
     ProfileUploadController,
     ReviewsController,
     AccountsController,
@@ -85,6 +97,10 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     KeycloakAdminService,
     ProfilesService,
     ProfileSectionsService,
+    ProfileSubmitService,
+    ProfileUnlockService,
+    ProfileSubmissionStateService,
+    ProfileReviewDetailsService,
     ProfileUploadService,
     ProfileUploadGuard,
     MainInformationHandler,
@@ -96,8 +112,24 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     ProductionHandler,
     {
       provide: PROFILE_SECTION_HANDLERS,
-      inject: [MainInformationHandler, ContactsHandler, PersonnelHandler, DocumentsHandler, CertificatesHandler, ProductsHandler, ProductionHandler],
-      useFactory: (main: MainInformationHandler, contacts: ContactsHandler, personnel: PersonnelHandler, documents: DocumentsHandler, certificates: CertificatesHandler, products: ProductsHandler, production: ProductionHandler) => [
+      inject: [
+        MainInformationHandler,
+        ContactsHandler,
+        PersonnelHandler,
+        DocumentsHandler,
+        CertificatesHandler,
+        ProductsHandler,
+        ProductionHandler,
+      ],
+      useFactory: (
+        main: MainInformationHandler,
+        contacts: ContactsHandler,
+        personnel: PersonnelHandler,
+        documents: DocumentsHandler,
+        certificates: CertificatesHandler,
+        products: ProductsHandler,
+        production: ProductionHandler,
+      ) => [
         defineSectionHandler(main),
         defineSectionHandler(contacts),
         defineSectionHandler(personnel),

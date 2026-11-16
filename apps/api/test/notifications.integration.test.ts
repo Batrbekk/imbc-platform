@@ -9,6 +9,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import type { AccountState, Locale, Role } from '@imbc/contracts';
 import { AuditService } from '../src/common/audit.service.js';
 import { ProblemException } from '../src/common/problem.js';
+import { PermanentNotificationError } from '../src/notifications/errors.js';
 import type { Env } from '../src/config/env.js';
 import { applyAppRoleGrants } from '../src/database/app-role.js';
 import type { Database } from '../src/database/database.module.js';
@@ -29,7 +30,6 @@ import { enqueueNotification, type NotifyJob, notifyJobSchema } from '../src/not
 import {
   DEFAULT_RECIPIENT_RESOLVERS,
   type Recipient,
-  RecipientPartNotReady,
   type RecipientResolver,
 } from '../src/notifications/recipients.js';
 import {
@@ -69,6 +69,7 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
     pool.query(`DO $$ BEGIN
       IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${ROLE}') THEN
         REVOKE ALL ON ALL TABLES IN SCHEMA public FROM ${ROLE};
+          REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM ${ROLE};
         REVOKE ALL ON SCHEMA public FROM ${ROLE};
         IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'pgboss_auth_test') THEN
           REVOKE ALL ON ALL TABLES IN SCHEMA pgboss_auth_test FROM ${ROLE};
@@ -541,7 +542,7 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
     expect(rows.map((r) => r.recipient_email).sort()).toEqual([active.email, invited.email, inactive.email].sort());
   });
 
-  it('каждое из 17 правил разбирается parseRecipientRule; части этапов 3 и 5 бросают RecipientPartNotReady', async () => {
+  it('каждое из 17 правил разбирается parseRecipientRule; события review без точного назначения не отправляют даже готовую часть получателей', async () => {
     const rules = await roleDb
       .select({ code: schema.notificationRule.code, recipientRule: schema.notificationRule.recipientRule })
       .from(schema.notificationRule)
@@ -553,20 +554,16 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
       expect(() => parseRecipientRule(text), text).toThrow();
 
     const job: NotifyJob = { rule: 'NOT-05', eventKey: eventKey('review'), params: {} };
-    for (const [part, stage] of [
-      ['focal_point', '3'],
-      ['manufacturer_contacts', '3'],
-      ['assigned_sme_or_imbc_mailbox', '5'],
-    ] as const) {
+    for (const part of ['focal_point', 'manufacturer_contacts', 'assigned_sme_or_imbc_mailbox'] as const) {
       const error = await DEFAULT_RECIPIENT_RESOLVERS[part](roleDb, job).catch((e: unknown) => e);
-      expect(error, part).toBeInstanceOf(RecipientPartNotReady);
-      expect(error, part).toMatchObject({ part, stage });
+      expect(error, part).toBeInstanceOf(PermanentNotificationError);
+      expect((error as Error).message).toBe('notification NOT-05: review_assignment без related.id');
     }
-    // Правило с неготовой частью не отправляет и готовую часть: задание падает, письмо придёт с этапом 3.
+    // Не допускаем частичную рассылку аккаунту, если исторический focal point нельзя определить.
     const maker = await account('manufacturer');
     const { transport, dispatcher } = setup();
     await expect(dispatcher.dispatch({ ...job, organizationId: maker.organizationId })).rejects.toBeInstanceOf(
-      RecipientPartNotReady,
+      PermanentNotificationError,
     );
     expect(transport.sent).toEqual([]);
     expect(await journal('NOT-05', job.eventKey)).toEqual([]);
@@ -980,7 +977,7 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
       notReady: {
         rule: 'NOT-05',
         refused: 'permanent_failure',
-        reason: 'notification: часть получателей focal_point появится на этапе 3',
+        reason: 'notification NOT-05: review_assignment без related.id',
       },
       noText: { rule: 'NOT-04', refused: 'permanent_failure', reason: 'notification NOT-04: нет текста письма' },
       noParam: { rule: 'NOT-03', refused: 'permanent_failure', reason: 'mail NOT-03: нет подстановки {link}' },
@@ -1002,7 +999,7 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
     expect(lines).toEqual(
       expect.arrayContaining([
         'notification NOT-04: задание отклонено без повторов — неверные поля: job:unrecognized_keys',
-        'notification NOT-05: письмо не будет отправлено, без повторов — notification: часть получателей focal_point появится на этапе 3',
+        'notification NOT-05: письмо не будет отправлено, без повторов — notification NOT-05: review_assignment без related.id',
         'notification NOT-04: письмо не будет отправлено, без повторов — notification NOT-04: нет текста письма',
         'notification NOT-03: письмо не будет отправлено, без повторов — mail NOT-03: нет подстановки {link}',
         'notification NOT-17: письмо не будет отправлено, без повторов — notification NOT-17: правила нет в notification_rule',

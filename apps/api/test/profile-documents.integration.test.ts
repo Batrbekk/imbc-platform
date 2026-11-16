@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import {
+  documentEditorChoicesSchema,
   ownDocumentsSchema,
   type DocumentsWrite,
   type ProfileDocumentWrite,
@@ -380,6 +381,23 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('MAN-37–39 documents through a
       .where(eq(s.dictionaryEntry.id, typeIds.financial_statements!));
     expect((await read()).data.requiredTypes.map((type) => type.id)).not.toContain(typeIds.financial_statements);
     expect((await read()).completeness.percent).toBe(100);
+    const choicesResponse = await http.get(`${ROOT}/choices`, 'manufacturer');
+    expect(choicesResponse.status).toBe(200);
+    const choices = documentEditorChoicesSchema.parse(await choicesResponse.json());
+    expect(choices.requiredTypes.map((type) => type.id)).toContain(typeIds.financial_statements);
+    expect(choices.requiredTypes.map((type) => type.id)).not.toContain(typeIds.licence);
+    expect(choices.requiredTypes.find((type) => type.id === typeIds.financial_statements)?.names).toEqual({
+      kk: 'Fixture financial_statements kk',
+      ru: 'Fixture financial_statements ru',
+      en: 'Fixture financial_statements en',
+    });
+    const unchanged = await read();
+    expect(unchanged.revisionId).toBe(first.revisionId);
+    expect(unchanged.hasWorkingChanges).toBe(false);
+    expect(unchanged.data.requiredTypes.map((type) => type.id)).not.toContain(typeIds.financial_statements);
+    const withSelector = await http.get(`${ROOT}/choices?profileId=${foreignProfile.id}`, 'manufacturer');
+    expect(withSelector.status).toBe(200);
+    expect(documentEditorChoicesSchema.parse(await withSelector.json())).toEqual(choices);
     const replacement = await file();
     const changed = ownDocumentsSchema.parse(
       await (
@@ -614,6 +632,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('MAN-37–39 documents through a
     await freeze(first.revisionId!, 'submitted');
     const submitted = await read();
     expect(submitted.readOnly).toBe(true);
+    const choices = await http.get(`${ROOT}/choices`, 'manufacturer');
+    expect(choices.status).toBe(409);
+    expect(await choices.json()).toMatchObject({ code: 'profile_locked' });
     expect(submitted.data.documents.map((row) => row.status)).toEqual(['under_review', 'under_review']);
     const locked = await save(empty(), first.editVersion);
     expect(locked.status).toBe(409);
@@ -621,7 +642,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('MAN-37–39 documents through a
     expect((await read()).data.editable.documents).toEqual(base.data.documents);
   });
 
-  it('preserves an unchanged item status and resets only a materially changed item to uploaded', async () => {
+  it('keeps legacy frozen verification but new COW business rows never inherit it', async () => {
     const base = await baseline();
     const additional = await file();
     const first = ownDocumentsSchema.parse(
@@ -653,7 +674,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('MAN-37–39 documents through a
         )
       ).json(),
     );
-    expect(changed.data.documents.map((row) => row.status)).toEqual(['verified', 'verified', 'uploaded']);
+    expect(changed.data.documents.map((row) => row.status)).toEqual(['uploaded', 'uploaded', 'uploaded']);
     const frozenContext = await context(first.revisionId!);
     const frozen = await db.transaction((tx) => new DocumentsHandler().read(tx as Database, frozenContext));
     expect(frozen.documents.map((row) => row.status)).toEqual(['verified', 'verified', 'verified']);

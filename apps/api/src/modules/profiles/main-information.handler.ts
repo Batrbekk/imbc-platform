@@ -26,6 +26,7 @@ import { assertDictionaryChoice } from './dictionary-choice.js';
 import { emptyLegalInformation, storedMainSource } from './main-source.js';
 import { sectionFieldError } from './section-errors.js';
 import type { SectionContext, TypedSectionHandler } from './section-handler.js';
+import { profileCandidateRevisionSql } from './profile-candidate.js';
 
 @Injectable()
 export class MainInformationHandler implements TypedSectionHandler<MainInformationWrite, MainInformationRead> {
@@ -252,7 +253,7 @@ export class MainInformationHandler implements TypedSectionHandler<MainInformati
         join profile_section section on section.id=revision.profile_section_id
         where line.organization_id=${context.organizationId} and section.profile_id=${context.profileId}
           and line.production_site_identity_id=any(${sql.param(removed)}::uuid[])
-          and line.section_revision_id=coalesce(section.working_revision_id,section.verified_revision_id)
+          and line.section_revision_id=${profileCandidateRevisionSql('section')}
       ) as used`);
       if (result.rows[0]?.used) throw sectionFieldError('sites', 'site_in_use');
     }

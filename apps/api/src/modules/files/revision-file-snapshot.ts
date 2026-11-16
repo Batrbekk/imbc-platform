@@ -43,6 +43,7 @@ export async function captureRevisionFileVersions(
   if (fileIds.length > 0) {
     const { rows: objects } = await tx.execute<{ id: string }>(sql`
       select id from file_object where id = any(${sql.param(fileIds)}::uuid[]) and organization_id = ${input.organizationId}
+        and purge_requested_at is null
       order by id for update`);
     if (objects.length !== fileIds.length) throw notFound();
     const { rows: versions } = await tx.execute<CapturedFileVersion & { scanState: string }>(sql`

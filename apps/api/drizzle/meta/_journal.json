@@ -141,6 +141,20 @@
       "when": 1794791829264,
       "tag": "0019_profile_units",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794795769356,
+      "tag": "0020_stage3_review_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794795769357,
+      "tag": "0021_submission_requirement_serialization",
+      "breakpoints": true
     }
   ]
 }

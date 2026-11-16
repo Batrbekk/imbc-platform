@@ -80,15 +80,28 @@ export class ProfileSectionsService {
   }
 
   async fileHistory(
-    actor: AuthUser, rawKind: string, pagination: { offset: number; limit: number }, ip: string | null = null,
+    actor: AuthUser,
+    rawKind: string,
+    pagination: { offset: number; limit: number },
+    ip: string | null = null,
   ): Promise<ProfileFileHistory> {
     const kind = this.kind(rawKind);
-    return this.run(actor, 'profile.read', '/api/v1/profiles/own/sections/:kind/files/history', ip, async (tx, graph) => {
-      const section = graph.sections.find((item) => item.kind === kind);
-      if (!section) throw sectionUnavailable();
-      return readProfileFileHistory(tx, { profileId: graph.profile.id, sectionId: section.id,
-        organizationId: graph.profile.organizationId, ...pagination });
-    });
+    return this.run(
+      actor,
+      'profile.read',
+      '/api/v1/profiles/own/sections/:kind/files/history',
+      ip,
+      async (tx, graph) => {
+        const section = graph.sections.find((item) => item.kind === kind);
+        if (!section) throw sectionUnavailable();
+        return readProfileFileHistory(tx, {
+          profileId: graph.profile.id,
+          sectionId: section.id,
+          organizationId: graph.profile.organizationId,
+          ...pagination,
+        });
+      },
+    );
   }
 
   async editorChoices(actor: AuthUser, rawKind: string, ip: string | null = null): Promise<unknown> {
@@ -99,8 +112,11 @@ export class ProfileSectionsService {
       const section = graph.sections.find((item) => item.kind === kind);
       const revision = section ? selectedRevision(section, graph.revisions) : null;
       if (!handler?.editorChoices || !handler.editorChoicesSchema || !section || !revision) throw sectionUnavailable();
-      return parseResponse(handler.editorChoicesSchema,
-        await handler.editorChoices(tx, this.context(graph.profile, section, revision)), 'варианты для редактирования раздела');
+      return parseResponse(
+        handler.editorChoicesSchema,
+        await handler.editorChoices(tx, this.context(graph.profile, section, revision)),
+        'варианты для редактирования раздела',
+      );
     });
   }
 
@@ -237,14 +253,18 @@ export class ProfileSectionsService {
   }
 
   private async overviewIn(tx: Database, graph: OwnGraph): Promise<OwnSectionsOverview> {
-    const sections = await Promise.all(SECTION_KINDS.map((kind) => this.metadata(tx, graph, kind)));
+    const sections: SectionOverview[] = [];
+    for (const kind of SECTION_KINDS) sections.push(await this.metadata(tx, graph, kind));
     return parseResponse(
       ownSectionsOverviewSchema,
       {
         profileId: graph.profile.id,
         profileStatus: graph.profile.status,
         readOnly: profileIsLocked(graph.profile, graph.sections),
-        hasPendingChanges: graph.profile.status === 'verified' && graph.sections.some((section) => section.pendingRevisionId !== null),
+        hasPendingChanges:
+          graph.profile.status === 'verified' &&
+          (graph.profile.activeAssignmentId !== null ||
+            graph.sections.some((section) => section.pendingRevisionId !== null)),
         completenessPct: profileCompleteness(sections),
         sections,
       },

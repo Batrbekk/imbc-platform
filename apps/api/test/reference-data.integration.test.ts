@@ -335,11 +335,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
     // Код в файле в другом регистре — тот же код (уникальность без учёта регистра): тоже пропускается.
     const lower = await loadReferenceFile(
       db,
-      fixture(
-        'certificate_type',
-        [{ code: 'asme', names: { en: 'ASME' }, mandatory: true }],
-        'specification',
-      ),
+      fixture('certificate_type', [{ code: 'asme', names: { en: 'ASME' }, mandatory: true }], 'specification'),
       'release',
     );
     expect(lower).toEqual({ dictionary: 'certificate_type', inserted: 0, translationsAdded: 0, skippedDeleted: 1 });
@@ -349,20 +345,35 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
   it('fixed ISO/registration/charter cannot be retired or deleted through admin HTTP after their flag changes', async () => {
     await loadReferenceDirectory(db, RELEASE, 'release');
     const admin = await administrator();
-    const http = await startHttp({ controllers: [DictionariesController], providers: [{ provide: DictionariesService,
-      useValue: dictionaries() }], organizationId: admin.organizationId, accountIds: { administrator: admin.id } });
+    const http = await startHttp({
+      controllers: [DictionariesController],
+      providers: [{ provide: DictionariesService, useValue: dictionaries() }],
+      organizationId: admin.organizationId,
+      accountIds: { administrator: admin.id },
+    });
     try {
-      for (const [dictionary, codes] of [['certificate_type', COMPANY_ISO_CODES], ['document_type', DOCUMENT_REQUIRED_CODES]] as const)
+      for (const [dictionary, codes] of [
+        ['certificate_type', COMPANY_ISO_CODES],
+        ['document_type', DOCUMENT_REQUIRED_CODES],
+      ] as const)
         for (const code of codes) {
-          const id = await entryId(dictionary, code); const route = `/api/v1/dictionaries/${dictionary}/entries/${id}`;
-          expect((await http.send('PUT', `${route}/mandatory`, 'administrator', { mandatory: false })).status).toBe(200);
-          for (const response of [await http.send('POST', `${route}/retire`, 'administrator'),
-            await http.send('DELETE', route, 'administrator')]) {
-            expect(response.status).toBe(409); expect(await response.json()).toMatchObject({ code: 'entry_mandatory' });
+          const id = await entryId(dictionary, code);
+          const route = `/api/v1/dictionaries/${dictionary}/entries/${id}`;
+          expect((await http.send('PUT', `${route}/mandatory`, 'administrator', { mandatory: false })).status).toBe(
+            200,
+          );
+          for (const response of [
+            await http.send('POST', `${route}/retire`, 'administrator'),
+            await http.send('DELETE', route, 'administrator'),
+          ]) {
+            expect(response.status).toBe(409);
+            expect(await response.json()).toMatchObject({ code: 'entry_mandatory' });
           }
           expect((await entries(dictionary)).find((entry) => entry.code === code)?.retired_at).toBeNull();
         }
-    } finally { await http.close(); }
+    } finally {
+      await http.close();
+    }
   });
 
   it('удалить и создать заново с тем же кодом: загрузка строку администратора не меняет — ни полей, ни переводов (ADM-08, DATA-04)', async () => {
@@ -808,6 +819,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
       pool.query(`DO $$ BEGIN
         IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${ROLE}') THEN
           REVOKE ALL ON ALL TABLES IN SCHEMA public FROM ${ROLE};
+          REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM ${ROLE};
           REVOKE ALL ON SCHEMA public FROM ${ROLE};
           DROP ROLE ${ROLE};
         END IF;

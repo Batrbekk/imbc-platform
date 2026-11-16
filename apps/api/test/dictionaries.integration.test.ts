@@ -132,6 +132,8 @@ describe.skipIf(!databaseUrl)('справочники: API администра�
     const client = await pool.connect();
     try {
       await client.query('begin');
+      // Same order as the real administrator pathway and Send: requirement lock before the entry.
+      await client.query('select pg_advisory_xact_lock(2146711107,3)');
       await client.query('select 1 from dictionary_entry where id = $1 for no key update', [id]);
       const result = action();
       result.catch(() => undefined);
@@ -944,6 +946,7 @@ describe.skipIf(!databaseUrl)('справочники: API администра�
       pool.query(`DO $$ BEGIN
         IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${ROLE}') THEN
           REVOKE ALL ON ALL TABLES IN SCHEMA public FROM ${ROLE};
+          REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM ${ROLE};
           REVOKE ALL ON SCHEMA public FROM ${ROLE};
           DROP ROLE ${ROLE};
         END IF;

@@ -9,17 +9,27 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, or, sql, type SQL } from 'drizzle-orm';
 import { parseResponse } from '../../common/response.js';
 import { DB, type Database } from '../../database/database.module.js';
-import { manufacturerProfiles, organizations, profileSection, userAccounts } from '../../database/schema/index.js';
+import {
+  manufacturerProfiles,
+  organizations,
+  profileSection,
+  reviewAssignment,
+  userAccounts,
+} from '../../database/schema/index.js';
 
 const p = manufacturerProfiles;
 
 /** MAN-45 / reply 29: only a submitted section pointer means changes were sent to SME. */
-const sentPendingChanges = sql<boolean>`exists (
+const sentPendingChanges = sql<boolean>`(exists (
   select 1 from ${profileSection}
   where ${profileSection.profileId} = ${p.id}
     and ${profileSection.organizationId} = ${p.organizationId}
     and ${profileSection.pendingRevisionId} is not null
-)`;
+) or exists (
+  select 1 from ${reviewAssignment} assignment
+  where assignment.profile_id=${p.id} and assignment.organization_id=${p.organizationId}
+    and assignment.submission_mode='verified_changes' and assignment.closed_at is null
+))`;
 
 /** REV-03: section pointers are authoritative; a stale transitional profile flag cannot admit a queue row. */
 function queueCondition(status: QueueStatus): SQL {

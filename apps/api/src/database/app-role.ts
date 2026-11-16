@@ -15,6 +15,8 @@ export async function applyAppRoleGrants(pool: pg.Pool, role: string): Promise<v
   let broken: Error | undefined;
   try {
     await client.query('BEGIN');
+    // Table privileges alone cannot resolve public relations when schema USAGE was removed/recreated.
+    await client.query(`GRANT USAGE ON SCHEMA public TO ${name}`);
     await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${name}`);
     // DATA-01: TRUNCATE bypasses row-level frozen-revision triggers and is never an application operation.
     await client.query(`REVOKE TRUNCATE ON ALL TABLES IN SCHEMA public FROM ${name}`);
@@ -23,9 +25,27 @@ export async function applyAppRoleGrants(pool: pg.Pool, role: string): Promise<v
     await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON audit_entries FROM ${name}`);
     await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON nda_acceptance FROM ${name}`);
     // Also usable during compatibility checks against the pre-history expand boundary.
-    const history = await client.query<{ exists: boolean }>("SELECT to_regclass('profile_file_history') IS NOT NULL AS exists");
+    const history = await client.query<{ exists: boolean }>(
+      "SELECT to_regclass('profile_file_history') IS NOT NULL AS exists",
+    );
     if (history.rows[0]?.exists)
       await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON profile_file_history FROM ${name}`);
+    // Canonical review expand is absent at older migration boundaries. Immutable maps and decisions
+    // are append-only; assignments can be assigned/closed, while the current candidate cursor is mutable.
+    const review = await client.query<{ exists: boolean }>(
+      "SELECT to_regclass('review_assignment') IS NOT NULL AS exists",
+    );
+    if (review.rows[0]?.exists) {
+      await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON review_decision, review_assignment_section FROM ${name}`);
+      await client.query(`REVOKE DELETE, TRUNCATE ON review_assignment FROM ${name}`);
+      for (const sequence of ['profile_review_assignment_order_seq', 'profile_review_decision_order_seq']) {
+        const present = await client.query<{ exists: boolean }>('SELECT to_regclass($1) IS NOT NULL AS exists', [
+          sequence,
+        ]);
+        if (present.rows[0]?.exists)
+          await client.query(`GRANT USAGE ON SEQUENCE ${pg.escapeIdentifier(sequence)} TO ${name}`);
+      }
+    }
     // Журнал писем (NOT-18) — только добавление: запись и отправка идут одной транзакцией, сбой SMTP — откат.
     await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON notification FROM ${name}`);
     // Правила писем и справочники — данные релиза (миграция 0010): приложение их только читает.
