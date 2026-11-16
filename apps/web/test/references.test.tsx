@@ -968,10 +968,11 @@ describe("справочники: вывод из оборота, возврат
     await waitFor(() => expect(screen.queryByText("Прежний сертификат")).toBeNull());
     // Строка «Выведено из оборота» — бейдж с состоянием в таблице всех значений.
     await user.click(screen.getByRole("tab", { name: t.status.all }));
-    await screen.findByText("Сертификат ISO 9001");
+    // ISO уже был на предыдущей вкладке: дождаться строки OLD, доступной только после нового ответа.
+    const restoredRow = (await screen.findByRole("cell", { name: OLD })).closest("tr")!;
     const row = screen.getByRole("cell", { name: ISO }).closest("tr")!;
     expect(within(row).getByText(t.retired)).toBeTruthy();
-    expect(within(screen.getByRole("cell", { name: OLD }).closest("tr")!).getByText(t.inUse)).toBeTruthy();
+    expect(within(restoredRow).getByText(t.inUse)).toBeTruthy();
   });
 
   it("обязательный тип нельзя вывести из оборота: 409 entry_mandatory — сообщение в строке итога", async () => {
