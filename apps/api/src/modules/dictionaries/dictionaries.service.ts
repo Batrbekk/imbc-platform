@@ -1,4 +1,6 @@
 import {
+  COMPANY_ISO_CODES,
+  DOCUMENT_REQUIRED_CODES,
   CLOSED_DICTIONARIES,
   type CreateDictionaryEntryInput,
   createDictionaryEntrySchema,
@@ -83,6 +85,13 @@ function known(code: string): DictionaryCode {
   if (!(DICTIONARY_CODES as readonly string[]).includes(code)) throw notFound();
   return code as DictionaryCode;
 }
+
+/** MAN-35/37: these requirements must remain available even if their optional admin flag is changed. */
+const fixedProfileRequirement = (dictionaryCode: DictionaryCode, code: string): boolean => {
+  const values: readonly string[] = dictionaryCode === 'certificate_type' ? COMPANY_ISO_CODES
+    : dictionaryCode === 'document_type' ? DOCUMENT_REQUIRED_CODES : [];
+  return values.some((value) => value.toLowerCase() === code.toLowerCase());
+};
 
 /** `%`, `_` и `\` запроса ищутся буквально: `\` — символ экранирования LIKE по умолчанию. */
 const escapeLike = (value: string) => value.replace(/[\\%_]/g, (c) => `\\${c}`);
@@ -215,6 +224,7 @@ export class DictionariesService {
         code: ENTRY_COLUMNS.code,
         parentCode: ENTRY_COLUMNS.parentCode,
         names: ENTRY_COLUMNS.names,
+        customNameAllowed: ENTRY_COLUMNS.customNameAllowed,
       })
       .from(dictionaryEntry)
       .leftJoin(parent, eq(parent.id, dictionaryEntry.parentEntryId))
@@ -230,6 +240,7 @@ export class DictionariesService {
           code: row.code,
           name: entryDisplayName(row.names ?? {}, query.lang, row.code),
           parentCode: row.parentCode,
+          ...(row.customNameAllowed ? { customNameAllowed: true } : {}),
         })),
         total: await this.count(condition),
         page: query.page,
@@ -360,7 +371,7 @@ export class DictionariesService {
     const entry = await this.mutate(actor, DICTIONARY_ROUTES.retire, ip, async (tx) => {
       if (isClosed(dict)) throw dictionaryClosed();
       const row = await this.lockEntry(tx, dict, id);
-      if (row.mandatory === true) throw entryMandatory();
+      if (row.mandatory === true || fixedProfileRequirement(dict, row.code)) throw entryMandatory();
       if (row.retiredAt === null) {
         await tx
           .update(dictionaryEntry)
@@ -402,7 +413,7 @@ export class DictionariesService {
       await this.mutate(actor, DICTIONARY_ROUTES.entry, ip, async (tx) => {
         if (isClosed(dict)) throw dictionaryClosed();
         const row = await this.lockEntry(tx, dict, id);
-        if (row.mandatory === true) throw entryMandatory();
+        if (row.mandatory === true || fixedProfileRequirement(dict, row.code)) throw entryMandatory();
         if (await entryInUse(tx, dict, row.code)) throw entryUsed();
         const { names } = await this.readEntry(tx, id);
         await tx.delete(dictionaryEntry).where(eq(dictionaryEntry.id, id));

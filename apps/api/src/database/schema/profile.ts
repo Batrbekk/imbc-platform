@@ -168,3 +168,14 @@ export const certificateIdentity = pgTable(
     }),
   ],
 );
+
+/** Stable document identity across working copies and per-document review decisions (MAN-36). */
+export const documentIdentity = pgTable('document_identity', {
+  id: id(),
+  profileId: uuid('profile_id').notNull(),
+  organizationId: uuid('organization_id').notNull(),
+}, (t) => [
+  uniqueIndex('document_identity_id_org_uq').on(t.id, t.organizationId),
+  foreignKey({ name: 'document_identity_profile_org_fk', columns: [t.profileId, t.organizationId],
+    foreignColumns: [manufacturerProfile.id, manufacturerProfile.organizationId] }),
+]);

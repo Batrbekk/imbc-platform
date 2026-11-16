@@ -957,18 +957,21 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
     expect(await scanAs(restored.versionId, { clean: true })).toBe('passed');
   });
 
-  it('скан: параллельный запуск с другим вердиктом решил раньше — отклонил: наша копия в рабочем бакете удаляется; пропустил: копия остаётся', async () => {
-    /** Антивирус, пока «проверяет», даёт другому запуску перевести версию в `state`. */
+  it('скан: параллельный запуск решил раньше — rejected не оставляет байтов, passed сохраняет копию победителя без повторного копирования', async () => {
+    /** Пока первый антивирус читает поток, другой настоящий worker фиксирует решение вместе с копированием. */
     const racing = (versionId: string, state: 'passed' | 'rejected'): Antivirus => ({
       scan: async (body) => {
         for await (const chunk of body) void chunk;
-        await pool.query('update file_version set scan_state = $2, scanned_at = now() where id = $1', [
-          versionId,
-          state,
-        ]);
+        expect(
+          await scanAs(
+            versionId,
+            state === 'passed' ? { clean: true } : { clean: false, signature: 'Eicar-Test-Signature' },
+          ),
+        ).toBe(state);
         return { clean: true };
       },
     });
+    const copy = vi.spyOn(storage, 'copy');
     const rejected = await createFile();
     const rejectedKey = (await version(rejected.versionId)).storage_key;
     const loser = new FileScanJob(
@@ -983,6 +986,7 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
     expect(await loser.run({ fileVersionId: rejected.versionId })).toBe('skipped');
     expect(storage.keys(FILES)).not.toContain(rejectedKey);
     expect(storage.keys(QUARANTINE)).not.toContain(rejectedKey);
+    expect(copy).not.toHaveBeenCalled();
 
     const passed = await createFile();
     const passedKey = (await version(passed.versionId)).storage_key;
@@ -998,6 +1002,7 @@ describe.skipIf(!databaseUrl)('файлы: карантин, скан, скач�
     expect(await second.run({ fileVersionId: passed.versionId })).toBe('skipped');
     expect(storage.keys(FILES)).toContain(passedKey);
     expect(storage.keys(QUARANTINE)).not.toContain(passedKey);
+    expect(copy).toHaveBeenCalledTimes(1);
   });
 
   it('скан: транзакция перехода ждёт блокировку не дольше boundLockWaits — превышение — ошибка задания, версия pending; после снятия — passed', async () => {

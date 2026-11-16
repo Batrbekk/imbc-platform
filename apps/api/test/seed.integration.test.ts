@@ -86,7 +86,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
       commodity_group: 5,
       commodity_type: 0,
       contact_role: 3,
-      certificate_type: 10,
+      certificate_type: 9,
       document_type: 4,
       equipment_type: 0,
       kpved: 0,
@@ -95,6 +95,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
       process: 0,
       region: 0,
       tn_ved: 0,
+      unit: 4,
     });
 
     // Стенд: seed добавляет временные значения прототипа.
@@ -132,8 +133,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
         )
       ).rows[0]!.n;
     const auditAfterFirst = await audit();
-    // Пять списков release и семь временных.
-    expect(auditAfterFirst).toBe(12);
+    // Шесть списков release и семь временных.
+    expect(auditAfterFirst).toBe(13);
     await seedDemo(pool);
     expect(await perDictionary()).toEqual(demo);
     expect(await audit()).toBe(auditAfterFirst);

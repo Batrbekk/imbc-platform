@@ -58,6 +58,7 @@ describe('worker: письма событий', () => {
     const sent = { sent: 1, duplicates: 0, skippedObservers: 0, invalid: 0, skipped: null };
     const runJob = vi.fn().mockResolvedValueOnce(refusal).mockResolvedValueOnce(sent);
     const jobs = { purgeSessions: vi.fn(async () => 'не результат задания') };
+    const cleanup = { run: vi.fn(async () => 'purged'), sweep: vi.fn(async () => ({ enqueued: 1 })) };
     const worker = new WorkerModule(
       boss as never,
       jobs as never,
@@ -65,6 +66,7 @@ describe('worker: письма событий', () => {
       {} as never,
       {} as never,
       { runJob } as never,
+      cleanup as never,
     );
     await worker.onApplicationBootstrap();
 
@@ -74,6 +76,10 @@ describe('worker: письма событий', () => {
     expect(await handlers.get(QUEUES.notify)!([{ data: job }])).toEqual(sent);
     expect(await handlers.get(QUEUES.purgeSessions)!([{ data: null }])).toBeUndefined();
     expect(jobs.purgeSessions).toHaveBeenCalledOnce();
+    expect(await handlers.get(QUEUES.fileCleanup)!([{ data: { fileObjectId: 'fixture-id' } }])).toBeUndefined();
+    expect(cleanup.run).toHaveBeenCalledWith({ fileObjectId: 'fixture-id' });
+    expect(await handlers.get(QUEUES.fileCleanupSweep)!([{ data: null }])).toBeUndefined();
+    expect(cleanup.sweep).toHaveBeenCalledOnce();
   });
 
   it('письмо без текста или подстановки — постоянный отказ, а не пустое письмо: NOT-04 до своего этапа', () => {

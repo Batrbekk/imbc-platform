@@ -69,8 +69,8 @@ export async function captureRevisionFileVersions(
   // Retry while working refreshes the technical draft snapshot; frozen rows cannot be modified by DB triggers.
   await tx.execute(sql`delete from revision_file_version where section_revision_id = ${input.sectionRevisionId}
                        and organization_id = ${input.organizationId}`);
-  if (captured.length > 0) {
-    const values = captured.map(
+  for (let i = 0; i < captured.length; i += 1000) {
+    const values = captured.slice(i, i + 1000).map(
       (version) => sql`(${input.sectionRevisionId}, ${version.fileObjectId},
       ${version.fileVersionId}, ${input.organizationId})`,
     );

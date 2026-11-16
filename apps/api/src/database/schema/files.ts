@@ -32,6 +32,8 @@ export const fileObject = pgTable(
     purpose: filePurpose('purpose').notNull(),
     dataClass: dataClass('data_class').notNull(),
     createdAt: createdAt(),
+    /** A never-bound upload claimed for purge cannot be downloaded, rebound, re-versioned or scanned. */
+    purgeRequestedAt: timestamp('purge_requested_at', { withTimezone: true }),
   },
   (t) => [uniqueIndex('file_object_id_org_uq').on(t.id, t.organizationId)],
 );

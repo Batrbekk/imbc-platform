@@ -145,10 +145,14 @@ describe.skipIf(!databaseUrl)('file owner graph and immutable version selection 
         )
       ).rows[0]!.id;
     }
+    const documentIdentity = (await pool.query<{ id: string }>(
+      'insert into document_identity(profile_id,organization_id) values ($1,$2) returning id',
+      [p.profileId, p.organizationId],
+    )).rows[0]!.id;
     return (
       await pool.query<{ id: string }>(
-        'insert into document(section_revision_id,organization_id,file_object_id) values ($1,$2,$3) returning id',
-        args,
+        'insert into document(section_revision_id,organization_id,file_object_id,identity_id) values ($1,$2,$3,$4) returning id',
+        [...args, documentIdentity],
       )
     ).rows[0]!.id;
   };

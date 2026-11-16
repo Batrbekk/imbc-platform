@@ -33,6 +33,11 @@ export async function applyMigrations(
     // Расширения создаются до миграций: pg_trgm нужен индексам каталога.
     await client.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
     await migrate(drizzle(client), { migrationsFolder });
+    // Reinstall guards against the complete FK graph after every future expand migration as well (DATA-05/07).
+    const guards = await client.query<{ exists: boolean }>(
+      "SELECT to_regprocedure('install_file_binding_guards()') IS NOT NULL AS exists",
+    );
+    if (guards.rows[0]?.exists) await client.query('SELECT install_file_binding_guards()');
   } finally {
     client.release(true);
   }

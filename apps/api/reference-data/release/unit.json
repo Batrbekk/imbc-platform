@@ -1,0 +1,11 @@
+{
+  "dictionary": "unit",
+  "status": "specification",
+  "source": "MAN-23 / v1.4 DBML product_line.capacity_unit_id: four manual quantity units, per year",
+  "entries": [
+    { "code": "pieces", "names": { "kk": "Дана", "ru": "Штуки", "en": "Pieces" }, "sortOrder": 0 },
+    { "code": "tonnes", "names": { "kk": "Тонна", "ru": "Тонны", "en": "Tonnes" }, "sortOrder": 1 },
+    { "code": "metres", "names": { "kk": "Метр", "ru": "Метры", "en": "Metres" }, "sortOrder": 2 },
+    { "code": "sets", "names": { "kk": "Жиынтық", "ru": "Комплекты", "en": "Sets" }, "sortOrder": 3 }
+  ]
+}

@@ -68,6 +68,11 @@ export async function seedProfileGraph(
   const siteIdentity = await insert('production_site_identity', { profile_id: g.profile, organization_id: g.org });
   const productIdentity = await insert('product_line_identity', { profile_id: g.profile, organization_id: g.org });
   const certificateIdentity = await insert('certificate_identity', { profile_id: g.profile, organization_id: g.org });
+  const hasDocumentIdentity = (await pool.query<{ exists: boolean }>(
+    "select to_regclass('document_identity') is not null as exists",
+  )).rows[0]!.exists;
+  const documentIdentity = hasDocumentIdentity
+    ? await insert('document_identity', { profile_id: g.profile, organization_id: g.org }) : null;
   const file = async (purpose: string) => {
     const object = await insert('file_object', { organization_id: g.org, purpose, data_class: 'b_manufacturer' });
     const version = await insert('file_version', {
@@ -120,7 +125,8 @@ export async function seedProfileGraph(
   await child('product_line_certificate', 'product_line_id', 'product_line', {
     certificate_identity_id: certificateIdentity.id,
   });
-  await root('document', 'documents', { file_object_id: docFile.object.id });
+  await root('document', 'documents', { file_object_id: docFile.object.id,
+    ...(documentIdentity ? { identity_id: documentIdentity.id } : {}) });
   await root('submission_requirement', 'certificates', {
     dictionary_entry_id: await entry('certificate_type'),
     captured_at: new Date(),

@@ -113,6 +113,34 @@
       "when": 1794781511220,
       "tag": "0015_stage3_profile_data",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1794789405506,
+      "tag": "0016_tiny_hercules",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1794789785921,
+      "tag": "0017_lumpy_ultimates",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794790795232,
+      "tag": "0018_profile_file_cleanup",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794791829264,
+      "tag": "0019_profile_units",
+      "breakpoints": true
     }
   ]
 }

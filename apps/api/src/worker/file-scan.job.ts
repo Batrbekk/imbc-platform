@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { pipeline, type Readable, Transform } from 'node:stream';
 import type { FilePurpose, FileRejectionReason } from '@imbc/contracts';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, asc, eq, lt, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull, lt, sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { isUuid } from '../common/actor-transaction.js';
 import { AuditService } from '../common/audit.service.js';
@@ -72,7 +72,8 @@ type ScanVersion = {
 /**
  * Проверка файла ClamAV (DATA-07): версия `pending` читается из карантина и передаётся в антивирус, по тому же
  * потоку считается sha256 — байты должны совпасть с `file_version.checksum` загрузки. Чистая — копия в рабочий
- * бакет, затем транзакция `passed` (`scanned_at`, хук назначения), затем удаление из карантина. Найдена сигнатура —
+ * бакет и переход `passed` (`scanned_at`, хук назначения) под блокировками файла и версии в одной транзакции,
+ * затем удаление из карантина. Найдена сигнатура —
  * транзакция `rejected` с причиной `rejection_reason` (`rejectionReasonFor`) и аудитом `file.scan_rejected` с
  * сигнатурой, затем удаление.
  *
@@ -112,11 +113,12 @@ export class FileScanJob {
         uploadedBy: fileVersion.uploadedBy,
         purpose: fileObject.purpose,
         organizationId: fileObject.organizationId,
+        purgeRequestedAt: fileObject.purgeRequestedAt,
       })
       .from(fileVersion)
       .innerJoin(fileObject, eq(fileObject.id, fileVersion.fileObjectId))
       .where(eq(fileVersion.id, fileVersionId));
-    if (!row || row.scanState !== 'pending') return 'skipped';
+    if (!row || row.scanState !== 'pending' || row.purgeRequestedAt !== null) return 'skipped';
     const version: ScanVersion = row;
     const quarantine = this.env.S3_BUCKET_QUARANTINE;
     const files = this.env.S3_BUCKET_FILES;
@@ -134,8 +136,7 @@ export class FileScanJob {
     // Байты карантина не те, что приняла загрузка (подмена или порча): вердикт о них ничего не значит.
     if (checksum !== version.checksum) return this.unverifiable(version, CHECKSUM_MISMATCH_SIGNATURE, now);
 
-    // Копия до перехода: `passed` без байтов в рабочем бакете не бывает. Повтор копирует тот же объект.
-    if (verdict.clean === true) await this.storage.copy(quarantine, version.storageKey, files);
+    // Parent SHARE + version UPDATE locks cover copy and decision in one transaction: purge cannot race a late copy.
     const result = await this.decide(version, verdict);
     // Решение зафиксировано: копия карантина больше не нужна. У отклонённой версии удаляется и копия рабочего
     // бакета, если её оставила прежняя попытка (чистый скан, сбой транзакции, повтор с новыми сигнатурами).
@@ -180,36 +181,58 @@ export class FileScanJob {
   private decide(version: ScanVersion, verdict: ScanVerdict): Promise<'passed' | 'rejected' | 'skipped'> {
     return this.db.transaction(async (tx) => {
       await boundLockWaits(tx);
-      const state = verdict.clean === true ? 'passed' : 'rejected';
-      const rejectionReason = verdict.clean === true ? null : rejectionReasonFor(verdict.signature);
-      const updated = await tx
-        .update(fileVersion)
-        .set({ scanState: state, scannedAt: sql`now()`, rejectionReason })
-        .where(and(eq(fileVersion.id, version.id), eq(fileVersion.scanState, 'pending')))
-        .returning({ id: fileVersion.id });
-      if (!updated.length) return 'skipped';
-      if (verdict.clean === true) {
-        await this.hooks[version.purpose]?.(tx, {
-          id: version.id,
-          fileObjectId: version.fileObjectId,
-          purpose: version.purpose,
-        });
-      } else {
-        await this.audit.record(
-          {
-            userId: version.uploadedBy,
-            organizationId: version.organizationId,
-            action: 'file.scan_rejected',
-            objectType: 'file_version',
-            objectId: version.id,
-            outcome: 'denied',
-            diff: { signature: verdict.signature },
-          },
-          tx,
-        );
-      }
-      return state;
+      const [object] = await tx
+        .select({ id: fileObject.id, purgeRequestedAt: fileObject.purgeRequestedAt })
+        .from(fileObject)
+        .where(eq(fileObject.id, version.fileObjectId))
+        .for('share');
+      if (!object || object.purgeRequestedAt !== null) return 'skipped';
+      const [current] = await tx
+        .select({ id: fileVersion.id, state: fileVersion.scanState })
+        .from(fileVersion)
+        .where(and(eq(fileVersion.id, version.id), eq(fileVersion.fileObjectId, object.id)))
+        .for('update');
+      if (!current || current.state !== 'pending') return 'skipped';
+      if (verdict.clean === true)
+        await this.storage.copy(this.env.S3_BUCKET_QUARANTINE, version.storageKey, this.env.S3_BUCKET_FILES);
+      return this.decideIn(tx as Database, version, verdict);
     });
+  }
+
+  private async decideIn(
+    tx: Database,
+    version: ScanVersion,
+    verdict: ScanVerdict,
+  ): Promise<'passed' | 'rejected' | 'skipped'> {
+    const state = verdict.clean === true ? 'passed' : 'rejected';
+    const rejectionReason = verdict.clean === true ? null : rejectionReasonFor(verdict.signature);
+    const updated = await tx
+      .update(fileVersion)
+      .set({ scanState: state, scannedAt: sql`now()`, rejectionReason })
+      .where(and(eq(fileVersion.id, version.id), eq(fileVersion.scanState, 'pending')))
+      .returning({ id: fileVersion.id });
+    if (!updated.length) return 'skipped';
+    if (verdict.clean === true) {
+      await this.hooks[version.purpose]?.(tx, {
+        id: version.id,
+        fileObjectId: version.fileObjectId,
+        purpose: version.purpose,
+      });
+    } else {
+      await this.audit.record(
+        {
+          userId: version.uploadedBy,
+          organizationId: version.organizationId,
+          action: 'file.scan_rejected',
+          objectType: 'file_version',
+          objectId: version.id,
+          outcome: 'denied',
+          diff: { signature: verdict.signature },
+        },
+        tx,
+      );
+    }
+    return state;
   }
 
   /**
@@ -264,8 +287,13 @@ export class FileScanJob {
     const stale = await this.db
       .select({ id: fileVersion.id })
       .from(fileVersion)
+      .innerJoin(fileObject, eq(fileObject.id, fileVersion.fileObjectId))
       .where(
-        and(eq(fileVersion.scanState, 'pending'), lt(fileVersion.uploadedAt, new Date(now.getTime() - SCAN_STALE_MS))),
+        and(
+          eq(fileVersion.scanState, 'pending'),
+          isNull(fileObject.purgeRequestedAt),
+          lt(fileVersion.uploadedAt, new Date(now.getTime() - SCAN_STALE_MS)),
+        ),
       )
       .orderBy(asc(fileVersion.uploadedAt))
       .limit(SWEEP_BATCH);

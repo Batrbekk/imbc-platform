@@ -225,7 +225,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('этап 2: миграции 00
 
     it('0010: двенадцать справочников с кодами DBML в порядке ADM-08, семнадцать правил; повторный прогон SQL 0010 ничего не добавляет', async () => {
       const dictionaries = await pool.query<{ code: string; name: string }>('select code, name from dictionary');
-      expect(dictionaries.rows.map((d) => d.code).sort()).toEqual([...DICTIONARY_CODES].sort());
+      expect(dictionaries.rows.map((d) => d.code).sort()).toEqual(DICTIONARY_CODES.filter((code) => code !== 'unit').sort());
       for (const d of dictionaries.rows) expect(d.name, d.code).toMatch(/^\S.*\S$/);
       const rules = await pool.query(
         'select code, event, recipient_rule, enabled from notification_rule order by code',

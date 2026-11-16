@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import type { DataClass, FilePurpose } from '@imbc/contracts';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 import { isUuid, notFound } from '../../common/actor-transaction.js';
 import { AuditService } from '../../common/audit.service.js';
@@ -139,7 +139,7 @@ export class FilesService {
     const [object] = await tx
       .select({ id: fileObject.id })
       .from(fileObject)
-      .where(eq(fileObject.id, fileObjectId))
+      .where(and(eq(fileObject.id, fileObjectId), isNull(fileObject.purgeRequestedAt)))
       .for('update');
     if (!object) throw notFound();
     const [last] = await tx
@@ -269,7 +269,7 @@ export class FilesService {
         dataClass: fileObject.dataClass,
       })
       .from(fileObject)
-      .where(eq(fileObject.id, fileObjectId));
+      .where(and(eq(fileObject.id, fileObjectId), isNull(fileObject.purgeRequestedAt)));
     if (!file) throw notFound();
 
     const rule = FILE_READ_RULES[file.purpose] ?? denyAll;

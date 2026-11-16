@@ -4,6 +4,8 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  COMPANY_ISO_CODES,
+  DOCUMENT_REQUIRED_CODES,
   COMMODITY_GROUPS,
   CONTACT_ROLES,
   DICTIONARY_CODES,
@@ -27,6 +29,8 @@ import {
 import * as schema from '../src/database/schema/index.js';
 import type { AuthUser } from '../src/modules/auth/auth.types.js';
 import { DictionariesService } from '../src/modules/dictionaries/dictionaries.service.js';
+import { DictionariesController } from '../src/modules/dictionaries/dictionaries.controller.js';
+import { startHttp } from './support/http.js';
 import { migrateThrough, openTestPool, resetDatabase } from './support/database.js';
 
 const RELEASE = join(REFERENCE_DATA_DIR, 'release');
@@ -158,7 +162,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
       )
     ).rows[0]!.id;
 
-  it('release: правовые формы LLP, LLC, JSC; группы A–E; роли management, technical, commercial; типы сертификатов — ISO 9001, ISO 14001, ISO 45001 обязательные, Other с customNameAllowed; типы документов — registration_certificate, charter, licence обязательные, financial_statements нет (MAN-09, MAN-13, MAN-34, MAN-37, MAN-38)', async () => {
+  it('release: legal forms, commodity groups, contact roles, fixed ISO and document types follow v1.4 without licensing', async () => {
     const results = await loadReferenceDirectory(db, RELEASE, 'release');
 
     // Родительский справочник раньше дочернего, порядок — как в DICTIONARY_CODES (ADM-08).
@@ -168,8 +172,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
       'contact_role',
       'certificate_type',
       'document_type',
+      'unit',
     ]);
-    expect(results.map((r) => r.inserted)).toEqual([3, 5, 3, 10, 4]);
+    expect(results.map((r) => r.inserted)).toEqual([3, 5, 3, 9, 4, 4]);
 
     // MAN-09: правовые формы — LLP, LLC, JSC (полный перечень — IMBC).
     const legalForms = await entries('legal_form');
@@ -207,11 +212,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
       'IEC',
       'IECEx',
       'ATEX',
-      'Extract from e-Ondiris',
       'Other',
     ]);
     expect(certificates.filter((e) => e.mandatory).map((e) => e.code)).toEqual(['ISO 9001', 'ISO 14001', 'ISO 45001']);
-    expect(certificates.filter((e) => e.mandatory === false)).toHaveLength(7);
+    expect(certificates.filter((e) => e.mandatory === false)).toHaveLength(6);
     expect(certificates.filter((e) => e.custom_name_allowed).map((e) => e.code)).toEqual(['Other']);
     // Названия кодов стандартов — сами коды на трёх языках; CT-KZ среди типов нет (MAN-34).
     expect(certificates.find((e) => e.code === 'ISO 9001')!.names).toEqual({
@@ -219,11 +223,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
       ru: 'ISO 9001',
       en: 'ISO 9001',
     });
-    expect(certificates.find((e) => e.code === 'Extract from e-Ondiris')!.names).toEqual({
-      kk: 'e-Ondiris үзінді көшірмесі',
-      ru: 'Выписка из e-Ondiris',
-      en: 'Extract from e-Ondiris',
-    });
+    expect(certificates.some((e) => e.code === 'Extract from e-Ondiris')).toBe(false);
     expect(certificates.find((e) => e.code === 'Other')!.names).toEqual({
       kk: 'Басқа (атауын көрсетіңіз)',
       ru: 'Другой (укажите название)',
@@ -231,19 +231,23 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
     });
     expect(certificates.every((e) => e.retired_at === null)).toBe(true);
 
-    // MAN-37, MAN-38: свидетельство, устав, лицензии — обязательные; финансовая отчётность — нет.
+    // MAN-37/38: registration and charter required; additional named documents optional, no licensing.
     const documents = await entries('document_type');
     expect(documents.map((e) => [e.code, e.mandatory])).toEqual([
       ['registration_certificate', true],
       ['charter', true],
-      ['licence', true],
       ['financial_statements', false],
+      ['additional_document', false],
     ]);
-    expect(documents.find((e) => e.code === 'licence')!.names).toEqual({
-      kk: 'Лицензиялар',
-      ru: 'Лицензии',
-      en: 'Licences',
+    expect(documents.find((e) => e.code === 'additional_document')!.names).toEqual({
+      kk: 'Қосымша құжат',
+      ru: 'Дополнительный документ',
+      en: 'Additional document',
     });
+
+    // MAN-23: годовой выпуск — четыре единицы; «в год» обозначает период, а не единицу.
+    expect((await entries('unit')).map((entry) => entry.code).sort()).toEqual(['metres', 'pieces', 'sets', 'tonnes']);
+    expect((await entries('unit')).every((entry) => Object.keys(entry.names ?? {}).length === 3)).toBe(true);
 
     // Спецификация не называет перечней остальных семи справочников: до перечня IMBC они пусты.
     for (const code of ['region', 'oked', 'tn_ved', 'kpved', 'commodity_type', 'process', 'equipment_type'])
@@ -253,7 +257,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
   it('повторная загрузка ничего не добавляет; название, исправленное администратором, не возвращается; недостающий перевод добавляется', async () => {
     await loadReferenceDirectory(db, RELEASE, 'release');
     const first = await counts();
-    expect(first).toEqual({ entries: 25, translations: 75, audit: 5 });
+    expect(first).toEqual({ entries: 28, translations: 84, audit: 6 });
 
     // Администратор правит названия, порядок, обязательность и выводит значение из оборота.
     await pool.query(
@@ -301,14 +305,14 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
     });
     expect((await entries('legal_form')).find((e) => e.code === 'LLP')).toEqual(adjusted.llp);
     expect(await entries('certificate_type')).toEqual(adjusted.certificates);
-    expect(await counts()).toEqual({ ...first, audit: 6 });
+    expect(await counts()).toEqual({ ...first, audit: first.audit + 1 });
   });
 
-  it('значение release, удалённое администратором, выкат не возвращает: ISO 45001 снят с обязательных и удалён — загрузка его пропускает, счётчик пропущенных 1, аудита reference.loaded нет (ADM-08, DATA-04)', async () => {
+  it('значение release, удалённое администратором, выкат не возвращает: ASME снят с обязательных и удалён — загрузка его пропускает, счётчик пропущенных 1, аудита reference.loaded нет (ADM-08, DATA-04)', async () => {
     await loadReferenceDirectory(db, RELEASE, 'release');
     const admin = await administrator();
     const service = dictionaries();
-    const iso = await entryId('certificate_type', 'ISO 45001');
+    const iso = await entryId('certificate_type', 'ASME');
     await service.setMandatory(admin, 'certificate_type', iso, false);
     await service.remove(admin, 'certificate_type', iso);
     const before = await counts();
@@ -321,7 +325,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
       skippedDeleted: 1,
     });
     expect(results.filter((r) => r.dictionary !== 'certificate_type').every((r) => r.skippedDeleted === 0)).toBe(true);
-    expect((await entries('certificate_type')).map((e) => e.code)).not.toContain('ISO 45001');
+    expect((await entries('certificate_type')).map((e) => e.code)).not.toContain('ASME');
     // Ни строки, ни перевода, ни записи reference.loaded: пропущенное в аудит загрузки не попадает.
     expect(await counts()).toEqual(before);
     expect(referenceLoadSummary(results.find((r) => r.dictionary === 'certificate_type')!)).toBe(
@@ -333,13 +337,32 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
       db,
       fixture(
         'certificate_type',
-        [{ code: 'iso 45001', names: { en: 'ISO 45001' }, mandatory: true }],
+        [{ code: 'asme', names: { en: 'ASME' }, mandatory: true }],
         'specification',
       ),
       'release',
     );
     expect(lower).toEqual({ dictionary: 'certificate_type', inserted: 0, translationsAdded: 0, skippedDeleted: 1 });
     expect(await counts()).toEqual(before);
+  });
+
+  it('fixed ISO/registration/charter cannot be retired or deleted through admin HTTP after their flag changes', async () => {
+    await loadReferenceDirectory(db, RELEASE, 'release');
+    const admin = await administrator();
+    const http = await startHttp({ controllers: [DictionariesController], providers: [{ provide: DictionariesService,
+      useValue: dictionaries() }], organizationId: admin.organizationId, accountIds: { administrator: admin.id } });
+    try {
+      for (const [dictionary, codes] of [['certificate_type', COMPANY_ISO_CODES], ['document_type', DOCUMENT_REQUIRED_CODES]] as const)
+        for (const code of codes) {
+          const id = await entryId(dictionary, code); const route = `/api/v1/dictionaries/${dictionary}/entries/${id}`;
+          expect((await http.send('PUT', `${route}/mandatory`, 'administrator', { mandatory: false })).status).toBe(200);
+          for (const response of [await http.send('POST', `${route}/retire`, 'administrator'),
+            await http.send('DELETE', route, 'administrator')]) {
+            expect(response.status).toBe(409); expect(await response.json()).toMatchObject({ code: 'entry_mandatory' });
+          }
+          expect((await entries(dictionary)).find((entry) => entry.code === code)?.retired_at).toBeNull();
+        }
+    } finally { await http.close(); }
   });
 
   it('удалить и создать заново с тем же кодом: загрузка строку администратора не меняет — ни полей, ни переводов (ADM-08, DATA-04)', async () => {
@@ -469,8 +492,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
       ['повтор кода другим регистром', fixture('region', [good, { code: 'kz-akt', names: { ru: 'Другая' } }])],
       ['mandatory у региона', fixture('region', [good, { code: 'KZ-ALA', names: { ru: 'Алматы' }, mandatory: false }])],
       [
-        'customNameAllowed вне certificate_type',
-        fixture('document_type', [good, { code: 'other', names: { ru: 'x' }, customNameAllowed: true }]),
+        'customNameAllowed outside certificate/document types',
+        fixture('equipment_type', [good, { code: 'other', names: { ru: 'x' }, customNameAllowed: true }]),
       ],
       [
         'parent вне DICTIONARY_PARENT',
@@ -803,8 +826,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('загрузка справоч
       );
 
       const results = await loadReferenceDirectory(asApp, RELEASE, 'release');
-      expect(results.reduce((sum, r) => sum + r.inserted, 0)).toBe(25);
-      expect(await counts()).toEqual({ entries: 25, translations: 75, audit: 5 });
+      expect(results.reduce((sum, r) => sum + r.inserted, 0)).toBe(28);
+      expect(await counts()).toEqual({ entries: 28, translations: 84, audit: 6 });
       // Повтор под той же ролью.
       expect((await loadReferenceDirectory(asApp, RELEASE, 'release')).every((r) => r.inserted === 0)).toBe(true);
 
@@ -849,8 +872,9 @@ describe('файлы справочников в репозитории', () => 
       'release/legal_form': 3,
       'release/commodity_group': 5,
       'release/contact_role': 3,
-      'release/certificate_type': 10,
+      'release/certificate_type': 9,
       'release/document_type': 4,
+      'release/unit': 4,
       'provisional/region': 9,
       'provisional/oked': 4,
       'provisional/tn_ved': 4,

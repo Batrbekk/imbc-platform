@@ -41,6 +41,7 @@ export const DICTIONARY_USAGES: Record<DictionaryCode, readonly DictionaryUsage[
     { table: 'certificates', column: 'type_code', array: false },
   ],
   document_type: [{ table: 'documents', column: 'type_code', array: false }],
+  unit: [],
 };
 
 /**

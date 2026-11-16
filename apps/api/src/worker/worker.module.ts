@@ -1,6 +1,7 @@
 import type { FilePurpose } from '@imbc/contracts';
 import { Inject, Logger, Module, type OnApplicationBootstrap } from '@nestjs/common';
 import { LoggerModule } from 'nestjs-pino';
+import { httpLoggerOptions } from '../common/logging.js';
 import type { PgBoss } from 'pg-boss';
 import { AuditModule } from '../common/audit.service.js';
 import { ConfigModule } from '../config/config.module.js';
@@ -20,6 +21,7 @@ import { orgChartSamplePassed } from '../modules/files/org-chart-sample.rules.js
 import {
   ADATA_QUEUE_OPTIONS,
   FILE_SCAN_QUEUE_OPTIONS,
+  FILE_CLEANUP_QUEUE_OPTIONS,
   NOTIFY_QUEUE_OPTIONS,
   PLATFORM_TZ,
   QUEUES,
@@ -35,6 +37,7 @@ import { DEFAULT_RECIPIENT_RESOLVERS, RECIPIENT_RESOLVERS } from '../notificatio
 import { AccountInactivityJob } from './account-inactivity.job.js';
 import { ADATA_CLIENT_FACTORY, ADATA_TIMING, AdataPrefillJob, defaultAdataClientFactory } from './adata-prefill.job.js';
 import { FileScanJob, SCAN_PASSED_HOOKS, type ScanPassedHook } from './file-scan.job.js';
+import { FileCleanupJob } from './file-cleanup.job.js';
 import { JobHandlers } from './handlers.service.js';
 
 @Module({
@@ -43,10 +46,7 @@ import { JobHandlers } from './handlers.service.js';
     LoggerModule.forRootAsync({
       inject: [ENV],
       useFactory: (env: Env) => ({
-        pinoHttp: {
-          level: env.LOG_LEVEL,
-          transport: env.NODE_ENV === 'development' ? { target: 'pino-pretty' } : undefined,
-        },
+        pinoHttp: httpLoggerOptions(env),
       }),
     }),
     DatabaseModule,
@@ -64,6 +64,7 @@ import { JobHandlers } from './handlers.service.js';
     AdataPrefillJob,
     AccountInactivityJob,
     FileScanJob,
+    FileCleanupJob,
     // Письма событий (раздел 8.2): получатели по правилам-данным, тексты из языковых файлов.
     NotificationDispatcher,
     { provide: RECIPIENT_RESOLVERS, useValue: DEFAULT_RECIPIENT_RESOLVERS },
@@ -91,6 +92,7 @@ export class WorkerModule implements OnApplicationBootstrap {
     private readonly inactivity: AccountInactivityJob,
     private readonly fileScan: FileScanJob,
     private readonly notifications: NotificationDispatcher,
+    private readonly fileCleanup: FileCleanupJob,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -102,6 +104,10 @@ export class WorkerModule implements OnApplicationBootstrap {
       // Без аргумента: «сейчас» — часы worker (DATA-08).
       [QUEUES.fileScanSweep]: async () => {
         await this.fileScan.sweep();
+      },
+      [QUEUES.fileCleanup]: (d) => this.fileCleanup.run(d),
+      [QUEUES.fileCleanupSweep]: async () => {
+        await this.fileCleanup.sweep();
       },
       // Задание проверяется схемой (только id, код правила и параметры, без адресов). Постоянный отказ —
       // строка журнала и завершение без повторов, причина — в output задания; сбой SMTP или базы — повтор
@@ -136,18 +142,20 @@ export class WorkerModule implements OnApplicationBootstrap {
           ? ADATA_QUEUE_OPTIONS
           : queue === QUEUES.fileScan
             ? FILE_SCAN_QUEUE_OPTIONS
-            : queue === QUEUES.notify
-              ? NOTIFY_QUEUE_OPTIONS
-              : {
-                  retryLimit:
-                    queue === QUEUES.sendPasswordEmail ||
-                    queue === QUEUES.cleanupIdentity ||
-                    queue === QUEUES.inactivityReset
-                      ? 10
-                      : 5,
-                  retryBackoff: true,
-                  retryDelay: 30,
-                },
+            : queue === QUEUES.fileCleanup
+              ? FILE_CLEANUP_QUEUE_OPTIONS
+              : queue === QUEUES.notify
+                ? NOTIFY_QUEUE_OPTIONS
+                : {
+                    retryLimit:
+                      queue === QUEUES.sendPasswordEmail ||
+                      queue === QUEUES.cleanupIdentity ||
+                      queue === QUEUES.inactivityReset
+                        ? 10
+                        : 5,
+                    retryBackoff: true,
+                    retryDelay: 30,
+                  },
       );
       await this.boss.work(queue, async (jobs) => {
         try {

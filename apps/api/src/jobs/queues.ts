@@ -8,6 +8,8 @@ import type { JobWithMetadata, PgBoss, Queue, QueueOptions } from 'pg-boss';
 export const QUEUES = {
   fileScan: 'file-scan',
   fileScanSweep: 'file-scan-sweep',
+  fileCleanup: 'file-cleanup',
+  fileCleanupSweep: 'file-cleanup-sweep',
   notify: 'notify',
   sendPasswordEmail: 'send-password-email',
   cleanupIdentity: 'cleanup-identity',
@@ -86,6 +88,7 @@ export const PLATFORM_TZ = 'Asia/Almaty';
 
 /** Расписания (раздел 12 спецификации, архитектура §8). */
 export const SCHEDULES: ReadonlyArray<{ queue: QueueName; cron: string; note: string }> = [
+  { queue: QUEUES.fileCleanupSweep, cron: '0 3 * * *', note: 'unused manufacturer uploads older than 30 days' },
   { queue: QUEUES.certificateExpiry, cron: '30 0 * * *', note: 'истечение сертификатов (REV-20)' },
   { queue: QUEUES.purgeExportFiles, cron: '0 1 * * *', note: 'удаление файлов выгрузок старше 90 дней (OPR-23)' },
   {
@@ -117,6 +120,16 @@ export const SCHEDULES: ReadonlyArray<{ queue: QueueName; cron: string; note: st
 export interface FileScanJobData {
   fileVersionId: string;
 }
+
+export interface FileCleanupJobData {
+  fileObjectId: string;
+}
+export const FILE_CLEANUP_QUEUE_OPTIONS = {
+  policy: 'exclusive',
+  retryLimit: 10,
+  retryDelay: 60,
+  retryBackoff: true,
+} satisfies Omit<Queue, 'name'>;
 
 /**
  * Очередь `file-scan` создают API (ставит задание в транзакции загрузки) и worker — с одними параметрами.

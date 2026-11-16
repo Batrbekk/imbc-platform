@@ -18,6 +18,7 @@ export const DICTIONARY_CODES = [
   'contact_role',
   'certificate_type',
   'document_type',
+  'unit',
 ] as const;
 export type DictionaryCode = (typeof DICTIONARY_CODES)[number];
 
@@ -64,6 +65,7 @@ export const DICTIONARY_CODE_PATTERNS: Record<DictionaryCode, RegExp> = {
   contact_role: GENERIC_CODE,
   certificate_type: GENERIC_CODE,
   document_type: GENERIC_CODE,
+  unit: GENERIC_CODE,
 };
 
 /**
@@ -244,7 +246,7 @@ export type DictionaryEntryResult = z.infer<typeof dictionaryEntryResultSchema>;
 
 /** Значение для выбора: название — `entryDisplayName` на языке запроса. */
 export const dictionaryChoiceSchema = z
-  .object({ id: z.uuid(), code: z.string(), name: z.string(), parentCode: z.string().nullable() })
+  .object({ id: z.uuid(), code: z.string(), name: z.string(), parentCode: z.string().nullable(), customNameAllowed: z.boolean().optional() })
   .strict();
 export type DictionaryChoice = z.infer<typeof dictionaryChoiceSchema>;
 

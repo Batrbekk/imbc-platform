@@ -22,6 +22,10 @@ export async function applyAppRoleGrants(pool: pg.Pool, role: string): Promise<v
     // у роли приложения нет UPDATE/DELETE.
     await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON audit_entries FROM ${name}`);
     await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON nda_acceptance FROM ${name}`);
+    // Also usable during compatibility checks against the pre-history expand boundary.
+    const history = await client.query<{ exists: boolean }>("SELECT to_regclass('profile_file_history') IS NOT NULL AS exists");
+    if (history.rows[0]?.exists)
+      await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON profile_file_history FROM ${name}`);
     // Журнал писем (NOT-18) — только добавление: запись и отправка идут одной транзакцией, сбой SMTP — откат.
     await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON notification FROM ${name}`);
     // Правила писем и справочники — данные релиза (миграция 0010): приложение их только читает.

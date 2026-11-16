@@ -72,7 +72,7 @@ describe('перечисления v1.3 (раздел 3.1, UPD-06)', () => {
 });
 
 describe('файлы и справочники (DBML, ADM-08, DATA-05, DATA-07)', () => {
-  it('FILE_PURPOSES, DATA_CLASSES, FILE_SCAN_STATES — значения DBML; MANUFACTURER_FILE_PURPOSES — подмножество FILE_PURPOSES; DICTIONARY_CODES — двенадцать кодов ADM-08', () => {
+  it('FILE_PURPOSES, DATA_CLASSES, FILE_SCAN_STATES — значения DBML; MANUFACTURER_FILE_PURPOSES — подмножество FILE_PURPOSES; DICTIONARY_CODES — коды ADM-08 и единицы MAN-23', () => {
     // DBML `file_purpose`, порядок тот же.
     expect(FILE_PURPOSES).toEqual([
       'organisation_chart',
@@ -132,6 +132,7 @@ describe('файлы и справочники (DBML, ADM-08, DATA-05, DATA-07)'
       'contact_role',
       'certificate_type',
       'document_type',
+      'unit',
     ]);
   });
 });

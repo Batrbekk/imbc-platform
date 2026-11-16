@@ -42,7 +42,7 @@ const ACCEPTED_STATUSES: Record<ReferenceExpect, readonly ReferenceDataStatus[]>
 };
 
 /** Значение «Other» (MAN-34): только у типов сертификатов. */
-const CUSTOM_NAME_DICTIONARY: DictionaryCode = 'certificate_type';
+const CUSTOM_NAME_DICTIONARIES: readonly DictionaryCode[] = ['certificate_type', 'document_type'];
 
 /** Строк в одном INSERT: у значения 6 параметров, у перевода 3 — до 6000, предел PostgreSQL 65535. */
 const BATCH_SIZE = 1000;
@@ -111,8 +111,8 @@ function checkReferenceFile(file: ReferenceFile, expect: ReferenceExpect, fileNa
     seen.set(key, i + 1);
     if (entry.mandatory !== undefined && !mandatoryAllowed)
       throw new ReferenceFileError(fileName, `${at}: признак mandatory есть только у типов сертификатов и документов`);
-    if (entry.customNameAllowed && file.dictionary !== CUSTOM_NAME_DICTIONARY)
-      throw new ReferenceFileError(fileName, `${at}: customNameAllowed есть только у типов сертификатов`);
+    if (entry.customNameAllowed && !CUSTOM_NAME_DICTIONARIES.includes(file.dictionary))
+      throw new ReferenceFileError(fileName, `${at}: customNameAllowed есть только у типов сертификатов и документов`);
     if (entry.parent !== null && parentDictionary === undefined)
       throw new ReferenceFileError(fileName, `${at}: у значений этого справочника нет родителя`);
   }

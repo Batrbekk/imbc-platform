@@ -9,3 +9,4 @@ export { exportSubscriptions, exportFiles, forecastVersions, forecastLines, tech
 export { auditEntries, activitySnapshots, catalogVisible } from './platform.js';
 export * from './profile.js';
 export * from './profile-content.js';
+export * from './profile-file-history.js';

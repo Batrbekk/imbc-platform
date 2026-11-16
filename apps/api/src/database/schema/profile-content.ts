@@ -19,7 +19,7 @@ import { id } from './_shared.js';
 import { certificateGroup, productLineSource, recordStatus } from './enums.js';
 import { fileObject, fileVersion } from './files.js';
 import { dictionaryEntry } from './reference.js';
-import { certificateIdentity, productionSiteIdentity, productLineIdentity, sectionRevision } from './profile.js';
+import { certificateIdentity, documentIdentity, productionSiteIdentity, productLineIdentity, sectionRevision } from './profile.js';
 
 /** DATA-01/GEN-11: every content link includes its organisation; partial drafts remain nullable (MAN-40). */
 const revisionColumns = () => ({
@@ -349,6 +349,7 @@ export const certificate = pgTable(
   {
     ...revisionColumns(),
     identityId: uuid('identity_id').notNull(),
+    positionInList: position(),
     group: certificateGroup('group'),
     certificateTypeId: reference('certificate_type_id'),
     customTypeName: text('custom_type_name'),
@@ -397,6 +398,8 @@ export const document = pgTable(
   'document',
   {
     ...revisionColumns(),
+    identityId: uuid('identity_id').notNull(),
+    positionInList: position(),
     documentTypeId: reference('document_type_id'),
     customName: text('custom_name'),
     status: recordStatus('status').notNull().default('uploaded'),
@@ -405,6 +408,8 @@ export const document = pgTable(
   (t) => [
     revisionFk('document_revision_org_fk', t),
     uniqueIndex('document_id_org_uq').on(t.id, t.organizationId),
+    tenantFk('document_identity_org_fk', t.identityId, t.organizationId, documentIdentity),
+    uniqueIndex('document_revision_identity_uq').on(t.sectionRevisionId, t.identityId),
     tenantFk('document_file_org_fk', t.fileObjectId, t.organizationId, fileObject),
   ],
 );

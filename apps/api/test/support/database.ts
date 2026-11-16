@@ -43,6 +43,10 @@ export async function migrateThrough(pool: pg.Pool, lastTag?: string): Promise<v
     for (const { tag } of entries) copyFileSync(join(MIGRATIONS, `${tag}.sql`), join(folder, `${tag}.sql`));
     writeFileSync(join(folder, 'meta/_journal.json'), JSON.stringify({ ...journal, entries }));
     await migrate(drizzle(pool), { migrationsFolder: folder });
+    const guards = await pool.query<{ exists: boolean }>(
+      "SELECT to_regprocedure('install_file_binding_guards()') IS NOT NULL AS exists",
+    );
+    if (guards.rows[0]?.exists) await pool.query('SELECT install_file_binding_guards()');
   } finally {
     rmSync(folder, { recursive: true, force: true });
   }

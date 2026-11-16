@@ -1,5 +1,5 @@
-import { unknownSectionSaveInputSchema } from '@imbc/contracts';
-import { Body, Controller, Get, Param, Put, Req } from '@nestjs/common';
+import { profileFileHistoryQuerySchema, unknownSectionSaveInputSchema } from '@imbc/contracts';
+import { Body, Controller, Get, Param, Put, Query, Req } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { auditIp } from '../../common/audit-ip.js';
@@ -32,5 +32,19 @@ export class ProfileSectionsController {
     const parsed = unknownSectionSaveInputSchema.safeParse(body);
     if (!parsed.success) throw sectionValidationError(parsed.error);
     return this.sections.save(auth.user, kind, parsed.data, auditIp(req));
+  }
+
+  @Get(':kind/files/history')
+  @Can('profile.read')
+  fileHistory(@Auth() auth: AuthContext, @Param('kind') kind: string, @Query() query: unknown, @Req() req: Request) {
+    const parsed = profileFileHistoryQuerySchema.safeParse(query);
+    if (!parsed.success) throw sectionValidationError(parsed.error);
+    return this.sections.fileHistory(auth.user, kind, parsed.data, auditIp(req));
+  }
+
+  @Get(':kind/choices')
+  @Can('profile.edit')
+  editorChoices(@Auth() auth: AuthContext, @Param('kind') kind: string, @Req() req: Request) {
+    return this.sections.editorChoices(auth.user, kind, auditIp(req));
   }
 }

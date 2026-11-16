@@ -188,7 +188,7 @@ describe.skipIf(!databaseUrl)('справочники: API администра�
     await pool?.end();
   });
 
-  it('список: двенадцать справочников в порядке ADM-08 со счётчиками; commodity_group и contact_role — closed, certificate_type и document_type — mandatoryApplicable, у commodity_type parentDictionary commodity_group (ADM-08)', async () => {
+  it('список: тринадцать справочников в порядке ADM-08 со счётчиками; commodity_group и contact_role — closed, certificate_type и document_type — mandatoryApplicable, у commodity_type parentDictionary commodity_group (ADM-08)', async () => {
     const loaded = new Map<string, number>();
     for (const name of readdirSync(RELEASE).filter((n) => n.endsWith('.json'))) {
       const file = referenceFileSchema.parse(JSON.parse(readFileSync(join(RELEASE, name), 'utf8')));
@@ -208,7 +208,7 @@ describe.skipIf(!databaseUrl)('справочники: API администра�
     const byCode = Object.fromEntries(dictionaries.map((d) => [d.code, d]));
     expect(byCode.commodity_group).toMatchObject({ closed: true, active: 5 });
     expect(byCode.contact_role).toMatchObject({ closed: true, active: 3 });
-    expect(byCode.certificate_type).toMatchObject({ mandatoryApplicable: true, active: 10 });
+    expect(byCode.certificate_type).toMatchObject({ mandatoryApplicable: true, active: 9 });
     expect(byCode.document_type).toMatchObject({ mandatoryApplicable: true });
     expect(byCode.commodity_type).toMatchObject({ parentDictionary: 'commodity_group', closed: false });
   });
@@ -235,9 +235,9 @@ describe.skipIf(!databaseUrl)('справочники: API администра�
 
     // Название — на любом языке, без учёта регистра (кириллица и казахские буквы тоже).
     for (const [dictionary, q, code] of [
-      ['certificate_type', 'ҮЗІНДІ КӨШІРМЕСІ', 'Extract from e-Ondiris'],
-      ['certificate_type', 'выписка ИЗ', 'Extract from e-Ondiris'],
-      ['certificate_type', 'FROM E-ONDIRIS', 'Extract from e-Ondiris'],
+      ['document_type', 'ҚОСЫМША', 'additional_document'],
+      ['document_type', 'ДОПОЛНИТЕЛЬНЫЙ', 'additional_document'],
+      ['document_type', 'ADDITIONAL DOCUMENT', 'additional_document'],
       ['process', 'СВАРКА', 'WELD'],
     ] as const)
       expect(codes((await service.entries(dictionary, query({ q }))).items), q).toEqual([code]);
@@ -377,10 +377,10 @@ describe.skipIf(!databaseUrl)('справочники: API администра�
       parentCode: null,
       names: names('NACE'),
       // В справочнике загружено десять значений с порядком 0–9: новое встаёт в конец.
-      sortOrder: 10,
+      sortOrder: 9,
     });
     const gost = await service.create(admin, 'certificate_type', createInput('GOST R'), IP);
-    expect(gost.entry).toMatchObject({ mandatory: false, sortOrder: 11 });
+    expect(gost.entry).toMatchObject({ mandatory: false, sortOrder: 10 });
     const empty = await service.create(admin, 'legal_form', createInput('SP'), IP);
     expect(empty.entry).toMatchObject({ mandatory: null });
 
@@ -978,7 +978,7 @@ describe.skipIf(!databaseUrl)('справочники: API администра�
       await asApp.setMandatory(admin, 'document_type', type.id, false, IP);
       await asApp.remove(admin, 'document_type', type.id, IP);
       await asApp.remove(admin, 'commodity_type', created.id, IP);
-      expect((await asApp.list()).dictionaries).toHaveLength(12);
+      expect((await asApp.list()).dictionaries).toHaveLength(13);
       expect((await asApp.entries('commodity_type', query({ q: 'heat' }))).items).toEqual([]);
       expect((await asApp.choices('document_type', choicesQuery({ q: 'permit' }))).items).toEqual([]);
     } finally {

@@ -28,6 +28,9 @@ export interface TypedSectionHandler<Write, Read> {
   read(tx: Database, context: SectionContext): Promise<Read>;
   save(tx: Database, context: SectionContext, normalized: Write): Promise<void>;
   mandatoryInputs(tx: Database, context: SectionContext): Promise<CompletenessInput[]>;
+  /** Current own-profile picker candidates, separate from an immutable section read. */
+  readonly editorChoicesSchema?: z.ZodType<unknown>;
+  editorChoices?(tx: Database, context: SectionContext): Promise<unknown>;
 }
 
 export type SectionHandler = TypedSectionHandler<unknown, unknown>;
@@ -43,5 +46,7 @@ export function defineSectionHandler<Write, Read>(handler: TypedSectionHandler<W
     read: (tx, context) => handler.read(tx, context),
     save: (tx, context, normalized) => handler.save(tx, context, normalized as Write),
     mandatoryInputs: (tx, context) => handler.mandatoryInputs(tx, context),
+    editorChoicesSchema: handler.editorChoicesSchema,
+    editorChoices: handler.editorChoices ? (tx, context) => handler.editorChoices!(tx, context) : undefined,
   };
 }

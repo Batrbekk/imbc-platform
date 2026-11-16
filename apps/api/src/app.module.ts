@@ -39,6 +39,13 @@ import { ProfileSectionsController } from './modules/profiles/profile-sections.c
 import { ProfileSectionsService } from './modules/profiles/profile-sections.service.js';
 import { MainInformationHandler } from './modules/profiles/main-information.handler.js';
 import { ContactsHandler } from './modules/profiles/contacts.handler.js';
+import { PersonnelHandler } from './modules/profiles/personnel.handler.js';
+import { DocumentsHandler } from './modules/profiles/documents.handler.js';
+import { CertificatesHandler } from './modules/profiles/certificates.handler.js';
+import { ProductsHandler } from './modules/profiles/products.handler.js';
+import { ProductionHandler } from './modules/profiles/production.handler.js';
+import { ProfileUploadController, ProfileUploadGuard } from './modules/profiles/profile-upload.controller.js';
+import { ProfileUploadService } from './modules/profiles/profile-upload.service.js';
 import { defineSectionHandler, PROFILE_SECTION_HANDLERS } from './modules/profiles/section-handler.js';
 import { ManufacturerOnboardingService } from './modules/registration/onboarding.service.js';
 import { RegistrationController } from './modules/registration/registration.controller.js';
@@ -63,6 +70,7 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     CatalogController,
     ProfilesController,
     ProfileSectionsController,
+    ProfileUploadController,
     ReviewsController,
     AccountsController,
     OrganizationsController,
@@ -77,14 +85,26 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     KeycloakAdminService,
     ProfilesService,
     ProfileSectionsService,
+    ProfileUploadService,
+    ProfileUploadGuard,
     MainInformationHandler,
     ContactsHandler,
+    PersonnelHandler,
+    DocumentsHandler,
+    CertificatesHandler,
+    ProductsHandler,
+    ProductionHandler,
     {
       provide: PROFILE_SECTION_HANDLERS,
-      inject: [MainInformationHandler, ContactsHandler],
-      useFactory: (main: MainInformationHandler, contacts: ContactsHandler) => [
+      inject: [MainInformationHandler, ContactsHandler, PersonnelHandler, DocumentsHandler, CertificatesHandler, ProductsHandler, ProductionHandler],
+      useFactory: (main: MainInformationHandler, contacts: ContactsHandler, personnel: PersonnelHandler, documents: DocumentsHandler, certificates: CertificatesHandler, products: ProductsHandler, production: ProductionHandler) => [
         defineSectionHandler(main),
         defineSectionHandler(contacts),
+        defineSectionHandler(personnel),
+        defineSectionHandler(documents),
+        defineSectionHandler(certificates),
+        defineSectionHandler(products),
+        defineSectionHandler(production),
       ],
     },
     CatalogService,

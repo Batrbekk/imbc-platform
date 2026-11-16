@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   displayCompleteness,
   ownSectionsOverviewSchema,
+  type ProfileFileHistory,
   profileCompleteness,
   SECTION_KINDS,
   sectionCompleteness,
@@ -39,6 +40,7 @@ import {
 import { copyRevisionContent, revisionContent } from './revision-copy.js';
 import { PROFILE_SECTION_HANDLERS, type SectionContext, type SectionHandler } from './section-handler.js';
 import { profileLocked, sectionChanged, sectionUnavailable, sectionValidationError } from './section-errors.js';
+import { readProfileFileHistory, retainProfileFiles } from './profile-file-history.js';
 
 interface OwnGraph {
   profile: StoredProfile;
@@ -77,6 +79,31 @@ export class ProfileSectionsService {
     );
   }
 
+  async fileHistory(
+    actor: AuthUser, rawKind: string, pagination: { offset: number; limit: number }, ip: string | null = null,
+  ): Promise<ProfileFileHistory> {
+    const kind = this.kind(rawKind);
+    return this.run(actor, 'profile.read', '/api/v1/profiles/own/sections/:kind/files/history', ip, async (tx, graph) => {
+      const section = graph.sections.find((item) => item.kind === kind);
+      if (!section) throw sectionUnavailable();
+      return readProfileFileHistory(tx, { profileId: graph.profile.id, sectionId: section.id,
+        organizationId: graph.profile.organizationId, ...pagination });
+    });
+  }
+
+  async editorChoices(actor: AuthUser, rawKind: string, ip: string | null = null): Promise<unknown> {
+    const kind = this.kind(rawKind);
+    return this.run(actor, 'profile.edit', '/api/v1/profiles/own/sections/:kind/choices', ip, async (tx, graph) => {
+      if (profileIsLocked(graph.profile, graph.sections)) throw profileLocked();
+      const handler = this.handlers.get(kind);
+      const section = graph.sections.find((item) => item.kind === kind);
+      const revision = section ? selectedRevision(section, graph.revisions) : null;
+      if (!handler?.editorChoices || !handler.editorChoicesSchema || !section || !revision) throw sectionUnavailable();
+      return parseResponse(handler.editorChoicesSchema,
+        await handler.editorChoices(tx, this.context(graph.profile, section, revision)), 'варианты для редактирования раздела');
+    });
+  }
+
   async save(
     actor: AuthUser,
     rawKind: string,
@@ -102,10 +129,12 @@ export class ProfileSectionsService {
       }
 
       const before = await revisionContent(tx, kind, current.id, graph.profile.organizationId);
+      await retainProfileFiles(tx, context, current.editVersion, actor.id);
       const working =
         current.state === 'working' ? current : await this.copyWorking(tx, graph, section, current, actor.id);
       const workingContext = this.context(graph.profile, section, working);
       await handler.save(tx, workingContext, normalized);
+      await retainProfileFiles(tx, workingContext, current.editVersion + 1, actor.id);
       const completeness = sectionCompleteness(await handler.mandatoryInputs(tx, workingContext));
       const savedAt = new Date();
       const [saved] = await tx
