@@ -19,3 +19,5 @@ export * from './main-source-ownership.js';
 export * from './lps.js';
 export * from './due-diligence.js';
 export * from './site-survey.js';
+
+export * from './imbc-records.js';

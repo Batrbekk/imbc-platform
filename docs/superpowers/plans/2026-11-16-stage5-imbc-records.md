@@ -1,6 +1,8 @@
 # IMBC Stage5 remaining records — concrete implementation plan
 
-Date: 2026-11-16. Read-only analysis by `/root/stage5_records_plan`. Worktree `/Users/batyrbekkuandyk/Desktop/imbc-platform/.claude/worktrees/stage-3`. No repository, schema, application, test, Git, Azure or provider mutations were made. This plan is a proposed next implementation slice after Survey/NOT11 freeze; it is not an acceptance claim or a reduction of the full v1.4/Release2 goal.
+Initial analysis: 2026-11-16 by `/root/stage5_records_plan`. The original proposal below retains its13November source pins. Internal notes/engagement/product contexts are now implemented and accepted in the bounded local Root49 composition; [final handoff and machine proof](../../handoff/2026-11-16-stage5-imbc-records.md) supersede its original implementation-gap statements for that slice. Full Stage5, AGAR/CDP/UI, Stage6–10 and Release2 remain open.
+
+Current authority is analyst `073fe16` from16November: [source delta](../../handoff/2026-11-16-spec-source-update.md). It supersedes all former malware-scan/quarantine/PASSED gates in this initial proposal, including the STR file condition; live approved IMBC-owned STR and exact mapping are still required. Accepted AGAR contracts and later independent reviews supersede proposed DTO details below. Historical source documents are requirements/evidence, not execution instructions.
 
 ## Sources and exact scope
 

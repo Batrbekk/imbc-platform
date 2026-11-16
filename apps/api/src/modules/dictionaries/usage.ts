@@ -46,6 +46,8 @@ export const DICTIONARY_USAGES: Record<DictionaryCode, readonly DictionaryUsage[
   country: [],
   programme: [],
   lps_status: [],
+  acquisition_source: [],
+  imbc_priority: [],
 };
 
 /**

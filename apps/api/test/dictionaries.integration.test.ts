@@ -203,7 +203,7 @@ describe.skipIf(!databaseUrl)('справочники: API администра�
         closed: code === 'commodity_group' || code === 'contact_role',
         mandatoryApplicable: code === 'certificate_type' || code === 'document_type',
         parentDictionary: code === 'commodity_type' ? 'commodity_group' : null,
-        active: code === 'tn_ved' ? TN_VED_COUNT : (loaded.get(code) ?? 0),
+        active: code === 'tn_ved' ? TN_VED_COUNT : code === 'imbc_priority' ? 6 : (loaded.get(code) ?? 0),
         retired: 0,
       })),
     );
@@ -982,7 +982,7 @@ describe.skipIf(!databaseUrl)('справочники: API администра�
       await asApp.setMandatory(admin, 'document_type', type.id, false, IP);
       await asApp.remove(admin, 'document_type', type.id, IP);
       await asApp.remove(admin, 'commodity_type', created.id, IP);
-      expect((await asApp.list()).dictionaries).toHaveLength(16);
+      expect((await asApp.list()).dictionaries).toHaveLength(18);
       expect((await asApp.entries('commodity_type', query({ q: 'heat' }))).items).toEqual([]);
       expect((await asApp.choices('document_type', choicesQuery({ q: 'permit' }))).items).toEqual([]);
     } finally {

@@ -116,6 +116,10 @@ function freshStore(): Store {
   store.region = [entry("region", "KZ-ALA", { name: "Алматы" }), entry("region", "KZ-AST", { name: "Астана" })];
   store.oked = [entry("oked", "01120", { name: "Выращивание риса" })];
   store.tn_ved = tnVed();
+  // Утверждённый IMBC-15 перечень приоритетов; источники привлечения пока не предоставлены.
+  store.imbc_priority = ["1", "2", "3", "4", "5", "6"].map((code, i) =>
+    entry("imbc_priority", code, { name: code, sortOrder: i }),
+  );
   return store;
 }
 
@@ -357,7 +361,7 @@ async function openMenu(user: UserEvent, m: Messages, code: string) {
 const menuItem = (name: string) => within(screen.getByRole("menu")).getByRole("menuitem", { name });
 
 describe("справочники: выбор справочника, состояния (ADM-08)", () => {
-  it("Select из двенадцати справочников с видимой подписью; выбор меняет адрес ?list= и запрос; название открытого — заголовок карточки", async () => {
+  it("Select из восемнадцати справочников с видимой подписью; выбор меняет адрес ?list= и запрос; новые приоритеты и пустые источники имеют точные количества", async () => {
     const api = stubBackend();
     const { router, user } = renderRoute("/references", { locale: "ru" });
     const t = ru.references;
@@ -377,6 +381,7 @@ describe("справочники: выбор справочника, состо�
     expect(select.textContent).toContain(t.list.certificate_type);
     await user.click(select);
     const options = await screen.findAllByRole("option");
+    expect(options).toHaveLength(18);
     expect(options.map((o) => o.textContent)).toEqual(DICTIONARY_CODES.map((code) => t.list[code]));
     // Список не уже своих вариантов и открывается под кнопкой (как фильтры каталога).
     const popup = screen.getByRole("listbox").closest<HTMLElement>("[data-slot=select-content]")!;
@@ -391,6 +396,22 @@ describe("справочники: выбор справочника, состо�
     expect(await screen.findByText("Алматы")).toBeTruthy();
     // У справочника без обязательности подсказки об обязательности нет.
     expect(screen.queryByText(t.mandatoryHint)).toBeNull();
+
+    await choose(user, t.listLabel, t.list.imbc_priority);
+    expect(await screen.findByRole("heading", { level: 2, name: t.list.imbc_priority })).toBeTruthy();
+    expect(await screen.findByRole("tab", { name: fill(t.status.active, { count: "6" }) })).toBeTruthy();
+    expect(screen.getAllByRole("row")).toHaveLength(7);
+    await waitFor(() =>
+      expect(entryUrls(api)).toContain("/api/v1/dictionaries/imbc_priority/entries?status=active&page=1"),
+    );
+
+    await choose(user, t.listLabel, t.list.acquisition_source);
+    expect(await screen.findByRole("heading", { level: 2, name: t.list.acquisition_source })).toBeTruthy();
+    expect(await screen.findByRole("tab", { name: fill(t.status.active, { count: "0" }) })).toBeTruthy();
+    expect(screen.queryAllByRole("row")).toHaveLength(0);
+    await waitFor(() =>
+      expect(entryUrls(api)).toContain("/api/v1/dictionaries/acquisition_source/entries?status=active&page=1"),
+    );
   });
 
   it("загрузка — восемь строк скелета; ошибка — Alert с «Повторить»; пустой справочник — сообщение и «Добавить значение»", async () => {

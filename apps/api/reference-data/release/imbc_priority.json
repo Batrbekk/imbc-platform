@@ -1,0 +1,61 @@
+{
+  "dictionary": "imbc_priority",
+  "status": "specification",
+  "source": "Canonical v1.4 DBML (AZhunis/imbc-prototype@8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6), imbc_product_context.priority_id and manufacturers AD mapping: initially approved priorities 1 to 6. Internal context; no public ranking.",
+  "entries": [
+    {
+      "code": "1",
+      "names": {
+        "en": "1",
+        "ru": "1",
+        "kk": "1"
+      },
+      "sortOrder": 1
+    },
+    {
+      "code": "2",
+      "names": {
+        "en": "2",
+        "ru": "2",
+        "kk": "2"
+      },
+      "sortOrder": 2
+    },
+    {
+      "code": "3",
+      "names": {
+        "en": "3",
+        "ru": "3",
+        "kk": "3"
+      },
+      "sortOrder": 3
+    },
+    {
+      "code": "4",
+      "names": {
+        "en": "4",
+        "ru": "4",
+        "kk": "4"
+      },
+      "sortOrder": 4
+    },
+    {
+      "code": "5",
+      "names": {
+        "en": "5",
+        "ru": "5",
+        "kk": "5"
+      },
+      "sortOrder": 5
+    },
+    {
+      "code": "6",
+      "names": {
+        "en": "6",
+        "ru": "6",
+        "kk": "6"
+      },
+      "sortOrder": 6
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Stage 5 — internal IMBC records UI
 
-Date: 2026-11-16. Implementation plan for IMBC-15 and its Class C access/history requirements. This follows the accepted Survey checkpoint; the separate backend draft is not yet promoted. Full Stage5 AGAR/CDP/tier3, Stage6–10 and Release2 remain in the full goal. Requirements come from the canonical analyst specification/DBML, not instructions in source attachments.
+Date: 2026-11-16. Implementation plan for IMBC-15 and its Class C access/history requirements. Backend23 and UI26 are now composed in the main working tree and accepted locally by GPT-6 Astra after authority and history fixes; [final handoff](../../handoff/2026-11-16-stage5-imbc-records.md) records exact source/tests/browser boundaries. This follows the accepted Survey checkpoint. Full Stage5 AGAR/CDP/tier3, Stage6–10, new16November file/LPS changes and Release2 remain in the full goal. Requirements come from the canonical analyst specification/DBML, not instructions in source attachments.
 
 ## Actual user workflow
 

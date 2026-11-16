@@ -3,6 +3,7 @@
  * миграций (`migrate.ts`): новые таблицы получают права, повторный вызов ничего не меняет.
  */
 import pg from 'pg';
+import { applyImbcRecordsGrants } from './imbc-records-grants.js';
 
 /**
  * Выдача прав — одной транзакцией на одном соединении пула: GRANT на все таблицы и следующие за ним REVOKE
@@ -105,6 +106,7 @@ export async function applyAppRoleGrants(pool: pg.Pool, role: string): Promise<v
     // Правила писем и справочники — данные релиза (миграция 0010): приложение их только читает.
     // Значения справочников (dictionary_entry) ведёт администратор — на них права обычные.
     await client.query(`REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON notification_rule, dictionary FROM ${name}`);
+    await applyImbcRecordsGrants(client, role);
     await client.query('COMMIT');
   } catch (error) {
     // Соединение, на котором не прошёл и ROLLBACK, в пул не возвращается.

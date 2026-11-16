@@ -38,6 +38,8 @@ import { authDestination, useLogout, useMe } from "@/lib/session";
 /** `handle` рабочего маршрута: ключ заголовка вкладки, пока страница ещё не показана. */
 export interface AppRouteHandle {
   title?: string;
+  /** Only pages that hide private content and block all writes can retain their dirty state during a transient session probe failure. */
+  preserveTransientSession?: boolean;
 }
 
 /**
@@ -68,8 +70,11 @@ export function AppShell() {
   // из handle маршрута. Когда страница на экране, заголовок ставит она: оболочка свой не рендерит.
   const handle = useMatches().at(-1)?.handle as AppRouteHandle | undefined;
   const gateTitle = <PageTitle title={handle?.title ? t(handle.title) : undefined} />;
+  const transientSession = me.isError && (!(me.error instanceof ApiError) || me.error.status >= 500);
+  const retainOutlet = transientSession && handle?.preserveTransientSession === true && !!me.data &&
+    me.data.gates.mfa && me.data.gates.responsibility && authDestination(me.data, pathname) === pathname;
 
-  if (me.isError && !(me.error instanceof ApiError && me.error.status === 401)) {
+  if (me.isError && !retainOutlet && !(me.error instanceof ApiError && me.error.status === 401)) {
     return (
       <div className="flex min-h-svh items-center justify-center">
         {gateTitle}
@@ -78,7 +83,7 @@ export function AppShell() {
     );
   }
   if (
-    me.isError ||
+    (me.isError && !retainOutlet) ||
     !me.data ||
     !me.data.gates.mfa ||
     !me.data.gates.responsibility ||

@@ -102,6 +102,7 @@ function CompanyView({ company }: { company: Company }) {
   const role = useMe().data?.user.role;
   const diligence = useTranslations("diligence");
   const survey = useTranslations("siteSurvey");
+  const records = useTranslations("imbcRecords");
   const showDiligence = role !== undefined && ["expert", "director"].includes(role) && can(role, "imbc_records.read") !== null;
   const yesNo = (value: boolean) => (value ? common("yes") : common("no"));
   const orNone = (value: string | null) => value ?? t("notProvided");
@@ -130,6 +131,8 @@ function CompanyView({ company }: { company: Company }) {
           to={`/imbc/profiles/${company.profileId}/due-diligence`} state={{ from: `/companies/${company.profileId}` }}>{diligence("open")}</Link></div>}
         {showDiligence && <div><Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
           to={`/imbc/profiles/${company.profileId}/site-surveys`} state={{ from: `/companies/${company.profileId}` }}>{survey("openSurveys")}</Link></div>}
+        {showDiligence && <div><Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+          to={`/imbc/profiles/${company.profileId}/records`} state={{ from: `/companies/${company.profileId}` }}>{records("open")}</Link></div>}
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">

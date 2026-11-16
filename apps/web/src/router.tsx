@@ -59,6 +59,11 @@ export const routes: RouteObject[] = [
         ),
         children: [
           {
+            path: "imbc/profiles/:profileId/records",
+            handle: { title: "imbcRecords.title", preserveTransientSession: true } satisfies AppRouteHandle,
+            lazy: lazyPage(() => import("@/routes/app/imbc-records"), (m) => m.Component),
+          },
+          {
             path: "imbc/profiles/:profileId/site-surveys",
             handle: { title: "siteSurvey.title" } satisfies AppRouteHandle,
             lazy: lazyPage(() => import("@/routes/app/site-surveys"), (m) => m.Component),

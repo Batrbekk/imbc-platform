@@ -83,6 +83,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
     expect(await regions()).toEqual([]);
     const production = await perDictionary();
     expect(production).toEqual({
+      acquisition_source: 0,
+      imbc_priority: 6,
       commodity_group: 5,
       commodity_type: 0,
       contact_role: 3,
@@ -136,8 +138,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('demo seed', () => {
         )
       ).rows[0]!.n;
     const auditAfterFirst = await audit();
-    // Девять списков release, включая LPS country/status/programme, и семь временных.
-    expect(auditAfterFirst).toBe(16);
+    // Ten approved release lists include IMBC priorities; seven lists remain explicitly provisional.
+    expect(auditAfterFirst).toBe(17);
     await seedDemo(pool);
     expect(await perDictionary()).toEqual(demo);
     expect(await audit()).toBe(auditAfterFirst);

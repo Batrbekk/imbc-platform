@@ -80,6 +80,8 @@ import { SiteSurveyPublicationService } from './modules/site-survey/site-survey-
 import { SITE_SURVEY_PUBLICATION } from './modules/site-survey/survey-operation.js';
 import { SiteSurveyUploadController, SiteSurveyUploadGuard } from './modules/site-survey/site-survey-upload.controller.js';
 import { SiteSurveyUploadService } from './modules/site-survey/site-survey-upload.service.js';
+import { ImbcNotesController, ImbcEngagementController, ImbcProductContextController, ImbcRecordsOptionsController } from './modules/imbc-records/imbc-records.controller.js';
+import { ImbcRecordsService } from './modules/imbc-records/imbc-records.service.js';
 
 @Module({
   imports: [
@@ -123,6 +125,10 @@ import { SiteSurveyUploadService } from './modules/site-survey/site-survey-uploa
     OwnSiteSurveyRequestsController,
     SiteSurveyRequestsController,
     SiteSurveyUploadController,
+    ImbcNotesController,
+    ImbcEngagementController,
+    ImbcProductContextController,
+    ImbcRecordsOptionsController,
   ],
   providers: [
     OidcService,
@@ -147,6 +153,7 @@ import { SiteSurveyUploadService } from './modules/site-survey/site-survey-uploa
     { provide: SITE_SURVEY_PUBLICATION, useExisting: SiteSurveyPublicationService },
     SiteSurveyUploadService,
     SiteSurveyUploadGuard,
+    ImbcRecordsService,
     MainInformationHandler,
     ContactsHandler,
     PersonnelHandler,

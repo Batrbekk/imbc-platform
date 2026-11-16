@@ -22,6 +22,8 @@ export const DICTIONARY_CODES = [
   'country',
   'programme',
   'lps_status',
+  'acquisition_source',
+  'imbc_priority',
 ] as const;
 export type DictionaryCode = (typeof DICTIONARY_CODES)[number];
 
@@ -72,6 +74,8 @@ export const DICTIONARY_CODE_PATTERNS: Record<DictionaryCode, RegExp> = {
   country: /^[A-Z]{2}$/,
   programme: /^(LC|LPS)$/,
   lps_status: GENERIC_CODE,
+  acquisition_source: GENERIC_CODE,
+  imbc_priority: /^[1-6]$/,
 };
 
 /**

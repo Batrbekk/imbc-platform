@@ -137,6 +137,8 @@ describe('файлы и справочники (DBML, ADM-08, DATA-05, DATA-07)'
       'country',
       'programme',
       'lps_status',
+      'acquisition_source',
+      'imbc_priority',
     ]);
   });
 });
