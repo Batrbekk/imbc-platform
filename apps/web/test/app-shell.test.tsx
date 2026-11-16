@@ -86,7 +86,7 @@ const apiCalls = (api: ReturnType<typeof stubApi>) =>
 
 /** Запросы стартовой страницы роли: после перехода с закрытой страницы других запросов к /api/v1 нет. */
 const START_REQUESTS: Record<Me["user"]["role"], string[]> = {
-  manufacturer: [OWN_PROFILE, OWN_SECTIONS],
+  manufacturer: [OWN_PROFILE, OWN_SECTIONS, "/api/v1/profiles/own/submission"],
   expert: ["/api/v1/reviews/queue"],
   administrator: [ADMIN_ACCOUNTS],
   director: ["/api/v1/dashboard"],

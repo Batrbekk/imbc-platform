@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldContent, FieldLabel } from "@/components/ui/field";
 import { useFormat } from "@/i18n/format";
+import { RequirementsLoading } from "./current-requirements";
+import { useCurrentRequirements } from "./current-requirements-data";
 import { ProfileAttachments } from "./attachments";
 import { fieldId, moveRow, useProfileChoices } from "./form-data";
 import { ProfileChoiceField, ProfileGroupError, ProfileRowActions, ProfileTextField } from "./form-fields";
@@ -21,7 +23,9 @@ export function CertificatesForm({ value, source, onChange, disabled, errors }: 
   const update = useProfileChange(value, onChange);
   const t = useTranslations("profileCertificates"); const records = useTranslations("profileRecords");
   const locale = useLocale() as "en" | "ru" | "kk"; const format = useFormat();
-  const selected = [...source.requiredTypes, ...source.certificates.flatMap((item) => item.certificateType ? [item.certificateType] : [])];
+  const current = useCurrentRequirements("certificates", !disabled);
+  const requiredTypes = disabled ? source.requiredTypes : current.data?.requiredTypes ?? [];
+  const selected = [...requiredTypes, ...source.requiredTypes, ...source.certificates.flatMap((item) => item.certificateType ? [item.certificateType] : [])];
   const types = useProfileChoices("certificate_type", selected);
   const groups = CERTIFICATE_GROUPS.map((group) => ({ value: group, label: t(`group.${group}`) }));
   function change(index: number, patch: Partial<Certificate>) {
@@ -37,7 +41,8 @@ export function CertificatesForm({ value, source, onChange, disabled, errors }: 
       <Button type="button" variant="outline" disabled={disabled} onClick={() => add()}><PlusIcon />{t("add")}</Button>
     </div>
     <p className="text-sm text-muted-foreground">{t("hint")}</p>
-    <div className="grid gap-3 sm:grid-cols-3">{source.requiredTypes.map((type, index) => <div key={type.id}
+    {!disabled && <RequirementsLoading pending={current.isPending} error={current.isError} retry={() => void current.refetch()} />}
+    <div className="grid gap-3 sm:grid-cols-3">{requiredTypes.map((type, index) => <div key={type.id}
       id={fieldId(`requiredTypes.${index}`)} className="rounded-lg border p-3">
       <p className="text-sm font-medium">{entryDisplayName(type.names, locale, type.code)}</p>
       <p className="mt-1 text-xs text-muted-foreground">{COMPANY_ISO_CODES.some((code) => code.toLowerCase() === type.code.toLowerCase()) ? t("isoRequired") : t("required")}</p>

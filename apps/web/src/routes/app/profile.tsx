@@ -1,4 +1,9 @@
-import { displayCompleteness, type OwnProfile, type OwnSectionsOverview } from "@imbc/contracts";
+import {
+  displayCompleteness,
+  type OwnProfile,
+  type OwnSectionsOverview,
+  type ProfileSubmissionState,
+} from "@imbc/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "cn";
 import { Building2Icon, ChevronRightIcon } from "lucide-react";
@@ -10,11 +15,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { sectionPath, useOwnSections } from "@/features/profile/profile-data";
+import { sectionPath, useOwnSections, useSubmissionState } from "@/features/profile/profile-data";
+import { SubmissionWorkflow } from "@/features/profile/submission-workflow";
 import { useFormat } from "@/i18n/format";
 import { api } from "@/lib/api";
 
-/** MAN-21 / MAN-41: seven sections; only main and contacts are available in the foundation. */
+/** MAN-21 / MAN-41: seven saved sections and the manufacturer submission workflow. */
 export function ProfilePage() {
   const nav = useTranslations("nav");
   const t = useTranslations("profile");
@@ -23,6 +29,7 @@ export function ProfilePage() {
   const format = useFormat();
   const profile = useQuery({ queryKey: ["profile", "own"], queryFn: () => api<OwnProfile>("/v1/profiles/own") });
   const overview = useOwnSections();
+  const submission = useSubmissionState();
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-5">
       <PageTitle title={nav("profile")} />
@@ -30,7 +37,7 @@ export function ProfilePage() {
         <Building2Icon className="size-6 text-primary" />
         {nav("profile")}
       </h1>
-      {profile.isError || overview.isError ? (
+      {(profile.isError || overview.isError) && !(profile.data && overview.data) ? (
         <Alert variant="destructive">
           <AlertDescription>{t("loadError")}</AlertDescription>
           <Button
@@ -46,7 +53,21 @@ export function ProfilePage() {
         </Alert>
       ) : profile.data && overview.data ? (
         <>
-          <ProfileView profile={profile.data} overview={overview.data} />
+          <ProfileView profile={profile.data} overview={overview.data} state={submission.data} />
+          <SubmissionWorkflow
+            overview={overview.data}
+            state={submission.data}
+            stateError={submission.isError || profile.isError || overview.isError}
+            reload={async () => {
+              const results = await Promise.allSettled([
+                profile.refetch({ throwOnError: true }),
+                overview.refetch({ throwOnError: true }),
+                submission.refetch({ throwOnError: true }),
+              ]);
+              const failed = results.find((result) => result.status === "rejected");
+              if (failed?.status === "rejected") throw failed.reason;
+            }}
+          />
           <p className="text-sm text-muted-foreground">{editor("overviewHint")}</p>
           <div className="grid gap-3 sm:grid-cols-2">
             {overview.data.sections.map((section) => (
@@ -99,7 +120,15 @@ export function ProfilePage() {
   );
 }
 
-function ProfileView({ profile, overview }: { profile: OwnProfile; overview: OwnSectionsOverview }) {
+function ProfileView({
+  profile,
+  overview,
+  state,
+}: {
+  profile: OwnProfile;
+  overview: OwnSectionsOverview;
+  state?: ProfileSubmissionState;
+}) {
   const t = useTranslations("profile");
   const editor = useTranslations("profileEditor");
   const catalog = useTranslations("catalog");
@@ -121,9 +150,9 @@ function ProfileView({ profile, overview }: { profile: OwnProfile; overview: Own
             <dt className="text-muted-foreground">{t("status")}</dt>
             <dd className="flex flex-wrap gap-2">
               <Badge>{t(`statusValue.${overview.profileStatus}`)}</Badge>
-              {overview.sections.some((section) => section.hasWorkingChanges) ? (
+              {(state?.hasUnsubmittedChanges ?? overview.sections.some((section) => section.hasWorkingChanges)) ? (
                 <Badge variant="outline">{editor("unsubmitted")}</Badge>
-              ) : overview.hasPendingChanges ? (
+              ) : overview.hasPendingChanges || (state?.profileStatus === "verified" && state.activeAssignmentId) ? (
                 <Badge variant="outline">{t("pendingChanges")}</Badge>
               ) : null}
             </dd>

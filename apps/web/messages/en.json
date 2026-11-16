@@ -615,7 +615,7 @@
   },
   "profileEditor": {
     "backToProfile": "Back to profile",
-    "overviewHint": "Save main information and contacts. The other sections will be available later.",
+    "overviewHint": "Save changes in any of the seven sections. Send the saved profile from this page when it is ready.",
     "soon": "Coming soon",
     "requiredSoon": "This required section will be available later.",
     "optionalSoon": "Optional section. It does not lower profile completeness.",
@@ -917,5 +917,62 @@
     "retry": "Try again",
     "download": "Download sample",
     "fileMeta": "{size} KB · {date}"
+  },
+  "profileSubmission": {
+    "actions": "Profile submission",
+    "send": "Send for review",
+    "sendChanges": "Send changes",
+    "unlock": "Unlock profile",
+    "savedHint": "Send includes the saved versions of all seven sections. Save your edits before returning here.",
+    "lockedHint": "The profile is under review. Unlock it to make changes; the reviewer will be notified.",
+    "sendTitle": "Send profile for review",
+    "sendDescription": "Confirm the accuracy of the saved profile. Editing will be locked during review.",
+    "accuracy": "I confirm that the information in all seven sections is accurate.",
+    "unlockTitle": "Unlock profile?",
+    "unlockDescription": "This will end the current review and allow you to edit the profile. Already recorded decisions remain in the review history.",
+    "confirmSend": "Confirm and send",
+    "confirmUnlock": "Confirm unlock",
+    "cancel": "Cancel",
+    "processing": "Processing…",
+    "retry": "Try again",
+    "reload": "Reload saved profile",
+    "sent": "The saved profile has been sent for review.",
+    "unlocked": "The profile has been unlocked.",
+    "stateError": "The current review status could not be loaded. Reload before sending or unlocking.",
+    "missingHint": "Review the following sections, save any corrections, then confirm accuracy again.",
+    "currentRequirements": "Current required types",
+    "requirementsLoading": "Loading current requirements…",
+    "requirementsError": "Current requirements could not be loaded.",
+    "errors": {
+      "stale": "The saved profile or review has changed. Reload and review it before confirming again.",
+      "profile_incomplete": "Required information is missing. Complete the sections before sending.",
+      "submission_requirements_changed": "The required document or certificate types have changed. Review the current requirements.",
+      "submission_file_unavailable": "Some attachments are not ready or cannot be used. Check the files in the indicated sections.",
+      "submission_graph_invalid": "Some product, site or certificate links need to be corrected.",
+      "forbidden": "Your account cannot perform this action.",
+      "network": "The result could not be confirmed. Retry to check the same submission safely.",
+      "failed": "This action could not be completed. Reload the saved profile and try again."
+    },
+    "reloadError": "The saved profile could not be reloaded completely. Try reloading again before confirming."
+  },
+  "profileReviewHistory": {
+    "title": "Last reviewed version",
+    "loading": "Loading review history…",
+    "error": "Review history could not be loaded.",
+    "retry": "Retry",
+    "current": "These decisions concern the current saved version of this section.",
+    "previous": "These decisions concern a previous submitted version. They do not approve the current edits.",
+    "submittedAt": "Submitted: {date}",
+    "pending": "No section decision has been recorded yet.",
+    "empty": "This section has not been submitted for review.",
+    "verified": "Accepted",
+    "rejected": "Returned for correction",
+    "item": {
+      "certificate": "Reviewed certificate {number}",
+      "document": "Reviewed document {number}",
+      "file": "Reviewed attachment {number}"
+    },
+    "attachment": "Reviewed attachment",
+    "certificateNumber": "Certificate number: {number}"
   }
 }

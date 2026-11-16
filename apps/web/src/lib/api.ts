@@ -1,7 +1,22 @@
+import { SECTION_KINDS } from "@imbc/contracts";
+import { z } from "zod";
+
 /**
  * Клиент BFF. Браузер ходит только на свой origin (/api), сеанс — в HttpOnly cookie,
  * токены IdP в браузер не попадают (архитектура §9, ADR-04).
  */
+const missingSchema = z.object({ kind: z.enum(SECTION_KINDS), path: z.string(), code: z.string() });
+const requirementSchema = z.object({ kind: z.enum(["certificates", "documents"]), requiredTypeIds: z.array(z.uuid()) });
+type SubmissionMissing = z.infer<typeof missingSchema>;
+type SubmissionRequirement = z.infer<typeof requirementSchema>;
+function parseIssues<T>(value: unknown, schema: z.ZodType<T>): T[] {
+  return Array.isArray(value)
+    ? value.flatMap((item: unknown) => {
+        const result = schema.safeParse(item);
+        return result.success ? [result.data] : [];
+      })
+    : [];
+}
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -10,6 +25,8 @@ export class ApiError extends Error {
     readonly detail?: string,
     readonly retryAfter?: number,
     readonly fieldErrors: readonly { path: string; code: string }[] = [],
+    readonly submissionMissing: readonly SubmissionMissing[] = [],
+    readonly submissionRequirements: readonly SubmissionRequirement[] = [],
   ) {
     super(title);
   }
@@ -49,6 +66,8 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
               : [];
           })
         : [],
+      parseIssues(body?.missing, missingSchema),
+      parseIssues(body?.requirements, requirementSchema),
     );
   }
   return body as T;

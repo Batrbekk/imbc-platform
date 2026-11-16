@@ -30,10 +30,11 @@ import { PersonnelForm } from "@/features/profile/personnel-form";
 import { DocumentsForm } from "@/features/profile/documents-form";
 import { ProductsForm } from "@/features/profile/products-form";
 import { ProductionForm } from "@/features/profile/production-form";
+import { ProfileReviewDetails } from "@/features/profile/review-details";
 import { ProfileFileHistory } from "@/features/profile/file-history";
 import { mergeFileObservations } from "@/features/profile/file-observations";
 import { CertificatesForm } from "@/features/profile/certificates-form";
-import { routeSection } from "@/features/profile/profile-data";
+import { routeSection, useSubmissionState } from "@/features/profile/profile-data";
 import { UnsavedDialog } from "@/features/profile/unsaved-dialog";
 import { useSectionDraft } from "@/features/profile/section-draft";
 import { useFormat } from "@/i18n/format";
@@ -45,6 +46,7 @@ type ImplementedRead = MainInformationRead | ContactsRead | PersonnelRead | Docu
 export function ProfileSectionPage() {
   const { section } = useParams();
   const kind = routeSection(section);
+  useSubmissionState();
   const t = useTranslations("profileEditor");
   const available = Boolean(kind);
   const query = useQuery({
@@ -97,6 +99,7 @@ export function ProfileSectionPage() {
           )}
         </>
       )}
+      {query.data && <ProfileReviewDetails kind={kind} returned={query.data.profileStatus === "returned"} />}
     </div>
   );
 }
