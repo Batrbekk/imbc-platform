@@ -26,14 +26,14 @@ Checkpoint **до изменений задач 5–11** выполнен на N
 
 ## Реализованные задачи 5–11
 
-| Задача | Результат | Ревью и целевые проверки |
-|---|---|---|
-| 5 | 0013 rename/compatibility view и enum rename; 0014 модель семи секций; 0015 сохранение старого пустого скелета, bootstrap и guards | Astra Approved; 89/89 миграционных SQL-тестов, проверена копия локального дампа |
-| 6 | Own overview/read/save, транзакционные locks/editVersion/no-op, COW всего вида секции, полные before/after и operationId в append-only audit | Astra Approved; PostgreSQL/HTTP/contract проверки |
-| 7 | Owner revision/purpose/tenant file access, точные frozen версии, dictionary FK и capture boundary для будущей отправки | Astra Approved; целевые owner/snapshot/race проверки |
-| 8 | Main read: сохранённые источниковые legal/OKED/founders; write только website/companyPhone/contactEmail/sites. Partial save, source snapshot, стабильные site identities, retired region retain, запрет удаления используемой площадки | Astra Approved; API/HTTP/SQL проверки |
-| 9 | Ordered partial contacts, нормализация email/международных телефонов, дубли и одна focal отметка, dictionary role; без верхнего бизнес-лимита | Astra Approved; API/HTTP/SQL/contract проверки |
-| 10–11 | Обзор 7 секций, 2 доступных формы и 5 «Скоро», Main/sites и Contacts en/ru/kk, Verified view → Edit → Save, ошибки/dirty guard/409 explicit reload | Финальный web suite 332/332; 22/22 теста редактора и 10/10 overview входят в него. Локальный браузер en/ru/kk, 1280/390 px пройден; итоговое ревью GPT-6 Astra Approved |
+| Задача | Результат                                                                                                                                                                                                                              | Ревью и целевые проверки                                                                                                                                                |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 5      | 0013 rename/compatibility view и enum rename; 0014 модель семи секций; 0015 сохранение старого пустого скелета, bootstrap и guards                                                                                                     | Astra Approved; 89/89 миграционных SQL-тестов, проверена копия локального дампа                                                                                         |
+| 6      | Own overview/read/save, транзакционные locks/editVersion/no-op, COW всего вида секции, полные before/after и operationId в append-only audit                                                                                           | Astra Approved; PostgreSQL/HTTP/contract проверки                                                                                                                       |
+| 7      | Owner revision/purpose/tenant file access, точные frozen версии, dictionary FK и capture boundary для будущей отправки                                                                                                                 | Astra Approved; целевые owner/snapshot/race проверки                                                                                                                    |
+| 8      | Main read: сохранённые источниковые legal/OKED/founders; write только website/companyPhone/contactEmail/sites. Partial save, source snapshot, стабильные site identities, retired region retain, запрет удаления используемой площадки | Astra Approved; API/HTTP/SQL проверки                                                                                                                                   |
+| 9      | Ordered partial contacts, нормализация email/международных телефонов, дубли и одна focal отметка, dictionary role; без верхнего бизнес-лимита                                                                                          | Astra Approved; API/HTTP/SQL/contract проверки                                                                                                                          |
+| 10–11  | Обзор 7 секций, 2 доступных формы и 5 «Скоро», Main/sites и Contacts en/ru/kk, Verified view → Edit → Save, ошибки/dirty guard/409 explicit reload                                                                                     | Финальный web suite 332/332; 22/22 теста редактора и 10/10 overview входят в него. Локальный браузер en/ru/kk, 1280/390 px пройден; итоговое ревью GPT-6 Astra Approved |
 
 В UI исправлены замечания Astra: значения текстовых полей формы в режиме просмотра показаны фокусируемыми Textarea с переносом полного текста; Input используется при редактировании. Длинные адреса и телефоны доступны целиком на 390 px. Также ссылки missing sites/contacts ведут к существующим контейнерам; ошибка sites/site_in_use отображается отдельно от общего validation, остальные введённые значения сохраняются. Роли справочника загружаются со всех страниц и показываются названиями; UUID не подставляется вместо названия. Текущий общий процент хранит дробную точность и отображается целым вниз: полные Main/Contacts с остальными нулевыми обязательными секциями дают 33%.
 
@@ -69,16 +69,16 @@ SME/директор читают файл через сохранённую з�
 
 Сохранены снимки: [обзор на русском, desktop](2026-11-16-stage3a/overview-desktop-ru.jpg) и [полные адреса площадок на 390 px](2026-11-16-stage3a/main-mobile-ru.jpg). Остальные локальные JPG находятся в `output/imbc-stage3a-2026-11-16/` рабочего каталога Sake. Preview и harness остановлены; порты 62317/53000 освобождены, собственная harness-база удалена.
 
-| Проверка | Итог |
-|---|---|
-| Общий suite/типы/сборка/lint, PostgreSQL, requirements, generate/Compose/diff | Пройдены в указанных границах |
-| Независимое итоговое ревью Astra | Approved после исправления P2 |
-| Локальный браузер 1280/390 px, клавиатура/labels/focus, en/ru/kk | Пройден с actual API/PG и fixture auth |
-| Исходный R1 image/runtime API/onboarding на новой схеме | 17 HTTP-проверок и синтетические password_set/sign_in пройдены; границы выше |
-| Полный настоящий Office/LibreOffice/Google Docs/PDF corpus и текущий ClamAV | Не завершён; исторические живые пробы не заменяют текущую приёмку |
-| R1/R2 на Azure, шесть ролей, реальный 20–25 MB upload/storage | Не выполнялись; стенд этим запуском не обновлён |
-| Реальные пароль/OIDC/provisioning, worker, почта и источники в текущем срезе | Не проверялись этой локальной приёмкой |
-| CI | Успешный запуск текущей ветки не подтверждён |
+| Проверка                                                                      | Итог                                                                         |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Общий suite/типы/сборка/lint, PostgreSQL, requirements, generate/Compose/diff | Пройдены в указанных границах                                                |
+| Независимое итоговое ревью Astra                                              | Approved после исправления P2                                                |
+| Локальный браузер 1280/390 px, клавиатура/labels/focus, en/ru/kk              | Пройден с actual API/PG и fixture auth                                       |
+| Исходный R1 image/runtime API/onboarding на новой схеме                       | 17 HTTP-проверок и синтетические password_set/sign_in пройдены; границы выше |
+| Полный настоящий Office/LibreOffice/Google Docs/PDF corpus и текущий ClamAV   | Не завершён; исторические живые пробы не заменяют текущую приёмку            |
+| R1/R2 на Azure, шесть ролей, реальный 20–25 MB upload/storage                 | Не выполнялись; стенд этим запуском не обновлён                              |
+| Реальные пароль/OIDC/provisioning, worker, почта и источники в текущем срезе  | Не проверялись этой локальной приёмкой                                       |
+| CI                                                                            | Успешный запуск текущей ветки не подтверждён                                 |
 
 Локальная приёмка реализованного среза 3а завершена. Открытие producer uploads и выкат требуют оставшихся внешних проверок. Источник остаётся draft for sign-off; legal/NDA тексты, release справочники и языковая вычитка IMBC, реальные Adata quota/modules, source ingestion и инфраструктура остаются вводными последующих этапов.
 
@@ -87,3 +87,13 @@ SME/директор читают файл через сохранённую з�
 Следующая разработка — 3б: персонал, продукты, необязательное производство, общие сертификаты, документы, producer uploads, применимая полнота до 100%. 3в: accuracy confirmation, submit/unlock/return, pending changes, атомарный freeze/capture и requirement snapshot, тестовые решения SME, отдельный contract старого скелета и compatibility view после retirement R1. Отправка сейчас отсутствует; продукты, производство, сертификаты и документы имеют только схему и файловую основу, формы ещё «Скоро». LPS остаётся самостоятельным этапом 6б Release 1.
 
 R1 и R2 не выкатывались в этом запуске. Выкат R2 требует отдельной проверки R1 на стенде и команды владельца. Реальная очередь SME, DD, источники, LPS и последующие части roadmap не входят в приёмку текущего среза.
+
+## Продолжение после среза 3а
+
+Новый backend/UI срез 3б зафиксирован в `b3b2222`/`8d48bbd`; все семь секций и вложения реализованы, 1962 проверки прошли. На существующем dev установлен только K3s с сохранением старого приложения. Актуальные факты, следующие задачи и границы приёмки — [stage3b continuation](2026-11-16-stage3b-continuation.md). Запрос владельца разрешает продолжить весь план и dev-поставку без новых платных ресурсов.
+
+## Продолжение после срезов3б/3в
+
+Срез3в отправлен в `03c4722`/`0b3dbec`:2148 checks, Astra Approved, local browser cycle93 requests без HTTP/console errors. Эти исторические разделы3а не являются текущим статусом разработки или разрешением на остановку. NDA0022 и policy0023 получили отдельное ревью; MAN-02 и источники продолжаются. [Актуальный срез3в](2026-11-16-stage3c-continuation.md) и [полный production plan](../superpowers/plans/2026-11-16-production-delivery.md) содержат завершённые шаги и runtime gates. Разрешён только существующий dev VM, без новых платных ресурсов; старый public stack сохранён.
+
+Текущий auth/source checkpoint: [NDA/policy/MAN-02 и bounded e-Ondiris](2026-11-16-stage3d-auth-sources.md),2468 проверок с отдельным source-store PG runner; generic invitation ACK fix также прошёл Astra. Продолжаются source-COW0024 и самостоятельный LPS backend.

@@ -1,0 +1,250 @@
+{
+  "method": "openpyxl 3.1.5, read-only source audit; no Excel recalculation or writes",
+  "workbooks": [
+    {
+      "file": "Consolidated_Actualized_data(Random 100_rows).xlsx",
+      "sheets": [
+        {
+          "name": "Лист1",
+          "extent": "A1:H101",
+          "headerRow": 1,
+          "rowsAfterHeaderWithAnyValue": 100,
+          "columns": 8,
+          "formulaCells": 0,
+          "errorCells": 0
+        }
+      ],
+      "sourceRole": "Additional 100-row demand/classification sample; not an e-Ondiris registry source",
+      "columns": [
+        "Commodity group",
+        "KPVED_code",
+        "KPVED_name",
+        "TNVED_code",
+        "Commodity name",
+        "Full description",
+        "Unit of Measure",
+        "Total Estimated until 2031"
+      ]
+    },
+    {
+      "file": "IMBC_Manufacturers_Database.xlsx",
+      "sheets": [
+        {
+          "name": "1. IMBC Manufacturers' Data",
+          "extent": "A1:AL983",
+          "headerRow": 1,
+          "rowsAfterHeaderWithAnyValue": 982,
+          "columns": 38,
+          "formulaCells": 983,
+          "errorCells": 0,
+          "sourceRows": 982,
+          "binDistinctTrimmedValues": 816,
+          "binRowsWithValue": 982,
+          "rowsBeyondRequiredColumns": 0,
+          "identifiers": {
+            "D: BIN": {
+              "text": 970,
+              "digitsOnlyText": 970,
+              "leadingZeroText": 323,
+              "number": 12
+            },
+            "M: TN VED": {
+              "blank": 707,
+              "text": 91,
+              "combinedOrNonDigitText": 89,
+              "number": 184,
+              "digitsOnlyText": 2
+            },
+            "N: KPVED": {
+              "text": 628,
+              "combinedOrNonDigitText": 628,
+              "blank": 350,
+              "number": 4
+            }
+          },
+          "sourceMarkers": {
+            "OUT OF": 10,
+            "N/A": 1
+          },
+          "executionScaleAG": {
+            "numberCells": 27,
+            "numericZero": 2,
+            "numericOne": 25,
+            "generalNumberFormat": 27
+          }
+        }
+      ],
+      "sourceMetadata": {
+        "commentsByColumn": {
+          "R": 1,
+          "S": 1,
+          "T": 1,
+          "U": 1,
+          "V": 1,
+          "W": 1,
+          "K": 75,
+          "AI": 7
+        },
+        "hyperlinksByColumn": {
+          "AI": 282,
+          "H": 15,
+          "K": 9,
+          "I": 1
+        },
+        "formulasByColumn": {
+          "A": 982,
+          "I": 1
+        }
+      }
+    },
+    {
+      "file": "LC LPS table for Platform.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "extent": "A1:S58",
+          "headerRow": 1,
+          "rowsAfterHeaderWithAnyValue": 57,
+          "columns": 19,
+          "formulaCells": 0,
+          "errorCells": 0,
+          "sourceRows": 57,
+          "distinctCompanyLabels": 57,
+          "historicalTypes": {
+            "LC": 41,
+            "LPS": 16
+          },
+          "statuses": {
+            "Localized": 14,
+            "In process": 21,
+            "Planning": 16,
+            "On hold": 6
+          },
+          "launchPrecision": {
+            "quarter": 39,
+            "year": 5,
+            "quarterRange": 1,
+            "TBD": 11,
+            "blank": 1
+          },
+          "businessDateS": {
+            "typedDates": 57,
+            "blank": 0,
+            "first": "2026-09-17T00:00:00",
+            "last": "2026-11-06T00:00:00"
+          },
+          "K: investment": {
+            "blank": 23,
+            "numbers": 34,
+            "decimalNumbers": 1,
+            "negative": 0
+          },
+          "L: new jobs": {
+            "blank": 38,
+            "numbers": 19,
+            "decimalNumbers": 0,
+            "negative": 0
+          },
+          "contactTokenCountsForReview": {
+            "4": {
+              "names": 5,
+              "roles": 5,
+              "emails": 4,
+              "phones": 5
+            },
+            "12": {
+              "names": 2,
+              "roles": 2,
+              "emails": 5,
+              "phones": 3
+            }
+          },
+          "contactTokenCountMethod": "O/P/Q use source semicolons, R uses source slashes; counts never establish associations",
+          "unresolvedLocationRows": 13
+        }
+      ]
+    },
+    {
+      "file": "demand_forecast_detailed_under_NDA.xlsx",
+      "sheets": [
+        {
+          "name": "consolidated",
+          "extent": "A1:J77175",
+          "headerRow": 1,
+          "rowsAfterHeaderWithAnyValue": 77171,
+          "columns": 10,
+          "formulaCells": 0,
+          "errorCells": 32,
+          "sourceRows": 77171,
+          "headerQuantity": "Total Estimated until 2031",
+          "declaredHorizonYear": 2031,
+          "identifiers": {
+            "A: id": {
+              "blank": 77171
+            },
+            "B: KPVED code": {
+              "blank": 77171
+            },
+            "C: KPVED name": {
+              "blank": 77171
+            },
+            "D: TN VED": {
+              "text": 77110,
+              "digitsOnlyText": 77110,
+              "blank": 61
+            }
+          },
+          "quantitiesJ": {
+            "blank": 8,
+            "negative": 321,
+            "zero": 0,
+            "numeric": 77163,
+            "nonNumericNonBlank": 0
+          },
+          "missingRequiredRows": {
+            "D: TN VED": 61,
+            "F: commodity": 0,
+            "G: subcommodity": 13,
+            "H: description": 1285,
+            "I: unit": 68,
+            "J: quantity": 8
+          },
+          "errorCellsByColumn": {
+            "D: TN VED": 0,
+            "F: commodity": 0,
+            "G: subcommodity": 0,
+            "H: description": 0,
+            "I: unit": 32,
+            "J: quantity": 0
+          },
+          "whollyEmptyExcelRows": [
+            77165,
+            77166,
+            77167
+          ],
+          "rowsNeedingRequiredValueOrNegativeQuantityReview": 1756,
+          "distinctHierarchyLabels": {
+            "F: commodity": 195,
+            "G: subcommodity": 16059,
+            "I: unit": 91
+          },
+          "excludedColumn": {
+            "column": "E",
+            "semantic": "FPAL Code",
+            "rowsWithValue": 77163,
+            "neverPersist": true
+          }
+        },
+        {
+          "name": "dict_commodity",
+          "extent": "A1:B77175",
+          "headerRow": 1,
+          "rowsAfterHeaderWithAnyValue": 77171,
+          "columns": 2,
+          "formulaCells": 0,
+          "errorCells": 0
+        }
+      ]
+    }
+  ]
+}

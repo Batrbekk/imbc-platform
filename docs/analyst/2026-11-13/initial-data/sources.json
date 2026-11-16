@@ -1,0 +1,631 @@
+{
+  "repository": "AZhunis/imbc-prototype",
+  "revision": "8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6",
+  "capturedOn": "2026-11-16",
+  "files": [
+    {
+      "path": "docs/initial-data/Commodity Groups A-E Demands_EN.pdf",
+      "sha": "fae02e545f909b98fe11f061181bd8fccb4300ba",
+      "size": 2192488,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/Commodity Groups A-E Demands_EN.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/Commodity Groups A-E Demands_KZ.pdf",
+      "sha": "070487c373e279ade50c52a9aaef58dffac3c4fd",
+      "size": 2249120,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/Commodity Groups A-E Demands_KZ.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/Commodity Groups A-E Demands_RU.pdf",
+      "sha": "54bd7feaa9882c824a488802bc8f45b8834df20a",
+      "size": 2232644,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/Commodity Groups A-E Demands_RU.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/Consolidated_Actualized_data(Random 100_rows).xlsx",
+      "sha": "f20404c9572899f7f4bc245de0e06ee20e1467a3",
+      "size": 28190,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/Consolidated_Actualized_data(Random 100_rows).xlsx",
+      "localFile": "Consolidated_Actualized_data(Random 100_rows).xlsx",
+      "sha256": "99d132a2f531aee7380497199a7a2717a1ef4c8f20eaa84a4a49ef14da018d16",
+      "snapshot": true
+    },
+    {
+      "path": "docs/initial-data/IMBC Platform_Phase1_Scope_of_Work.pdf",
+      "sha": "8a1a5b36f2da94cbc4b51af3c1a28c0ca933f1ce",
+      "size": 341362,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/IMBC Platform_Phase1_Scope_of_Work.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/IMBC_Manufacturers_Database.xlsx",
+      "sha": "8e436eab06aeb492ee2fc1b6f7d3f5ab70990cc3",
+      "size": 370648,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/IMBC_Manufacturers_Database.xlsx",
+      "localFile": "IMBC_Manufacturers_Database.xlsx",
+      "sha256": "3c2dc4be9efdd8da6b3b3bf693c04e5a9c1ba55d633abe6d8a9fab6397af5772",
+      "snapshot": true
+    },
+    {
+      "path": "docs/initial-data/LC LPS table for Platform.xlsx",
+      "sha": "e85b7c7972d5903d7dedbfc02416f733ea9a8a86",
+      "size": 21750,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/LC LPS table for Platform.xlsx",
+      "localFile": "LC LPS table for Platform.xlsx",
+      "sha256": "21c4eef8c7875d5e73988f0d5056b65f90e41b636ad64abf1efd8daa83a36d7b",
+      "snapshot": true
+    },
+    {
+      "path": "docs/initial-data/demand_forecast_detailed_under_NDA.xlsx",
+      "sha": "06a0e558255a850097938a2d189fa01ceeb8c794",
+      "size": 6656971,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/demand_forecast_detailed_under_NDA.xlsx",
+      "localFile": "demand_forecast_detailed_under_NDA.xlsx",
+      "sha256": "fd1993a8302d2c156faa386596ef04e4d2030c5dcbdf3430c766d2fd098c93fc",
+      "snapshot": true
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/01_valves_and_accessories_en.pdf",
+      "sha": "de75d2ae590f591031d7c8b1f85e868d3ad48aee",
+      "size": 707021,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/01_valves_and_accessories_en.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/01_valves_and_accessories_kk.pdf",
+      "sha": "d020362ba7f83ff30c0e6ae6087ee0312b25ddc5",
+      "size": 712666,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/01_valves_and_accessories_kk.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/01_valves_and_accessories_ru.pdf",
+      "sha": "727f4658eb322fcc3b9d7c2098c68554de35b5e5",
+      "size": 706890,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/01_valves_and_accessories_ru.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/02_electrical_equipment_and_materials_en.pdf",
+      "sha": "a404a862094fad12cc44b2090f4729dcf8786f5e",
+      "size": 634725,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/02_electrical_equipment_and_materials_en.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/02_electrical_equipment_and_materials_kk.pdf",
+      "sha": "706ef8e2ed0ca897f7819e7a3799ac0aed583bab",
+      "size": 621838,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/02_electrical_equipment_and_materials_kk.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/02_electrical_equipment_and_materials_ru.pdf",
+      "sha": "b0114929b2111283fe0c7ff718beb8c9fd50a962",
+      "size": 617803,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/02_electrical_equipment_and_materials_ru.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/03_instrumentation_en.pdf",
+      "sha": "49ae6b742fd37fb3b223416b274b32406d31f194",
+      "size": 403747,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/03_instrumentation_en.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/03_instrumentation_kk.pdf",
+      "sha": "a6c89046d724446a45c8c66bf23f2a21317c88f5",
+      "size": 418390,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/03_instrumentation_kk.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/03_instrumentation_ru.pdf",
+      "sha": "38d93e2dcba45fd3754db5634aabd7d26c164524",
+      "size": 415524,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/03_instrumentation_ru.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/04_pipe_products_and_accessories_en.pdf",
+      "sha": "947fe2eeb7bd620d4efd6429c597ad4b14e33306",
+      "size": 940605,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/04_pipe_products_and_accessories_en.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/04_pipe_products_and_accessories_kk.pdf",
+      "sha": "c908964da97b42e0d86bc1dcb24e9cf422c17133",
+      "size": 944633,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/04_pipe_products_and_accessories_kk.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/04_pipe_products_and_accessories_ru.pdf",
+      "sha": "69d633e6a45af4a3c5e52b922c08f3305501ca9c",
+      "size": 963244,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/04_pipe_products_and_accessories_ru.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/05_pumps_and_parts_accessories_en.pdf",
+      "sha": "31bd89960b5605150e4e5c4efbd8f15c824c8ddb",
+      "size": 335957,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/05_pumps_and_parts_accessories_en.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/05_pumps_and_parts_accessories_kk.pdf",
+      "sha": "c11d30f56b6caab1a3d40d6166efcfdf4fbab4a6",
+      "size": 350711,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/05_pumps_and_parts_accessories_kk.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/05_pumps_and_parts_accessories_ru.pdf",
+      "sha": "ac0ba7404957c1b722e9e71abeb06821c6d069d7",
+      "size": 348154,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/05_pumps_and_parts_accessories_ru.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/06_hvac_equipment_en.pdf",
+      "sha": "1c27a0daa7dc2bc624985c9301b2ac8c062c0cd5",
+      "size": 365531,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/06_hvac_equipment_en.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/06_hvac_equipment_kk.pdf",
+      "sha": "5ccb0cbd897c9124a86e5b13b4af3fab512a10a2",
+      "size": 380511,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/06_hvac_equipment_kk.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/06_hvac_equipment_ru.pdf",
+      "sha": "44f667abf649e8feaddd71e9e2fdc8c1295bd026",
+      "size": 377629,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/06_hvac_equipment_ru.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/07_process_filters_en.pdf",
+      "sha": "cd852474fe9cd223bbcb4ec20888aa0c3d082ef1",
+      "size": 375840,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/07_process_filters_en.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/07_process_filters_kk.pdf",
+      "sha": "72ccfdef7dd332c6ef5e6241371fc5ab4ab4df7a",
+      "size": 390022,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/07_process_filters_kk.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/07_process_filters_ru.pdf",
+      "sha": "b4e7092b563df1e6a4f05697019a039b2bf66e89",
+      "size": 387526,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/07_process_filters_ru.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/09_chemicals_oils_paints_en.pdf",
+      "sha": "43a526576e16b4696d3e95b659ebdc69d9a91609",
+      "size": 300938,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/09_chemicals_oils_paints_en.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/09_chemicals_oils_paints_kk.pdf",
+      "sha": "773dd4890c493caca6c90d3cb9639c0716d279c4",
+      "size": 330390,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/09_chemicals_oils_paints_kk.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/09_chemicals_oils_paints_ru.pdf",
+      "sha": "eb821716f7ea0d9e91d22c65f267f3b36a80584b",
+      "size": 326890,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/09_chemicals_oils_paints_ru.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/10_safety_equipment_fire_fighting_equipment_en.pdf",
+      "sha": "38f515b522996f887fbdefe71353441f09d9f1c3",
+      "size": 384352,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/10_safety_equipment_fire_fighting_equipment_en.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/10_safety_equipment_fire_fighting_equipment_kk.pdf",
+      "sha": "2ee0f7a3e46701a621ff1b365bf6a2ae058c1b70",
+      "size": 370077,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/10_safety_equipment_fire_fighting_equipment_kk.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/10_safety_equipment_fire_fighting_equipment_ru.pdf",
+      "sha": "1defea83f68204e50052386e2e05721d1e14fe1e",
+      "size": 367321,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/10_safety_equipment_fire_fighting_equipment_ru.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/11_material_handling_equipment_en.pdf",
+      "sha": "916775d90d40cf965f545fc45dc9c19ecec94c4d",
+      "size": 241259,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/11_material_handling_equipment_en.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/11_material_handling_equipment_kk.pdf",
+      "sha": "4b97a2b12df7d5d3444de39e4d980f552df1eb39",
+      "size": 253561,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/11_material_handling_equipment_kk.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/11_material_handling_equipment_ru.pdf",
+      "sha": "5dda818451e39e1b5602bf2d0555ba79c1cad6c4",
+      "size": 251270,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/11_material_handling_equipment_ru.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/12_insulation_materials_en.pdf",
+      "sha": "36f062e8e41e4ea00c1c3b67922d1bd9384e8c45",
+      "size": 296844,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/12_insulation_materials_en.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/12_insulation_materials_kk.pdf",
+      "sha": "34716b08d7d358b0140bbded4457b5ff96b47d71",
+      "size": 279350,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/12_insulation_materials_kk.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/12_insulation_materials_ru.pdf",
+      "sha": "2ad9c531f7f1db3a9f884f2b770a137357006f0f",
+      "size": 278244,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/12_insulation_materials_ru.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/13_compressors_en.pdf",
+      "sha": "06ce8cb7ade1588ad7e4f49ed2ca604636a612c1",
+      "size": 390212,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/13_compressors_en.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/13_compressors_kk.pdf",
+      "sha": "3d812353613d341a36311be74bf722051f8d52b2",
+      "size": 376720,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/13_compressors_kk.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/13_compressors_ru.pdf",
+      "sha": "65af165402634e3bea85d9b28efccfe521fa6dcf",
+      "size": 373831,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/13_compressors_ru.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/14_drives_en.pdf",
+      "sha": "5ea29b831fb335dab2607f7d6f0d1644caef8316",
+      "size": 315375,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/14_drives_en.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/14_drives_kk.pdf",
+      "sha": "1de9784ee9df222037df432851d019c1d1050e68",
+      "size": 300386,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/14_drives_kk.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/14_drives_ru.pdf",
+      "sha": "94faabf6df9846d73636d2f34c6aa8d6af1ede4b",
+      "size": 297857,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/14_drives_ru.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/15_workshop_equipment_and_hand_tools_en.pdf",
+      "sha": "f6496b5c4179285de707268b3d6e4e518b4e344c",
+      "size": 241952,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/15_workshop_equipment_and_hand_tools_en.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/15_workshop_equipment_and_hand_tools_kk.pdf",
+      "sha": "bc29fa804307bda9841c1e058ebf288ced2c14f2",
+      "size": 254134,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/15_workshop_equipment_and_hand_tools_kk.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/15_workshop_equipment_and_hand_tools_ru.pdf",
+      "sha": "a967613c879c677ddffc177732d7db2b849af018",
+      "size": 251618,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/15_workshop_equipment_and_hand_tools_ru.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/16_steel_and_metal_materials_en.pdf",
+      "sha": "73838e2d45c166e431636830e72be37ea72dae69",
+      "size": 460111,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/16_steel_and_metal_materials_en.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/16_steel_and_metal_materials_kk.pdf",
+      "sha": "9c3da7305e5681685ff9854e22372b9daa7de4fe",
+      "size": 472962,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/16_steel_and_metal_materials_kk.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/kpo/16_steel_and_metal_materials_ru.pdf",
+      "sha": "b574ca481c8bd10d97d0fbd813b7937a01a32c7f",
+      "size": 471514,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/kpo/16_steel_and_metal_materials_ru.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/a_electrical_equipment_and_materials.pdf",
+      "sha": "fbec61832b7f370b647f58aae6b2fca1564c2460",
+      "size": 935520,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/a_electrical_equipment_and_materials.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/a_instrumentation.pdf",
+      "sha": "cd19f639c1fc7c3f0777c072332105dfd5f11fe7",
+      "size": 476348,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/a_instrumentation.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/a_pipeline_valves.pdf",
+      "sha": "11ef03cb16a20c3d988e84ad27a229ca30105297",
+      "size": 436778,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/a_pipeline_valves.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/b_hvac.pdf",
+      "sha": "0d06c466432d7c4652c8a387667ae0da45e3a74a",
+      "size": 380244,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/b_hvac.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/b_pipes.pdf",
+      "sha": "92bc3b3befd0b9485dc46bb1b3910ba69693dc71",
+      "size": 372672,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/b_pipes.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/b_piping_components.pdf",
+      "sha": "751dd62c6e80adb118ba775b3be6324b86fef8cf",
+      "size": 440008,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/b_piping_components.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/b_process_filters.pdf",
+      "sha": "17d5c1a0ed7d4643582153cf95fb0aedb430382d",
+      "size": 445920,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/b_process_filters.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/b_pumps_and_seals.pdf",
+      "sha": "5577cfb02d290094da078976f842d55f8492649f",
+      "size": 329779,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/b_pumps_and_seals.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/c_body_protection.pdf",
+      "sha": "1fc141b9738bf465244e3b905c972dc0108f76f4",
+      "size": 624628,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/c_body_protection.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/c_chemicals_oils_dyes.pdf",
+      "sha": "476945455aa021b5ba0d491ef4d009a6f283ac0d",
+      "size": 1098528,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/c_chemicals_oils_dyes.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/c_eye_protection.pdf",
+      "sha": "d8f838c2d66c5e13401e21e4586b35f802619283",
+      "size": 368473,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/c_eye_protection.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/c_firefighting_equipment.pdf",
+      "sha": "c7f830f7508df845f4ace1c8ea2b81ef6dedb270",
+      "size": 323488,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/c_firefighting_equipment.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/c_gas_detection_equipment.pdf",
+      "sha": "df14f3da30396fd0916e50db750b84cd89fb9b6c",
+      "size": 363267,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/c_gas_detection_equipment.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/c_gloves.pdf",
+      "sha": "e386d91a32887d28bdd71ec61a340a4ccb2e43d5",
+      "size": 750290,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/c_gloves.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/c_head_protection.pdf",
+      "sha": "42b17b7bee3c497178bc7f1bd8d58f8bac2b6c35",
+      "size": 281106,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/c_head_protection.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/c_hearing_protection.pdf",
+      "sha": "b3a8278272bfed501e7055744018b35dbdf9a6ed",
+      "size": 301449,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/c_hearing_protection.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/c_heat_exchangers.pdf",
+      "sha": "4e26f7d916233ace7385f4795257f584c4947bea",
+      "size": 331756,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/c_heat_exchangers.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/c_insulation_and_refractory_materials.pdf",
+      "sha": "b2f794fb0ad694eac6cb1a45dbeac4b9b6213cf4",
+      "size": 333056,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/c_insulation_and_refractory_materials.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/c_protective_footwear.pdf",
+      "sha": "cf62f8101a662409df2728d18db7a3d22d430c5e",
+      "size": 282215,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/c_protective_footwear.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/c_respiratory_protection.pdf",
+      "sha": "01b8eeff8cf494ff0e2f7b3343d7dcf454acacce",
+      "size": 674625,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/c_respiratory_protection.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/c_safety_and_protective_equipment.pdf",
+      "sha": "968a6f3f23d878be2bd305f8c1eb205ac8eaf39a",
+      "size": 426808,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/c_safety_and_protective_equipment.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/c_work_at_height_equipment.pdf",
+      "sha": "428c900ebe1c5d301b76f3852ef23b539ae0cb7a",
+      "size": 264725,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/c_work_at_height_equipment.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/d_drives_and_components.pdf",
+      "sha": "e1b50caba3d1e11b10465d34c18f321bd760b169",
+      "size": 294506,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/d_drives_and_components.pdf",
+      "snapshot": false
+    },
+    {
+      "path": "docs/initial-data/goods_specification/tco/d_fasteners.pdf",
+      "sha": "be6037b7fca14bf0c4bc4b72046af7719e38269f",
+      "size": 283112,
+      "type": "blob",
+      "sourceUrl": "https://github.com/AZhunis/imbc-prototype/blob/8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6/docs/initial-data/goods_specification/tco/d_fasteners.pdf",
+      "snapshot": false
+    }
+  ]
+}

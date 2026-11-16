@@ -17,7 +17,7 @@
 
 Локальные checkpoints 3б: `b3b2222` backend, `8d48bbd` UI; 1962 теста, build/typecheck/lint/generate/requirements и Astra Approved. [Факты и незавершённая приёмка](../../handoff/2026-11-16-stage3b-continuation.md). На существующем Azure dev развёрнут отдельный свежий K3s-стенд из `8d48bbd`: девять Ready pods, миграции 0000–0019, private storage/SMTP и реальные health/network/ClamAV PONG проверки. [Проверка фактической поставки](../../deployment/verification-2026-11-16-stage3b-k3s.md). Старый публичный релиз `335ef02` сохранён; старый Git HEAD и synced marker имеют отдельные значения. 3в на сервер ещё не поставлен; browser/corpus/restore/R1/edge остаются отдельными шагами.
 
-Реализация 3в зафиксирована и отправлена в GitHub: `03c4722` backend/contracts и `0b3dbec` web. Итоговый набор — 1477 API + 396 web + 251 contracts + 24 checker = 2148/2148; build/typecheck/lint/generate/map прошли, GPT-6 Astra Approved. Два P2 по историческим названиям предметов и stale reload исправлены и повторно проверены. [Подробный срез и открытые runtime gates](../../handoff/2026-11-16-stage3c-continuation.md). Local browser и реальный same-VM restore выполняются; production goal остаётся активным. Canonical NDA evidence развивается отдельным следующим срезом, затем продолжаются источники и рабочие кабинеты.
+Реализация 3в зафиксирована и отправлена в GitHub: `03c4722` backend/contracts и `0b3dbec` web. Итоговый набор — 1477 API + 396 web + 251 contracts + 24 checker = 2148/2148; build/typecheck/lint/generate/map прошли, GPT-6 Astra Approved. Два P2 по историческим названиям предметов и stale reload исправлены и повторно проверены. [Подробный срез и открытые runtime gates](../../handoff/2026-11-16-stage3c-continuation.md). Local browser cycle завершён:93 API requests, desktop1280/mobile390, en/ru/kk, ноль HTTP/console errors; auth — fixture, реальные OIDC/files/storage ещё предстоят. Canonical NDA evidence0022:40 PG/HTTP +2 contracts, Astra Approved. [Release policy0023](2026-11-16-release-policy.md):83 PG/HTTP, единый dataset/SQL startup engine, Astra Approved. [Auth/source checkpoint](../../handoff/2026-11-16-stage3d-auth-sources.md): `c7e6dab`/`6dad01a`,2468 checks across isolated runners; NDA0022, policy0023 and MAN-02 Approved. Generic invitation compensation `c31796d` adds9 PG cases and separate Astra approval. Изолированный слой e-Ondiris:65 pure +17 PG, Astra Approved после исправлений legal-name ownership и registry/manual collision;0024 queue/COW integration и независимый LPS backend продолжаются, real daily transport не подтверждён. Same-VM restore catalog уточняется; production goal остаётся активным.
 
 ## 3б. Все секции и вложения
 
@@ -33,8 +33,8 @@
 - [x] Typed registry/общая полнота для пяти новых handlers; необходимые migrations только expand, frozen guards сохраняются.
 - [x] Общий attachment UI: pending/rejected/passed, причины, сохранённые/несохранённые ссылки, retry/re-upload, явная версия frozen download, безопасные ошибки размера/структуры/лимитов.
 - [x] Формы personnel/certificates/documents/products/production, существующие Base UI компоненты, partial save/409/dirty guard, en/ru/kk.
-- [ ] Поддержка notification recipient parts этапа 3: одна явно выбранная contact revision, без смешивания COW-истории; работоспособна для Draft/Returned/Verified по событию.
-- [ ] Интеграционная приёмка 100% шести обязательных секций, optional production, чужих файлов/профилей, file-only re-upload COW, retired dictionary values и shared certificate/site isolation; GPT-6 Astra review и браузер 1280/390.
+- [x] Поддержка notification recipient parts этапа 3: одна явно выбранная contact revision, без смешивания COW-истории; работоспособна для Draft/Returned/Verified по событию.
+- [x] Интеграционная приёмка 100% шести обязательных секций, optional production, чужих файлов/профилей, file-only re-upload COW, retired dictionary values и shared certificate/site isolation; GPT-6 Astra review и браузер 1280/390.
 - [ ] Настоящий свежий корпус Office/LibreOffice/Google Docs/PDF и ClamAV/storage до открытия upload на стенде.
 
 - [x] Durable append-only `profile_file_history`, exact versions, retained replaced files, transaction locks and batched captures; upload-state API and safe orphan cleanup after persisted tombstone/all-FK checks. Storage-key orphan sweep after failed cleanup without DB object remains Stage 10.
@@ -42,23 +42,23 @@
 
 ## 3в. Отправка, возврат, проверенные редакции
 
-- [ ] Новые/мигрированные review_assignment/review_decision: immutable subject links к новым section_revision/certificate/document/file_version; старые plural записи остаются до совместимого contract.
-- [ ] Статус certificate/document получается из состояния редакции, immutable decisions и даты; status updater не переписывает frozen content.
-- [ ] Resolver связанных секций: для текущей отправки её submitted revisions, затем соответствующие verified; operator читает verified, никогда latest working по одной identity.
+- [x] Новые/мигрированные review_assignment/review_decision: immutable subject links к новым section_revision/certificate/document/file_version; старые plural записи остаются до совместимого contract.
+- [x] Статус certificate/document получается из состояния редакции, immutable decisions и даты; status updater не переписывает frozen content.
+- [x] Resolver связанных секций: для текущей отправки её submitted revisions, затем соответствующие verified; operator читает verified, никогда latest working по одной identity.
 - [x] Submit: locked profile/sections, fresh completeness, accuracy confirmation, mandatory-type snapshot, все referenced PASSED versions capture, freeze/pointers/assignment received_at/audit и идемпотентное enqueue одной транзакцией.
 - [x] Frozen completeness использует snapshot отправки, а не текущий dictionary.mandatory. Каждый новый Send проверяет сегодняшнюю membership всех required types, включая frozen unchanged sections. Resubmit получает новые требования; COW не наследует старый submission snapshot.
 - [x] Unlock закрывает assignment и сохраняет получателя NOT-10 до закрытия; Draft или Verified working возвращается без утраты проверенных данных/решений.
-- [ ] Returned/resubmit/Verified changes: только Send создаёт pending pointers/queue; unchanged decisions сохраняются, received_at обновляется; старые verified values/files остаются оператору.
-- [ ] Test-only review command с `.local` actor, SEED_DEMO, audit и без HTTP endpoint; полнофункциональный SME UI — этап 5.
-- [ ] UI подтверждения/комментарии/пропуски/переходы статусов и сквозной цикл, включая конкурентную замену/scan/send.
+- [x] Returned/resubmit/Verified changes: только Send создаёт pending pointers/queue; unchanged decisions сохраняются, received_at обновляется; старые verified values/files остаются оператору.
+- [x] Test-only review command с `.local` actor, SEED_DEMO, audit и без HTTP endpoint; полнофункциональный SME UI — этап 5.
+- [x] UI подтверждения/комментарии/пропуски/переходы статусов и сквозной цикл, включая конкурентную замену/scan/send.
 - [ ] Contract старого скелета — отдельная поставка после retirement R1, backup/restore и проверки rollback boundary.
 
 ## Дополнительные обязательства канонической модели
 
 Повторный аудит полного GitHub Абая зафиксирован в [handoff](../../handoff/2026-11-16-abay-documentation-audit.md). Исходные файлы initial-data и дополнительных документов сохранены с hash/provenance.
 
-- [ ] Append-only `account_nda_acceptance` и composite link из `nda_acceptance`; исторические согласия не перезаписываются.
-- [ ] Release-seeded `policy_rule` по DBML; кодовая матрица и seed сохраняют один проверяемый источник правил.
+- [x] Expand0022: append-only `account_nda_acceptance` и composite link из `nda_acceptance`; исторические согласия не перезаписываются. Unresolved legacy bridge остаётся до R1 retirement/contract; NDA UI отдельно.
+- [x] Release-seeded `policy_rule` по DBML; кодовая матрица и seed сохраняют один проверяемый источник правил.
 - [ ] `dictionary_alias` для классификаций/источников, без выдуманных сопоставлений.
 
 ## 4а/4б. Источники и due diligence
