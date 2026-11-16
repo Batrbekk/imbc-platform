@@ -1252,6 +1252,64 @@ sudo docker compose -f compose.yaml -f compose.azure.yaml exec -T postgres psql 
 
 **Дальше.** R2 (этап 3а) выкатывается только после «Проверок после выката `0011`» и записи их результата; до этого на стенд не выкатывается ничего новее ветки R1 `feat/stage-3-r1-contract`.
 
+## Профиль производителя: часть 3а R2
+
+Состояние 16.11.2026: R2 реализован только локально в `feat/stage-3-profile`: код задач 5–11 — `d73d6ee`, предыдущий checkpoint 1–4 — `db9a5f8`. Этот раздел описывает будущий выкат и его критерии; R1/R2 на Azure в этом запуске не устанавливались. Текущий источник — [v1.4 draft for sign-off](../analyst/2026-11-13/specification-v1.4.md). [Handoff](../handoff/2026-11-16-codex-continuation.md) содержит факты и незавершённые проверки; старые отчёты выката не являются отчётом R2.
+
+### Состав и последовательность
+
+1. Отдельный **R1** — contract этапа 2 `0011`, порядок и rollback в предыдущем разделе. До R2 должны быть завершены проверки этого выката на стенде.
+2. **R2** — file safety/upload limits, `0012_file_rejection_reason`, `0013_profile_rename`, `0014_stage3_profile_model`, `0015_stage3_profile_data`, core/API и формы Main/Contacts. После применения всей схемы до 0015 в одноразовых проверках — 16 строк migration journal. Номер сам по себе не доказывает правильность базы: сверить имена/хеши миграций и текущую сборку.
+3. **Contract этапа 3** — отдельная поставка 3в после retirement R1. Только там можно удалить compatibility view/legacy skeleton и переходные profile/source/freshness колонки. Код старого worker и всех readers проверяется до удаления.
+
+R2 не открывает отправку профиля, пять остальных форм, SME workflow или LPS. Overview показывает семь секций: Main/Contacts доступны, Personnel/Products/Production/Certificates/Documents — «Скоро». Producer uploads в этих формах открываются частью 3б после файловой приёмки.
+
+### Что меняют 0013–0015
+
+- **0013:** `manufacturer_profiles` переименовывается в физическую `manufacturer_profile`; прежнее имя — простое автообновляемое `CREATE VIEW manufacturer_profiles AS SELECT * FROM manufacturer_profile`. Представление сохраняет прежние колонки, INSERT/ON CONFLICT/RETURNING/row lock/update пути R1; новые колонки 0014 не нужны прежнему коду. Внешние ключи сохраняют ссылки на ту же физическую таблицу, их имена и индексы приведены к новой схеме Drizzle.
+- **Enum rename:** прежний `profile_section` переименовывается в `legacy_profile_section` до создания новой таблицы `profile_section`, поскольку enum и row type таблицы делят namespace PostgreSQL. Значения существующих legacy columns остаются; новая таблица использует `section_kind`. Точный R1 SQL и прежний onboarding не используют явного `::profile_section` cast и проверены после переименования.
+- **0014:** 26 новых таблиц (55 → 81 в приложении), семь kinds, identity площадки/продукта/сертификата, composite tenant FK, dictionary FK и `revision_file_version`. Это профильный срез DBML, не реализация всех 101 логических таблиц. `completeness_percent` — numeric; прежний whole-percent `completeness_pct` сохранён для R1.
+- **0015:** backfill только пустых рабочих legacy containers; main → main_information с сохранением автора/времени, старые строки не удаляются. Новый профиль, в том числе созданный R1 через view, получает семь секций от AFTER INSERT trigger. Frozen content/ownership/pointers защищены триггерами и deferrable constraints; pointed revisions удерживаются FOR SHARE. Роль приложения не имеет TRUNCATE.
+- **Draft:** nullable editable fields допускают неполное сохранение; `saved_at`, `edit_version` и working pointer — технические метаданные. Источниковое название legal form хранится отдельно от nullable dictionary match; полный исходный OKED code/source_name не теряется. Reserved e_ondiris_record/certificate_expiry_schedule ссылки пока допускают только NULL и заменяются полноценными FK в соответствующих этапах.
+
+Если legacy contacts/shareholders/product_lines/equipment_items/equipment_product_links/certificates/documents содержат business rows, либо legacy section_revisions имеют непустой JSON, frozen state/submitted metadata/номер не 1, либо profile_sections имеют verified/pending/confirmed/completed metadata — миграция останавливает весь upgrade с требованием отдельного history-preserving converter. Не очищать данные, не обходить проверку и не добавлять CASCADE. Проверить также нестандартные зависимости и блокирующие транзакции по общему preflight. Миграции Drizzle применяются транзакцией; итоговый журнал проверяется отдельно от успешности последующей выдачи прав/seed.
+
+### Уже подтверждённая локальная совместимость
+
+Task 5: 89/89 SQL-тестов на PostgreSQL 18.6, включая точные прежние R1 ON CONFLICT DO NOTHING/DO UPDATE/RETURNING/locks, tenant/pointer/frozen/reparenting/race проверки. Копия локальной базы после 0012 была восстановлена в одноразовую 55433: 23 профиля → 161 новая секция, counts/hashes старых profile/section/revision/file/version/notification rows 23/88/88/5/5/21 сохранены. Живой локальный стенд не менялся.
+
+Исходный R1 `e22ce6b5b6d9aa67d8f5d1cf51aaa25769555304` собран оригинальным API Dockerfile и запущен на собственной одноразовой базе со схемой до 0015, текущими app-role grants и синтетическими `.local` сеансами. Прошли 17 HTTP-проверок и настоящий старый ManufacturerOnboardingService с конкурентными синтетическими password_set/sign_in: на каждый аккаунт один профиль, восемь legacy и семь новых секций, NDA acceptance и локальная попытка Adata. Внешних запросов/квоты/писем нет; контейнер/БД/роль удалены. Пароль/OIDC/provisioning, worker, реальные Adata/S3/ClamAV и инфраструктурная readiness этим probe не проверялись.
+
+### HTTP и файловая граница
+
+- `GET /api/v1/profiles/own/sections` и `GET/PUT /api/v1/profiles/own/sections/:kind` определяют профиль по организации сеанса. Main write — только `{website, companyPhone, contactEmail, sites}`; Contacts write — ordered contacts; envelope строго `{editVersion, data}`. BIN/login/legal/OKED/founders не принимаются в write.
+- Общий JSON parser ограничен **2 MiB = 2 × 1024 × 1024 bytes** (`PROFILE_JSON_MAX_BYTES`). Превышение — 413 `request_too_large` до обработчика, malformed JSON — 400 `validation`; тело запроса не возвращается. Это транспортный бюджет, бизнес-лимита 50 контактов нет. Большие вставки выполняются пакетами, чтобы валидный HTTP draft не упёрся в предел bind parameters PostgreSQL.
+- Email нормализуется trim/lowercase; телефон требует + или 00 и 7–15 цифр с международным кодом, допускает пробелы/скобки/точки/дефисы. Страна по национальному номеру не угадывается. Partial/null fields сохраняются; минимум три контакта и ровно один focal point — условия полноты.
+- Verified save не выставляет legacy has_pending_changes и не попадает в старый R1 queue SQL; overview hasPendingChanges выводится из actual pending_revision_id, working changes отдельно. Полные readonly значения доступны фокусу/клавиатуре через Textarea с переносом, Input — при редактировании.
+- Main читает уже сохранённый source snapshot без сетевого GET/PUT Adata и без producer confirmation. Время/недоступность источника показываются честно; первый save фиксирует источниковые сведения, frozen/COW legal snapshot не подменяется global latest. Полнота не зависит от наличия source legal. Дробная полнота хранится точно; отображение целым вниз. Main=100 и Contacts=100 при остальных нулевых обязательных секциях — 33%; Production в среднем не участвует.
+- Upload limits: default четыре на процесс и два на аккаунт (`UPLOAD_CONCURRENCY`, `UPLOAD_CONCURRENCY_PER_ACCOUNT`), до multipart чтения; 503 `upload_busy`/429 `upload_parallel_limit`, Retry-After 5. После полного body disconnect не освобождает Buffer permit до завершения/ошибки обработчика.
+- Любой PDF с /Encrypt, в том числе только permissions restrictions, и encrypted OOXML отклоняется до хранения. PDF filter остаётся ограниченным структурным фильтром; синтетические tests не заменяют настоящий Office/PDF corpus. Риски altChunk/нестандартных OLE/синхронного сложного разбора требуют отдельной приёмки, как зафиксировано в handoff.
+
+### Frozen файлы: подготовленная граница 3в
+
+Производителю доступен own preview latest своей организации; SME/директору нужен сохранённый owner правильного purpose. Frozen owner читает только `revision_file_version`, без timestamp или global-latest fallback. Pending/rejected версии не раскрывают содержание. Отсутствующий снимок закрывает чтение, даже если поздний scan новой версии стал PASSED.
+
+`captureRevisionFileVersions` — подготовленный внутренний контракт, **HTTP submit ещё нет**. В 3в caller должен проверить права/полноту/submission requirements, заблокировать profile/section, вызвать capture в той же транзакции и затем freeze редакцию со сменой pointers. Capture блокирует revision и отсортированные file_object, читает latest версии отдельным statement после ожидания locks и принимает только уже PASSED. Конкурентная замена либо попадает в capture до freeze, либо ждёт его commit; поздняя замена/scan не меняет frozen evidence. Frozen-section DTO выбирает конкретную captured version; общий own-file preview не заменяет этот DTO. Copy-on-write не наследует `submission_requirement` и send snapshot как условия следующей отправки.
+
+### До и после разрешённого выката R2
+
+До выката: сохранить проверенный backup приложения/БД, записать фактический R1 source/image и миграционный журнал, восстановить копию в отдельную базу и прогнать 0012–0015 с проверкой сохранения legacy counts/hashes. Пройти общий typecheck/test/build/lint, PostgreSQL suites, requirements и оба Compose config. Закончить итоговое Astra-ревью, браузер 1280/390 px/клавиатура/три языка и настоящий Office/LibreOffice/Google Docs/PDF corpus. На 16 ноября локальные проверки завершены: 1651/1651 тест (API1149 с PG18.6, web332, contracts146, script24), typecheck/build/lint/generate/requirements/Compose/diff прошли, итоговое ревью GPT-6 Astra Approved; браузер production Vite preview + actual API/PG с fixture auth на 1280/390 px/en/ru/kk пройден. Generate: 81 tables/no changes; Compose config проверены с .env.example и PUBLIC_HOST=imbc.local для Azure — только модель конфигурации. Полный corpus и Azure-приёмка не закрыты; актуальные факты — handoff.
+
+Выкат — из отдельно проверенного дерева стенда с сохранёнными прототипными файлами, по общему порядку этого runbook и по команде владельца. Использовать compose.yaml + compose.azure.yaml; .env/секреты/volumes сохраняются. `clamav` должен быть **пересоздан**, поскольку R2 меняет entrypoint и mounts: `infrastructure/clamav/imbc.ndb` копируется при старте в `/var/lib/clamav/imbc.ndb`. Обычный restart не подменяет смонтированный inode изменённого файла. После обновления clamd некоторое время недоступен; file-scan jobs повторяются.
+
+После выката записать фактический verification report: schema/journal/app-role grants и health; обычный документ — OK, безопасный ZIP64 probe — `IMBC.Unverifiable.Zip64LocalHeader-…UNOFFICIAL FOUND`, конфигурация AlertEncryptedDoc/AlertEncryptedArchive и наличие imbc.ndb; encrypted/attachment refusal и scan reason; реальный 20–25 MB upload через Caddy/ClamAV/storage; process/account limits и disconnect; новый producer получает семь секций; Main/Contacts partial save/reopen/409/Verified Edit, completeness 33%, остальные «Скоро» и отсутствие submit; tenant/role/file refusals. Реальные адресаты почты требуют отдельного поручения; приёмочные аккаунты `.local`.
+
+### Откат R2
+
+До contract3в схема сохраняет R1 table/view/enum/API совместимость, что подтверждено локальными SQL/runtime проверками в указанной границе. Откат кода на проверенный R1 не откатывает БД и не удаляет новые секции/аудит/данные; прежний UI не предоставляет функции R2. Сохранить current app-role grants и frozen guards. На стенде перед принятием отката отдельно проверить старый worker, пароль/OIDC, прототип и инфраструктуру — локальный API probe этого не доказывает.
+
+Не откатывать код дальше через `0011`: граница contract этапа 2 и восстановление backup описаны в разделе «Откат после 0011». Если новая база не совместима с нужным прежним кодом, либо после contract3в удалены view/legacy поля, нужен проверенный backup/restore в отдельную базу; не удалять рабочую базу и не переписывать migration journal. Восстановление исключает записи после backup и требует сверки Keycloak/pg-boss/почтовых событий по общему rollback порядку.
+
 ## Статус и логи на VM
 
 После подключения по SSH:
