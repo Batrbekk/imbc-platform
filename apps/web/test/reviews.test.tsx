@@ -107,8 +107,10 @@ describe("очередь проверки SME (REV-04)", () => {
     expect(pending.getByText(ru.reviews.pendingChanges)).toBeTruthy();
     expect(pending.getByText(ru.reviews.unassigned)).toBeTruthy();
 
-    // Строки без ссылок: открытие профиля — этап 5.
-    expect(within(screen.getByRole("table")).queryAllByRole("link")).toEqual([]);
+    // DD — отдельная Class C страница для SME; четыре бизнес-колонки очереди остаются.
+    expect(within(screen.getByRole("table")).getAllByRole("link", { name: ru.diligence.open }).map(link => link.getAttribute("href"))).toEqual(
+      QUEUE.items.map(item => `/imbc/profiles/${item.profileId}/due-diligence`),
+    );
     expect(screen.getByText("3 профиля")).toBeTruthy();
   });
 

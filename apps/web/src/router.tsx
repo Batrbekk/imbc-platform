@@ -59,6 +59,11 @@ export const routes: RouteObject[] = [
         ),
         children: [
           {
+            path: "imbc/profiles/:profileId/due-diligence",
+            handle: { title: "diligence.title" } satisfies AppRouteHandle,
+            lazy: lazyPage(() => import("@/routes/app/diligence"), (m) => m.DiligencePage),
+          },
+          {
             path: "lps",
             handle: { title: "lps.title" } satisfies AppRouteHandle,
             lazy: lazyPage(() => import("@/routes/app/lps"), (m) => m.LpsPage),

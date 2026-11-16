@@ -1,19 +1,21 @@
-import { QUEUE_STATUSES, type ReviewQueue } from "@imbc/contracts";
+import { can, QUEUE_STATUSES, type ReviewQueue } from "@imbc/contracts";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { cn } from "cn";
 import { parseAsStringLiteral, useQueryState } from "nuqs";
 import { useTranslations } from "use-intl";
+import { Link, useLocation } from "react-router";
 
 import { PageTitle } from "@/components/app/page-title";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
 import { Select, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useFormat } from "@/i18n/format";
 import { api } from "@/lib/api";
+import { useMe } from "@/lib/session";
 
 import { FilterSelectContent } from "./filter-select";
 
@@ -25,14 +27,17 @@ const ALL = "all";
 
 /**
  * Очередь проверки SME, только для чтения (REV-01, REV-04). Фильтр статуса — в адресе страницы;
- * неизвестное значение парсер отбрасывает, и в API оно не уходит. Строки без ссылок: открытие
- * профиля — этап 5.
+ * неизвестное значение парсер отбрасывает, и в API оно не уходит. Due diligence открывается
+ * отдельно только для ролей с доступом к записям IMBC.
  */
 export function ReviewsPage() {
   const t = useTranslations("reviews");
   const profile = useTranslations("profile");
   const common = useTranslations("common");
   const format = useFormat();
+  const diligence = useTranslations("diligence"), location = useLocation();
+  const role = useMe().data?.user.role;
+  const showDiligence = role !== undefined && ["expert", "director"].includes(role) && can(role, "imbc_records.read") !== null;
   // shallow: false — адрес видит и роутер (возврат после истёкшего сеанса сохранит фильтр), как в каталоге.
   const [status, setStatus] = useQueryState(
     "status",
@@ -116,6 +121,8 @@ export function ReviewsPage() {
                   <TableCell>
                     <div className="font-medium">{item.organizationName}</div>
                     <div className="font-mono text-xs text-muted-foreground">{item.bin}</div>
+                    {showDiligence && <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }), "mt-2")}
+                      to={`/imbc/profiles/${item.profileId}/due-diligence`} state={{ from: `/reviews${location.search}` }}>{diligence("open")}</Link>}
                   </TableCell>
                   <TableCell>
                     {/* Verified с ожидающими изменениями в очереди — как «ожидающие изменения» (REV-03). */}

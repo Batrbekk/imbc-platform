@@ -99,6 +99,8 @@ function CompanyView({ company }: { company: Company }) {
   const common = useTranslations("common");
   const format = useFormat();
   const role = useMe().data?.user.role;
+  const diligence = useTranslations("diligence");
+  const showDiligence = role !== undefined && ["expert", "director"].includes(role) && can(role, "imbc_records.read") !== null;
   const yesNo = (value: boolean) => (value ? common("yes") : common("no"));
   const orNone = (value: string | null) => value ?? t("notProvided");
   // Основной код ТН ВЭД — первым.
@@ -122,6 +124,8 @@ function CompanyView({ company }: { company: Company }) {
           {/* Показаны последние проверенные значения (OPR-11). */}
           {company.pendingChanges && <Badge variant="outline">{t("pending")}</Badge>}
         </div>
+        {showDiligence && <div><Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+          to={`/imbc/profiles/${company.profileId}/due-diligence`} state={{ from: `/companies/${company.profileId}` }}>{diligence("open")}</Link></div>}
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
