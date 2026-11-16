@@ -1,0 +1,60 @@
+{
+  "fixturePurpose": "Synthetic local-only fixture; no real manufacturer or upstream response",
+  "metadata": {
+    "bin": "000000000010",
+    "observedAt": "2026-11-14T10:30:00.000Z",
+    "provenance": "synthetic",
+    "coverage": "all_observed_bin_rows"
+  },
+  "rows": [
+    {
+      "registration_number": "000027",
+      "bin_iin": "000000000010",
+      "company_name": "Synthetic Local Factory",
+      "region_kato": "Synthetic place name",
+      "production_address": "  Synthetic local site 1  ",
+      "website": "https://factory.synthetic.local",
+      "phone": "+7 700 000 00 00",
+      "email": "contact@synthetic.local",
+      "product_name": "Синтетическая деталь",
+      "production_capacity": "1 200 tonnes / year (source unit)",
+      "tnved_code_10": "0101000000",
+      "kpved_code": "01.00.10",
+      "kpved_name": "Synthetic KP VED name",
+      "enstru_code": "010000.000.000001",
+      "enstru_name": "Synthetic ENSTRU name",
+      "dvc_percent": "30.5",
+      "registry_inclusion_date": "2026-11-12",
+      "is_active": true,
+      "oked_codes": "01.11.0",
+      "oked_names": "Older reference only; full OKED is Adata-owned",
+      "localization_level": "Excluded from current v1.4 model",
+      "product_code": "Excluded barcode",
+      "agsk3_code": "Excluded code",
+      "agsk3_name": "Excluded classification",
+      "comment": "Excluded upstream comment",
+      "data_source": "Excluded transport source",
+      "ntin": "Excluded NTIN"
+    },
+    {
+      "registration_number": "000028",
+      "bin_iin": "000000000010",
+      "company_name": "Synthetic Local Factory",
+      "region_kato": "Synthetic place name",
+      "production_address": "Synthetic local site 2",
+      "website": "",
+      "phone": null,
+      "email": null,
+      "product_name": "Synthetic second product",
+      "production_capacity": "80 pieces / month",
+      "tnved_code_10": "0101000000",
+      "kpved_code": null,
+      "kpved_name": null,
+      "enstru_code": null,
+      "enstru_name": null,
+      "dvc_percent": "0",
+      "registry_inclusion_date": "2026-11-13",
+      "is_active": false
+    }
+  ]
+}
