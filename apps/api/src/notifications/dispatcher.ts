@@ -23,16 +23,17 @@ export type NotificationRenderer = (
   rule: NotificationRuleCode,
   language: Locale,
   params: Record<string, string>,
-) => RenderedMail;
+  job?: NotifyJob,
+) => RenderedMail | Promise<RenderedMail>;
 
 /**
  * Тексты из языковых файлов (`mail/messages`, LANG-02). Письма без текста ещё нет — постоянный отказ: тексты
  * NOT-04…NOT-17 приходят со своими этапами.
  */
-export const defaultNotificationRenderer: NotificationRenderer = (rule, language, params) => {
+export function defaultNotificationRenderer(rule: NotificationRuleCode, language: Locale, params: Record<string, string>): RenderedMail {
   if (!isMailTemplateCode(rule)) throw new PermanentNotificationError(`notification ${rule}: нет текста письма`);
   return renderNotification(rule, language, params);
-};
+}
 
 export interface DispatchResult {
   sent: number;
@@ -187,7 +188,7 @@ export class NotificationDispatcher {
         DEFAULT_LOCALE;
       let mail: RenderedMail;
       try {
-        mail = this.render(job.rule, language, job.params);
+        mail = await this.render(job.rule, language, job.params, job);
       } catch (error) {
         // Текст не собрался: повтор не поможет, если отказ постоянный (нет шаблона или подстановки).
         if (error instanceof PermanentNotificationError) rejected = error;

@@ -1,0 +1,67 @@
+# Stage 5: SME review workflow and administrative assignment
+
+Status: implementation in progress; not an acceptance claim. Canonical requirements: v1.4 REV-01–09, MAN-43–46, NOT-05/27/28/29, GEN-08–11 and AUD-01. Source revision: `AZhunis/imbc-prototype@8c0f2a6065d409bbc73f9f2fdd7f86214bdb50e6`. The complete production program, site-survey/engagement workflows, migration acceptance and real runtime acceptance remain separate unfinished work.
+
+## Existing foundation
+
+Migration 0020 supplies singular `review_assignment`, its immutable seven-section map and append-only exact-subject decisions. The profile submission/unlock services already freeze revisions, capture exact file versions, retain unchanged decisions and choose the immediately previous assignee. `ProfileReviewService` already validates the complete frozen graph, writes decisions and publishes a safe seven-verified-revision projection. This stage exposes that state machine through production routes, without a second business model or manufacturer editing by an SME.
+
+The former `/reviews/queue` exposed only legacy queue fields, including registration date. It had no actionable assignment ID, received-date filter or administrative projection. Canonical profiles submitted before a valid singular assignment exists remain visible as unresolved metadata; no submission date, seven-section map or expert is fabricated. Their actions fail explicitly until migration/reconciliation supplies a real assignment. A legacy unknown BIN stays NULL in the new operational DTO; the old R1 read-client subset remains explicitly separate.
+
+## Routes and rights
+
+| Route                                               | Action           | Behaviour                                                                                                                        |
+| --------------------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /v1/reviews/queue`                             | `review.take`    | SME queue, active first submissions and sent verified changes; name/status/assignee/received-date filters and bounded pagination |
+| `GET /v1/reviews/assignment-queue`                  | `review.assign`  | Administrator-only metadata projection: manufacturer name, status and assigned SME, plus technical identifiers/unresolved marker |
+| `GET /v1/reviews/assignment-queue/:id`              | `review.assign`  | Fresh exact metadata for explicit reload after an assignment conflict; no dependency on the current filter/page                  |
+| `GET /v1/reviews/experts`                           | `review.assign`  | Active IMBC expert identifiers and display labels for assignment                                                                 |
+| `GET /v1/reviews/queue/experts`                     | `review.take`    | SME filter labels: active experts and exact current queue assignees, including retained inactive assignees                       |
+| `POST /v1/reviews/assignments/:id/take`             | `review.take`    | Assign unassigned work to the actual SME; does not open it or send an email                                                      |
+| `POST /v1/reviews/assignments/:id/assign`           | `review.assign`  | Assign/reassign an active assignment to a persisted active IMBC expert; expected old expert prevents stale overwrites            |
+| `GET /v1/reviews/assignments/:id`                   | `profile.read`   | Assigned SME reads metadata/decisions from that exact immutable submission map                                                   |
+| `POST /v1/reviews/assignments/:id/open`             | `profile.read`   | Assigned SME opens it; initial/resubmitted profile becomes Under review, sent verified changes stay Verified; no email           |
+| `GET /v1/reviews/assignments/:id/sections/:kind`    | `profile.read`   | Exact mapped revision rendered with the existing typed handler; no working-copy lookup or source refresh                         |
+| `POST /v1/reviews/assignments/:id/section-decision` | `profile.verify` | One transaction saves all applicable item decisions and the section decision, using one section comment                          |
+| `POST /v1/reviews/assignments/:id/submit-result`    | `profile.verify` | Existing safe publication/return/NOT-05 state machine                                                                            |
+
+Every entry point checks persisted actor state, role, IMBC organisation and the precise policy action inside the same PostgreSQL transaction. `review.verify` is not a policy action; the canonical action is `profile.verify`. Trusted core options are selected by the server, never accepted in request bodies. Administrator endpoints do not return BIN, contacts, dates received, section contents, files, DD or source data.
+
+## Implementation order and ownership
+
+1. Introduce typed operational queue, administrative metadata, workbench and atomic section-decision contracts in `packages/contracts/src/review.ts`; preserve the old queue DTO as an explicit read-client compatibility subset during this release.
+2. Replace the queue query with one canonical query over `manufacturer_profile`, actual active `review_assignment` and authoritative sent-section pointers. Registration date stays a separate legacy field. Missing receipt date stays NULL and sorts last. Filter days use Asia/Almaty.
+3. Add assignment services with actor/target-account locks before profile/assignment locks. Taking and administrative assignment change only assignment metadata and the assignee mirror. Actual received time and immutable seven-section map remain unchanged. Audit stores complete assignment and permitted profile-metadata before/after values.
+4. Reuse the existing core lock/graph validation for reads/open. Existing typed section handlers read a server-selected frozen revision and never execute initial-source materialisation or save. Contacts add selected role metadata scoped only to role IDs actually referenced by that revision, including retired references. Site/product/certificate labels are mapped from the same exact seven-section graph, without current working-copy or active-only dictionary fallbacks.
+   The initial workbench metadata may be read before opening. Section content, decisions and submit result require explicit Open/Under review; pending changes keep their Verified state. A GET does not silently take work or alter the profile.
+5. Refactor the single-subject core decision into a shared in-transaction operation; atomic section decision validates exact subjects, duplicates, completeness and a section-decision concurrency token before appending any new decision. The client supplies one section comment; rejected item comments are derived server-side from it, satisfying the existing DBML constraint without per-field or per-item comment inputs.
+6. Integrate new controllers/services with AppModule through the coordinator. Migration0028 adds private immutable Unlock-retention provenance and source-bound decision helpers; AppModule/schema/journal and worker/templates belong to the coordinator. Public requests cannot select retention provenance.
+7. Actual PostgreSQL/HTTP permission, rollback/concurrency and complete lifecycle tests, types/build and independent GPT-6 Astra review. Frontend work follows the frozen API contract; real OIDC/browser/storage/notification delivery remains a separate runtime gate.
+
+## Required acceptance evidence
+
+- Six-role HTTP allow/deny and persisted stale-role/state/policy checks; administrator projections remain Class E metadata only, including unresolved legacy rows.
+- Submitted, Under review and truly sent Verified changes enter the queue; Draft, Returned, unsent changes and unlocked assignments leave. Date received is actual `received_at`, never `registered_at`. Filters/count/pagination use the same predicate.
+- Two SMEs taking one row yield one assignee; admin reassignment serialises with review actions and revokes the former SME. Repeated take/assign keeps received time and decisions. No assignment/open email job is created.
+- Reads use all seven exact mapped revisions and captured numeric file versions; foreign profile/section/document/certificate/file subjects and ISO-absence item decisions are refused.
+- One section comment accompanies an atomic complete item/section decision. Duplicate or omitted applicable document/certificate decisions, a stale section decision, invalid subject, scan failure or audit failure rolls back every append and leaves manufacturer content unchanged.
+- Initial return/resubmit preserves unchanged decisions and the previous SME. Verified pending changes publish accepted complete subsets and retain old verified/operator-visible values for rejected changes. Submit result produces one NOT-05 with correct initial versus pending-change wording and retained recipients.
+- Legacy unresolved rows are preserved and explicitly non-actionable; full legacy graph reconciliation and source-data import acceptance are not claimed by this stage.
+
+## Implemented boundary and remaining acceptance
+
+The coordinator released the DD0027/core boundary after `f1d309e` and `e1c564b`. All owned drafts were promoted to actual source files and removed. AppModule registration belongs to the coordinator. Stage5 migration0028 extends only Unlock retention and preserves the reviewed DD publication hook and existing0020/0027 migrations.
+
+`review_assignment.expert_id` remains the authorization and assignment CAS source of truth. A stale `manufacturer_profile.assigned_expert_id` mirror gives no review access. Repeating Take as the canonical SME, or Assign to that same SME with the canonical `expectedExpertId`, repairs only the mirror and records its before/after metadata. Assignment receipt/time/map and previous decisions remain unchanged. A request using the stale mirror as `expectedExpertId` returns `409 assignment_changed`; no new automatic legacy reconciliation is claimed.
+
+Local verification covers real restricted PostgreSQL roles, all six persisted role/organisation types at HTTP, all seven frozen handlers, exact captured version numbers, retired selected contact-role labels, atomic section/item comments, decision CAS, database audit failure and failed scan rollback, SME/admin races, previous-SME resubmission and Verified pending changes. The actual complete AppModule provider graph is constructed without replacing review services; external lifecycle/network boot is deliberately outside that DI proof and remains a runtime acceptance gate. See the Stage5 backend handoff for exact test results and manifest. Independent Astra review and the coordinator's final checkpoint are still required.
+
+## Mandatory review corrections
+
+Astra independently found that the original default worker renderer supported NOT02/03 only; NOT05 enqueue/recipient tests used an injected renderer and did not prove actual delivery. Stage5 owns this gap. The result job now contains only schema and seven final section-decision UUIDs. A database renderer loads exact comments/outcomes from append-only decisions pinned by the unique closure audit and immutable assignment map; old empty-param jobs use that same closure, with no current/latest fallback. Root owns worker/default-renderer/localized templates and actual local SMTP delivery tests.
+
+MAN43/NOT29 preserves every existing decision on untouched sections after a manufacturer Unlock, including rejected and partial item decisions. MAN44 narrows the Returned correction path to keeping verified sections. Migration0028 now records the immediately previous closed Unlock assignment privately. Untouched frozen revisions retain their section/document/certificate/captured-file decisions, including partial item-only histories. A missing section decision or incomplete/incoherent required items keeps reviewRequired=true; a retained section decision may therefore coexist with reviewRequired=true. New working edits or a changed requirement baseline invalidate retention only for the edited/replaced revision. The Returned path still retains only fully verified unchanged sections. Source decisions are resolved through immutable scoped maps, with the source assignment’s final own decision taking precedence over an inherited baseline; historical mail validation does not inspect current candidates, scan state or purge requests. Current file access and new Send retain their safety checks. No old0020/0027 migration or projection guard is relaxed.
+
+The section outcome, comment and decision UUID remain visible for a partial source; the atomic batch uses that UUID for concurrency and appends a final own decision on completion. A complete kept Rejected section needs no repeated click. The workbench allows Submit only when all required outcomes exist and accepted sections have verified mandatory items without rejected captured files. Result-mail relevance and quarterly anchor changes compare candidate revisions with the exact closure verifiedBefore map, rather than treating reviewRequired as a change flag.
+
+Final bounded backend local gate: Node26, fresh PostgreSQL55432 through0028, eight related suites151/151 passed (35 workbench/lifecycle cases included); contracts376/376 and API types passed. Full current API, independent Astra/PostgreSQL/local SMTP and runtime deployment acceptance remain coordinator gates before checkpoint.

@@ -131,9 +131,14 @@ export const reviewAssignmentSection = pgTable(
     organizationId: uuid('organization_id').notNull(),
     reviewRequired: boolean('review_required').notNull(),
     retainedDecisionId: uuid('retained_decision_id'),
+    /** MAN-43/NOT-29: exact immediately previous unlock map, separate from the decision's original authoring assignment. */
+    retainedFromAssignmentId: uuid('retained_from_assignment_id'),
   },
   (t) => [
     primaryKey({ columns: [t.reviewAssignmentId, t.profileSectionId] }),
+    foreignKey({ name: 'review_assignment_section_retained_from_fk',
+      columns: [t.retainedFromAssignmentId, t.profileId, t.organizationId],
+      foreignColumns: [reviewAssignment.id, reviewAssignment.profileId, reviewAssignment.organizationId] }),
     uniqueIndex('review_assignment_section_context_uq').on(
       t.reviewAssignmentId,
       t.profileSectionId,
@@ -160,7 +165,8 @@ export const reviewAssignmentSection = pgTable(
       columns: [t.retainedDecisionId, t.sectionRevisionId, t.organizationId],
       foreignColumns: retainedDecisionColumns(),
     }),
-    check('review_assignment_section_retained_ck', sql`${t.reviewRequired} = (${t.retainedDecisionId} is null)`),
+    check('review_assignment_section_retained_ck', sql`(${t.reviewRequired} = (${t.retainedDecisionId} is null))
+      or (${t.reviewRequired} and ${t.retainedFromAssignmentId} is not null and ${t.retainedDecisionId} is not null)`),
   ],
 );
 

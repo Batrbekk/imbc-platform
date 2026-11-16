@@ -47,13 +47,21 @@ describe('GET /api/v1/reviews/queue', () => {
     const res = await http.get(`${URL_PATH}?status=submitted,pending_changes`, 'expert');
     expect(res.status).toBe(200);
     expect(reviewQueueSchema.parse(await res.json())).toEqual(QUEUE);
-    expect(queue).toHaveBeenCalledExactlyOnceWith({ status: ['submitted', 'pending_changes'] });
+    expect(queue).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ role: 'expert' }),
+      { status: ['submitted', 'pending_changes'], offset: 0, limit: 25 },
+      '127.0.0.1',
+    );
   });
 
   it('без фильтра — вся очередь', async () => {
     const res = await http.get(URL_PATH, 'expert');
     expect(res.status).toBe(200);
-    expect(queue).toHaveBeenCalledExactlyOnceWith({ status: undefined });
+    expect(queue).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ role: 'expert' }),
+      { offset: 0, limit: 25 },
+      '127.0.0.1',
+    );
   });
 
   it.each(['director', 'administrator', 'operator', 'observer', 'manufacturer'] as const)(

@@ -14,6 +14,45 @@
         "The password was entered incorrectly several times, so sign-in is locked for {minutes} minutes.",
         "If this wasn't you, change your password: {link}"
       ]
+    },
+    "NOT-04": {
+      "subject": "A manufacturer profile is ready for review",
+      "lines": [
+        "The profile of {name} has been submitted for review.",
+        "Open the review queue: {link}"
+      ]
+    },
+    "NOT-05": {
+      "subject": "IMBC Platform profile review result",
+      "lines": [
+        "{result}",
+        "{details}",
+        "Open your profile: {link}"
+      ]
+    },
+    "NOT-10": {
+      "subject": "A manufacturer unlocked a profile under review",
+      "lines": [
+        "{name} unlocked the submitted profile to make changes. This review assignment has closed.",
+        "Open the review queue: {link}"
+      ]
+    }
+  },
+  "review": {
+    "verified": "Your profile has been verified.",
+    "returned": "Your profile was returned for correction.",
+    "changes": "The review of your submitted changes is complete. Your profile remains Verified.",
+    "accepted": "Accepted: {section}.",
+    "acceptedRetained": "Accepted: {section}. Previously verified values remain visible until related changes can be published.",
+    "rejected": "Rejected: {section}. Comment: {comment}",
+    "sections": {
+      "main_information": "Main information",
+      "contacts": "Contacts",
+      "personnel": "Personnel",
+      "products": "Products",
+      "production": "Production",
+      "certificates": "Certificates",
+      "documents": "Documents"
     }
   }
 }

@@ -761,7 +761,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
         quarterAnchorAt: `${p('year')}-${p('month')}-${p('day')}`,
       });
     });
-    it('keeps quarter anchor through Unlock and a retained-only result even when the old accepted change publishes now', async () => {
+    it('keeps the quarter anchor through Unlock and moves it when a retained changed candidate publishes', async () => {
       const g = await verifiedFixture();
       await db
         .update(s.manufacturerProfile)
@@ -777,7 +777,23 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       const repeat = await send(g);
       expect(repeat.sections.every((section) => !section.reviewRequired)).toBe(true);
       await review.submitResult(expert, repeat.assignmentId);
-      expect((await state(g)).profile.quarterAnchorAt).toBe('2025-02-01');
+      const expected = (
+        await pool.query(
+          "select to_char(closed_at at time zone 'Asia/Almaty','YYYY-MM-DD') as day from review_assignment where id=$1",
+          [repeat.assignmentId],
+        )
+      ).rows[0].day;
+      expect((await state(g)).profile.quarterAnchorAt).toBe(expected);
+      expect(
+        (
+          await pool.query("select diff from audit_entries where action='review.submit_result' and object_id=$1", [
+            repeat.assignmentId,
+          ])
+        ).rows[0].diff,
+      ).toMatchObject({
+        quarterAnchorBefore: '2025-02-01',
+        quarterAnchorAfter: expected,
+      });
     });
   },
 );

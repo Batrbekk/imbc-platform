@@ -46,6 +46,7 @@ import { ProfileSubmissionStateController } from './modules/profiles/profile-sub
 import { ProfileSubmissionStateService } from './modules/profiles/profile-submission-state.service.js';
 import { ProfileReviewDetailsController } from './modules/profiles/profile-review-details.controller.js';
 import { ProfileReviewDetailsService } from './modules/profiles/profile-review-details.service.js';
+import { ProfileReviewService } from './modules/profiles/profile-review.service.js';
 import { MainInformationHandler } from './modules/profiles/main-information.handler.js';
 import { ContactsHandler } from './modules/profiles/contacts.handler.js';
 import { PersonnelHandler } from './modules/profiles/personnel.handler.js';
@@ -69,6 +70,9 @@ import { CurrentNdaController } from './modules/registration/current-nda.control
 import { CurrentNdaService } from './modules/registration/current-nda.service.js';
 import { ReviewsController } from './modules/reviews/reviews.controller.js';
 import { ReviewsService } from './modules/reviews/reviews.service.js';
+import { ReviewActionsController, ReviewAssignmentMetadataController } from './modules/reviews/review-actions.controller.js';
+import { ReviewAssignmentService } from './modules/reviews/review-assignment.service.js';
+import { ReviewWorkbenchService } from './modules/reviews/review-workbench.service.js';
 
 @Module({
   imports: [
@@ -99,6 +103,8 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     ProfileReviewDetailsController,
     ProfileUploadController,
     ReviewsController,
+    ReviewActionsController,
+    ReviewAssignmentMetadataController,
     AccountsController,
     OrganizationsController,
     DictionariesController,
@@ -118,6 +124,7 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     ProfileUnlockService,
     ProfileSubmissionStateService,
     ProfileReviewDetailsService,
+    ProfileReviewService,
     ProfileUploadService,
     ProfileUploadGuard,
     DiligenceUploadGuard,
@@ -161,6 +168,8 @@ import { ReviewsService } from './modules/reviews/reviews.service.js';
     },
     CatalogService,
     ReviewsService,
+    ReviewAssignmentService,
+    ReviewWorkbenchService,
     AccountsService,
     OrganizationsService,
     InvitationsService,

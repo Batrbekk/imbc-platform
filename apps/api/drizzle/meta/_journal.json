@@ -197,6 +197,13 @@
       "when": 1794812581081,
       "tag": "0027_canonical_due_diligence",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1794821048533,
+      "tag": "0028_stage5_unlock_retention",
+      "breakpoints": true
     }
   ]
 }

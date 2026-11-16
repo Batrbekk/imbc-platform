@@ -50,14 +50,21 @@ async function expectWideList(user: ReturnType<typeof renderRoute>["user"], name
 }
 
 describe("выпадающие фильтры (OPR-02, REV-04)", () => {
-  it("очередь SME: список статусов не уже своих вариантов", async () => {
+  it("очередь SME: полный список статусов позволяет выбрать несколько значений", async () => {
     stubApi({
       "GET /api/auth/me": { body: me("expert") },
-      "GET /api/v1/reviews/queue": { body: { items: [], total: 0 } },
+      "GET /api/v1/reviews/queue": { body: { items: [], total: 0, offset: 0, limit: 25 } },
+      "GET /api/v1/reviews/queue/experts": { body: [] },
     });
     const { user } = renderRoute("/reviews", { locale: "en" });
-
-    await expectWideList(user, en.reviews.statusFilter);
+    await user.click(await screen.findByText(en.reviews.statusFilter, { selector: "summary" }));
+    expect(screen.getByRole("checkbox", { name: en.profile.statusValue.submitted })).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: en.profile.statusValue.under_review })).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: en.reviews.pendingChanges })).toBeTruthy();
+    await user.click(screen.getByRole("checkbox", { name: en.profile.statusValue.submitted }));
+    await user.click(screen.getByRole("checkbox", { name: en.reviews.pendingChanges }));
+    expect((screen.getByRole("checkbox", { name: en.profile.statusValue.submitted }) as HTMLInputElement).getAttribute("aria-checked")).toBe("true");
+    expect((screen.getByRole("checkbox", { name: en.reviews.pendingChanges }) as HTMLInputElement).getAttribute("aria-checked")).toBe("true");
   });
 
   it("каталог: три списка не уже своих вариантов", async () => {

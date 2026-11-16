@@ -460,9 +460,19 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       expect(legacyQueue.rows.map((row) => row.id)).not.toContain(profile.id);
       expect(await (await http.get(ROOT, 'manufacturer')).json()).toMatchObject({ hasPendingChanges: false });
       // MAN-45 / reply 29: saving a working copy is not sending it to SME.
-      const reviews = new ReviewsService(db);
-      expect((await reviews.queue({})).items.map((item) => item.profileId)).not.toContain(profile.id);
-      expect((await reviews.queue({ status: ['pending_changes'] })).total).toBe(0);
+      const reviewer = (await db.select().from(s.userAccounts).where(eq(s.userAccounts.id, ids.expert)))[0]!;
+      const expertActor = {
+        id: reviewer.id,
+        organizationId: reviewer.organizationId!,
+        organizationType: 'imbc' as const,
+        role: 'expert' as const,
+        email: reviewer.email,
+        fullName: reviewer.fullName,
+        locale: 'en' as const,
+      };
+      const reviews = new ReviewsService(pool, new AuditService(db));
+      expect((await reviews.queue(expertActor, {})).items.map((item) => item.profileId)).not.toContain(profile.id);
+      expect((await reviews.queue(expertActor, { status: ['pending_changes'] })).total).toBe(0);
       await db.transaction(async (tx) => {
         await tx
           .update(s.sectionRevision)
@@ -478,10 +488,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
           .set({ hasPendingChanges: false })
           .where(eq(s.manufacturerProfile.id, profile.id));
       });
-      const sent = await reviews.queue({ status: ['pending_changes'] });
+      const sent = await reviews.queue(expertActor, { status: ['pending_changes'] });
       expect(sent.total).toBe(1);
       expect(sent.items[0]).toMatchObject({ profileId: profile.id, status: 'verified', hasPendingChanges: true });
-      expect((await reviews.queue({})).items.map((item) => item.profileId)).toContain(profile.id);
+      expect((await reviews.queue(expertActor, {})).items.map((item) => item.profileId)).toContain(profile.id);
       expect(await (await http.get(ROOT, 'manufacturer')).json()).toMatchObject({ hasPendingChanges: true });
     });
 

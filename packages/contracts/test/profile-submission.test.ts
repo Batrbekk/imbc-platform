@@ -28,6 +28,7 @@ describe('MAN-42–45 exact Send and Unlock contracts', () => {
     'completenessPct',
     'assignmentOrder',
     'reusedFromAssignmentId',
+    'retainedFromAssignmentId',
   ])('rejects forged %s', (key) => {
     expect(profileSubmitInputSchema.safeParse({ ...send(), [key]: id(90) }).success).toBe(false);
   });
@@ -75,7 +76,7 @@ describe('MAN-42–45 exact Send and Unlock contracts', () => {
         .success,
     ).toBe(false);
   });
-  it('requires exact retained acceptance and mode-compatible acknowledgement', () => {
+  it('permits a partial retained decision but requires a decision when review is complete', () => {
     const result = {
       profileId: id(99),
       profileStatus: 'verified',
@@ -95,6 +96,12 @@ describe('MAN-42–45 exact Send and Unlock contracts', () => {
       profileSubmitResultSchema.safeParse({
         ...result,
         sections: result.sections.map((item) => ({ ...item, reviewRequired: true })),
+      }).success,
+    ).toBe(true);
+    expect(
+      profileSubmitResultSchema.safeParse({
+        ...result,
+        sections: result.sections.map((item) => ({ ...item, retainedDecisionId: null })),
       }).success,
     ).toBe(false);
     expect(

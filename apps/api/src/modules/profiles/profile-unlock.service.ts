@@ -96,13 +96,27 @@ export class ProfileUnlockService {
           )
         )
           throw changed();
-        // Keep the submitted map after pending clears. Verified partial decisions remain exact historical hints;
-        // the shared effective-decision guard prevents an older acceptance surviving a later rejection.
+        // Keep every frozen subject after pending clears; the next Send can retain its complete or partial decisions.
+        // This cursor field is only an acceptance hint: a rejected outcome never enters acceptedDecisionId.
         for (const subject of map) {
           const { rows } = await tx.execute<{ accepted: string | null }>(sql`select case
           when profile_review_effective_section_acceptance(
             profile_review_effective_decision(${profile.id},${profile.organizationId},${subject.revisionId}),
             ${subject.revisionId},${profile.id},${profile.organizationId})
+          and not exists (
+            select d.id from document d where d.section_revision_id=${subject.revisionId} and d.organization_id=${profile.organizationId}
+              and not exists(select 1 from review_decision item where item.id=profile_review_effective_decision(
+                ${profile.id},${profile.organizationId},null,null,d.id,null) and item.outcome='verified')
+            union all
+            select c.id from certificate c where c.section_revision_id=${subject.revisionId} and c.organization_id=${profile.organizationId}
+              and not c.not_held and not exists(select 1 from review_decision item where item.id=profile_review_effective_decision(
+                ${profile.id},${profile.organizationId},null,c.id,null,null) and item.outcome='verified')
+            union all
+            select f.file_version_id from revision_file_version f
+              join review_decision item on item.id=profile_review_effective_decision(
+                ${profile.id},${profile.organizationId},null,null,null,f.file_version_id)
+              where f.section_revision_id=${subject.revisionId} and f.organization_id=${profile.organizationId} and item.outcome='rejected'
+          )
           then profile_review_effective_decision(${profile.id},${profile.organizationId},${subject.revisionId}) else null end as accepted`);
           await tx
             .insert(profileSectionCandidate)

@@ -51,7 +51,14 @@ import {
 } from './submission-requirements.js';
 
 const ROUTE = '/api/v1/profiles/own/submit';
-type Selected = { section: StoredSection; revision: StoredRevision; retainedDecisionId: string | null };
+type Selected = {
+  section: StoredSection;
+  revision: StoredRevision;
+  reviewRequired: boolean;
+  retainedDecisionId: string | null;
+  retainedFromAssignmentId: string | null;
+  acceptedDecisionId: string | null;
+};
 const operationConflict = () =>
   new ProblemException(409, 'operation_conflict', 'Эта операция уже использована для другой отправки.');
 const context = (profileId: string, organizationId: string, item: Selected): SectionContext => ({
@@ -136,7 +143,14 @@ export class ProfileSubmitService {
         const selected: Selected[] = sections.map((section) => {
           const revision = selectedRevision(section, revisions);
           if (!revision) throw new ProblemException(409, 'section_unavailable', 'Раздел этой отправки недоступен.');
-          return { section, revision, retainedDecisionId: null };
+          return {
+            section,
+            revision,
+            reviewRequired: true,
+            retainedDecisionId: null,
+            retainedFromAssignmentId: null,
+            acceptedDecisionId: null,
+          };
         });
         if (selected.length !== SECTION_KINDS.length)
           throw new ProblemException(409, 'section_unavailable', 'Не все разделы этой отправки доступны.');
@@ -181,14 +195,44 @@ export class ProfileSubmitService {
               requirements[requirementKind],
             ));
           if (baselineChanged) changedRequirementKinds.push(requirementKind!);
-          if (item.revision.state !== 'working' && !baselineChanged)
-            item.retainedDecisionId = await this.retainedDecision(
-              tx,
-              profile.id,
-              profile.organizationId,
-              item.revision.id,
-            );
-          if (item.revision.state !== 'working' && item.retainedDecisionId === null) {
+          if (item.revision.state !== 'working' && !baselineChanged) {
+            if (previous?.closeReason === 'manufacturer_unlock' && item.section.workingRevisionId === null) {
+              const retained = (
+                await tx.execute<{ decisionId: string | null; reviewRequired: boolean; outcome: string | null }>(sql`
+                select profile_review_unlock_retained_decision(${previous.id},${item.revision.id},${profile.id},${profile.organizationId}) as "decisionId",
+                  profile_review_unlock_needs_review(${previous.id},${item.revision.id},${profile.id},${profile.organizationId}) as "reviewRequired",
+                  d.outcome::text as outcome
+                from profile_section_candidate c left join review_decision d on d.id=profile_review_unlock_retained_decision(
+                  ${previous.id},${item.revision.id},${profile.id},${profile.organizationId})
+                where c.profile_section_id=${item.section.id} and c.organization_id=${profile.organizationId}
+                  and c.review_assignment_id=${previous.id} and c.section_revision_id=${item.revision.id}
+                  and profile_review_unlock_revision_retained(${previous.id},${item.revision.id},${profile.id},${profile.organizationId})`)
+              ).rows[0];
+              if (retained) {
+                item.retainedFromAssignmentId = previous.id;
+                item.retainedDecisionId = retained.decisionId;
+                item.reviewRequired = retained.reviewRequired;
+                item.acceptedDecisionId =
+                  retained.outcome === 'verified' && !retained.reviewRequired ? retained.decisionId : null;
+              }
+            }
+            if (item.retainedFromAssignmentId === null) {
+              item.retainedDecisionId = await this.retainedDecision(
+                tx,
+                profile.id,
+                profile.organizationId,
+                item.revision.id,
+              );
+              item.reviewRequired = item.retainedDecisionId === null;
+              item.acceptedDecisionId = item.retainedDecisionId;
+            }
+          }
+          // A partial Unlock source keeps its frozen subjects even without a section decision.
+          if (
+            item.revision.state !== 'working' &&
+            item.retainedDecisionId === null &&
+            item.retainedFromAssignmentId === null
+          ) {
             const source = item.revision;
             const number =
               Math.max(
@@ -362,10 +406,10 @@ export class ProfileSubmitService {
           (
             item,
           ) => sql`(${assignment.id},${profile.id},${item.section.id},${item.revision.id},${profile.organizationId},
-        ${item.retainedDecisionId === null},${item.retainedDecisionId})`,
+        ${item.reviewRequired},${item.retainedDecisionId},${item.retainedFromAssignmentId})`,
         );
         await tx.execute(sql`insert into review_assignment_section
-        (review_assignment_id,profile_id,profile_section_id,section_revision_id,organization_id,review_required,retained_decision_id)
+        (review_assignment_id,profile_id,profile_section_id,section_revision_id,organization_id,review_required,retained_decision_id,retained_from_assignment_id)
         values ${sql.join(values, sql`, `)}`);
         for (const item of selected)
           await tx
@@ -375,14 +419,14 @@ export class ProfileSubmitService {
               organizationId: profile.organizationId,
               reviewAssignmentId: assignment.id,
               sectionRevisionId: item.revision.id,
-              acceptedDecisionId: item.retainedDecisionId,
+              acceptedDecisionId: item.acceptedDecisionId,
             })
             .onConflictDoUpdate({
               target: profileSectionCandidate.profileSectionId,
               set: {
                 reviewAssignmentId: assignment.id,
                 sectionRevisionId: item.revision.id,
-                acceptedDecisionId: item.retainedDecisionId,
+                acceptedDecisionId: item.acceptedDecisionId,
               },
             });
         await tx
@@ -424,6 +468,8 @@ export class ProfileSubmitService {
                   kind: item.section.kind,
                   revisionId: item.revision.id,
                   retainedDecisionId: item.retainedDecisionId,
+                  retainedFromAssignmentId: item.retainedFromAssignmentId,
+                  reviewRequired: item.reviewRequired,
                 })),
               },
             },

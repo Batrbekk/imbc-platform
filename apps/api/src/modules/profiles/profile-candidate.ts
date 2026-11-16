@@ -59,6 +59,7 @@ export type ProfileSubmissionRevision = {
   revisionId: string;
   reviewRequired: boolean;
   retainedDecisionId: string | null;
+  retainedFromAssignmentId: string | null;
 };
 
 /** Exact immutable submission/history graph. Authorization supplies all three scoped identifiers. */
@@ -68,7 +69,8 @@ export async function profileSubmissionRevisions(
 ): Promise<ProfileSubmissionRevision[]> {
   const { rows } = await tx.execute<ProfileSubmissionRevision>(sql`
     select m.profile_section_id as "sectionId", s.kind, m.section_revision_id as "revisionId",
-      m.review_required as "reviewRequired", m.retained_decision_id as "retainedDecisionId"
+      m.review_required as "reviewRequired", m.retained_decision_id as "retainedDecisionId",
+      m.retained_from_assignment_id as "retainedFromAssignmentId"
     from review_assignment a join review_assignment_section m
       on m.review_assignment_id=a.id and m.profile_id=a.profile_id and m.organization_id=a.organization_id
     join profile_section s on s.id=m.profile_section_id and s.profile_id=m.profile_id and s.organization_id=m.organization_id

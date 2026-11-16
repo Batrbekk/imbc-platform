@@ -50,7 +50,8 @@ const submittedSectionSchema = z
     retainedDecisionId: uuid.nullable(),
   })
   .superRefine((section, context) => {
-    if (section.reviewRequired !== (section.retainedDecisionId === null))
+    // An incomplete unchanged Unlock source may keep a section decision while still needing item review.
+    if (!section.reviewRequired && section.retainedDecisionId === null)
       context.addIssue({ code: 'custom', path: ['retainedDecisionId'], message: 'invalid_retained_decision' });
   });
 

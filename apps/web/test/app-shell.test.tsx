@@ -87,7 +87,7 @@ const apiCalls = (api: ReturnType<typeof stubApi>) =>
 /** Запросы стартовой страницы роли: после перехода с закрытой страницы других запросов к /api/v1 нет. */
 const START_REQUESTS: Record<Me["user"]["role"], string[]> = {
   manufacturer: [OWN_PROFILE, OWN_SECTIONS, "/api/v1/profiles/own/submission"],
-  expert: ["/api/v1/reviews/queue"],
+  expert: ["/api/v1/reviews/queue?offset=0&limit=25", "/api/v1/reviews/queue/experts"],
   administrator: [ADMIN_ACCOUNTS],
   director: ["/api/v1/dashboard"],
   operator: ["/api/v1/dashboard"],
@@ -127,7 +127,8 @@ function stubWorkspace(user: Me) {
     "GET /api/v1/dashboard": { body: DASHBOARD },
     [`GET ${OWN_PROFILE}`]: { body: OWN_PROFILE_BODY },
     [`GET ${OWN_SECTIONS}`]: { body: overview({ profileId: OWN_PROFILE_BODY.profileId, profileStatus: "draft", completenessPct: 0 }) },
-    "GET /api/v1/reviews/queue": { body: { items: [], total: 0 } },
+    "GET /api/v1/reviews/queue": { body: { items: [], total: 0, offset: 0, limit: 25 } },
+    "GET /api/v1/reviews/queue/experts": { body: [] },
     [`GET ${ADMIN_ACCOUNTS}`]: { body: { organizations: [] } },
   });
 }
@@ -248,15 +249,15 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
 
     await screen.findByRole("heading", { level: 1, name: en.adminAccounts.title });
     const menu = () => screen.getAllByRole("link").filter((link) => link.dataset.sidebar === "menu-button");
-    expect(menu().map((link) => link.textContent)).toEqual([en.nav.adminAccounts, en.nav.references, en.nav.account]);
-    expect(menu().map((link) => link.getAttribute("href"))).toEqual(["/admin/accounts", "/references", "/account"]);
-    expect(menu().map((link) => link.hasAttribute("data-active"))).toEqual([true, false, false]);
+    expect(menu().map((link) => link.textContent)).toEqual([en.nav.adminAccounts, en.nav.reviewAssignments, en.nav.references, en.nav.account]);
+    expect(menu().map((link) => link.getAttribute("href"))).toEqual(["/admin/accounts", "/admin/reviews", "/references", "/account"]);
+    expect(menu().map((link) => link.hasAttribute("data-active"))).toEqual([true, false, false, false]);
 
     // «Мой аккаунт» по-прежнему открыт администратору; подсвечен только он.
-    await user.click(menu()[2]!);
+    await user.click(menu()[3]!);
     await waitFor(() => expect(router.state.location.pathname).toBe("/account"));
     expect(await screen.findByRole("heading", { name: en.account.title })).toBeTruthy();
-    expect(menu().map((link) => link.hasAttribute("data-active"))).toEqual([false, false, true]);
+    expect(menu().map((link) => link.hasAttribute("data-active"))).toEqual([false, false, false, true]);
   });
 
   it("пункт «Справочники» — у администратора и директора (reference.read), у остальных ролей его нет; страница закрыта им шлюзом (ADM-08, GEN-08)", async () => {
@@ -433,7 +434,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
       ["director", ["/dashboard", "/catalog", "/lps", "/references", "/account"]],
       ["expert", ["/reviews", "/catalog", "/lps", "/account"]],
       ["manufacturer", ["/profile", "/account"]],
-      ["administrator", ["/admin/accounts", "/references", "/account"]],
+      ["administrator", ["/admin/accounts", "/admin/reviews", "/references", "/account"]],
     ];
     expect(expected.map(([role]) => role).sort()).toEqual([...ROLES].sort());
     for (const [role, hrefs] of expected) {
@@ -444,6 +445,7 @@ describe("оболочка рабочих страниц (GEN-08, GEN-10)", () =
         can(role, "profile.edit") && "/profile",
         can(role, "lps.read") && "/lps",
         can(role, "accounts.manage") && "/admin/accounts",
+        can(role, "review.assign") && "/admin/reviews",
         can(role, "reference.read") && "/references",
         "/account",
       ].filter(Boolean);

@@ -63,6 +63,7 @@ describe('страница после входа: destinationFor', () => {
     ['/profile', 'profile.edit'],
     ['/reviews', 'review.take'],
     ['/admin/accounts', 'accounts.manage'],
+    ['/admin/reviews', 'review.assign'],
     ['/references', 'reference.read'],
     ['/lps', 'lps.read'],
     ['/imbc', 'imbc_records.read'],
@@ -87,6 +88,14 @@ describe('страница после входа: destinationFor', () => {
         expect(destinationFor(role, saved)).toBe(role === 'expert' || role === 'director' ? saved : roleHome(role));
     }
     expect(destinationFor('manufacturer', '/imbc-more')).toBe('/imbc-more');
+  });
+
+  it.each(ROLES)('keeps %s review assignments and administrative assignment pages in their precise role scope', (role) => {
+    for (const saved of ['/reviews/assignments/00000000-0000-4000-8000-000000000001', '/%72eviews/assignments/x?section=contacts#decision'])
+      expect(destinationFor(role, saved)).toBe(role === 'expert' ? saved : roleHome(role));
+    for (const saved of ['/admin/reviews', '/admin/reviews/?status=submitted', '/admin/%72eviews/x#assign'])
+      expect(destinationFor(role, saved)).toBe(role === 'administrator' ? saved : roleHome(role));
+    expect(destinationFor(role, '/admin/reviews-more')).toBe('/admin/reviews-more');
   });
 
   it('/profile только у производителя: у остальных ролей — стартовая страница', () => {

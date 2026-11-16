@@ -118,6 +118,7 @@ export function AppShell() {
       icon: UsersIcon,
       show: !!can(role, "accounts.manage"),
     },
+    { href: "/admin/reviews", label: t("nav.reviewAssignments"), icon: ClipboardListIcon, show: !!can(role, "review.assign") },
     { href: "/references", label: t("nav.references"), icon: BookOpenIcon, show: !!can(role, "reference.read") },
     { href: "/account", label: t("nav.account"), icon: UserRoundIcon, show: true },
   ].filter((i) => i.show);

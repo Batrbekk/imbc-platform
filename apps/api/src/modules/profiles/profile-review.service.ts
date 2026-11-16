@@ -1,18 +1,22 @@
 import {
   profileReviewDecisionInputSchema,
   profileReviewDecisionSchema,
+  reviewSectionDecisionInputSchema,
   SECTION_KINDS,
   type ProfileReviewDecision,
   type ProfileReviewDecisionInput,
   type ProfileReviewSubject,
   type SectionKind,
   type ProfileOwnReviewItemLabel,
+  type ReviewSectionDecisionInput,
+  type ReviewSectionDecisionResult,
+  type Action,
 } from '@imbc/contracts';
 import { Inject, Injectable } from '@nestjs/common';
 import { eq, sql } from 'drizzle-orm';
 import type pg from 'pg';
 import type { PgBoss } from 'pg-boss';
-import { actorTransaction, isUuid, notFound, type QueueDb } from '../../common/actor-transaction.js';
+import { isUuid, notFound, type QueueDb } from '../../common/actor-transaction.js';
 import { AuditService } from '../../common/audit.service.js';
 import { ProblemException } from '../../common/problem.js';
 import { parseResponse } from '../../common/response.js';
@@ -30,8 +34,10 @@ import {
 import { ownSections, type StoredSection } from './profile-store.js';
 import { validateFrozenSubmissionFiles } from './submission-file-evidence.js';
 import { rebuildVerifiedCatalogProjection } from '../due-diligence/catalog-projection.js';
+import { ReviewScopeDenied, runReviewAction } from '../reviews/review-scope.js';
+import { buildReviewResultNotificationParams } from '../reviews/review-result-notification.js';
 
-const forbidden = () => new ProblemException(403, 'forbidden', 'Нет прав на это рассмотрение.');
+const forbidden = () => new ReviewScopeDenied();
 const changed = () => new ProblemException(409, 'assignment_changed', 'Это рассмотрение уже изменилось или завершено.');
 const incomplete = (missing: unknown[]) =>
   new ProblemException(409, 'review_incomplete', 'Не все решения рассмотрения заполнены.', undefined, { missing });
@@ -46,6 +52,9 @@ export interface LockedProfileReview {
 /** Trusted entry-point guard; demo restrictions deliberately do not constrain the production service. */
 export interface ProfileReviewOptions {
   ip?: string | null;
+  /** Trusted server entry point only; never copied from an HTTP body. */
+  authorizationAction?: Extract<Action, 'profile.read' | 'profile.verify' | 'review.take'>;
+  route?: string;
   beforeMutation?: (tx: Database, actor: AuthUser, graph: LockedProfileReview) => Promise<void>;
 }
 export interface ProfileReviewResult {
@@ -194,11 +203,16 @@ export class ProfileReviewService {
     callback: (tx: Database, queueDb: QueueDb, graph: LockedProfileReview) => Promise<T>,
   ): Promise<T> {
     if (!isUuid(assignmentId)) throw notFound();
-    return actorTransaction(
+    return runReviewAction(
       this.pool,
       this.audit,
       actor,
-      { action: 'profile.verify', route: `internal/profile-review/${action}`, ip: options.ip ?? null },
+      {
+        action: options.authorizationAction ?? 'profile.verify',
+        role: 'expert',
+        route: options.route ?? `internal/profile-review/${action}`,
+        ip: options.ip ?? null,
+      },
       async (tx, queueDb) => {
         const actual = (
           await tx.execute<{ organizationId: string }>(sql`select a.organization_id as "organizationId"
@@ -288,6 +302,16 @@ export class ProfileReviewService {
     );
   }
 
+  /** Reuses the complete exact-assignment graph; only its already assigned SME can inspect it. */
+  inspect<T>(
+    actor: AuthUser,
+    assignmentId: string,
+    read: (tx: Database, graph: LockedProfileReview) => Promise<T>,
+    options: ProfileReviewOptions = {},
+  ): Promise<T> {
+    return this.run(actor, assignmentId, 'inspect', options, (tx, _queueDb, graph) => read(tx, graph));
+  }
+
   async take(actor: AuthUser, assignmentId: string, options: ProfileReviewOptions = {}) {
     return this.run(actor, assignmentId, 'take', options, async (tx, _queueDb, graph) => {
       if (graph.assignment.expertId === null)
@@ -349,83 +373,184 @@ export class ProfileReviewService {
     options: ProfileReviewOptions = {},
   ): Promise<ProfileReviewDecision> {
     const normalized = profileReviewDecisionInputSchema.parse(input);
-    return this.run(actor, assignmentId, 'decide', options, async (tx, _queueDb, graph) => {
-      const evidence = await profileReviewEvidence(tx, graph);
-      // A shared captured file can occur in multiple sections; choose a review-required exact owner deterministically.
-      const fact = evidence.find(
-        (item) =>
-          subjectKey(item.subject) === subjectKey(normalized.subject) &&
-          graph.map.some((section) => section.revisionId === item.revisionId && section.reviewRequired),
-      );
-      if (!fact)
-        throw new ProblemException(404, 'review_subject_not_found', 'Предмет не принадлежит этому рассмотрению.');
-      const mapped = graph.map.find((section) => section.revisionId === fact.revisionId)!;
-      if (normalized.outcome === 'verified') {
-        if (normalized.subject.kind === 'section') await this.validateAccepted(tx, graph, mapped, evidence);
-        else {
-          await validateFrozenSubmissionFiles(tx, {
-            profileId: graph.profile.id,
-            organizationId: graph.profile.organizationId,
-            sectionId: mapped.sectionId,
-            revisionId: mapped.revisionId,
-          });
-          if (
-            normalized.subject.kind !== 'file' &&
-            evidence.some(
-              (item) =>
-                item.subject.kind === 'file' &&
-                item.revisionId === fact.revisionId &&
-                item.fileObjectId === fact.fileObjectId &&
-                item.outcome === 'rejected',
-            )
+    return this.run(actor, assignmentId, 'decide', options, (tx, _queueDb, graph) =>
+      this.decideIn(tx, graph, actor, assignmentId, normalized, options),
+    );
+  }
+
+  private async decideIn(
+    tx: Database,
+    graph: LockedProfileReview,
+    actor: AuthUser,
+    assignmentId: string,
+    normalized: ProfileReviewDecisionInput,
+    options: ProfileReviewOptions,
+    requiredRevisionId?: string,
+  ): Promise<ProfileReviewDecision> {
+    const evidence = await profileReviewEvidence(tx, graph);
+    // A shared captured file can occur in multiple sections; choose a review-required exact owner deterministically.
+    const fact = evidence.find(
+      (item) =>
+        subjectKey(item.subject) === subjectKey(normalized.subject) &&
+        (requiredRevisionId === undefined || item.revisionId === requiredRevisionId) &&
+        graph.map.some((section) => section.revisionId === item.revisionId && section.reviewRequired),
+    );
+    if (!fact)
+      throw new ProblemException(404, 'review_subject_not_found', 'Предмет не принадлежит этому рассмотрению.');
+    const mapped = graph.map.find((section) => section.revisionId === fact.revisionId)!;
+    if (normalized.outcome === 'verified') {
+      if (normalized.subject.kind === 'section') await this.validateAccepted(tx, graph, mapped, evidence);
+      else {
+        await validateFrozenSubmissionFiles(tx, {
+          profileId: graph.profile.id,
+          organizationId: graph.profile.organizationId,
+          sectionId: mapped.sectionId,
+          revisionId: mapped.revisionId,
+        });
+        if (
+          normalized.subject.kind !== 'file' &&
+          evidence.some(
+            (item) =>
+              item.subject.kind === 'file' &&
+              item.revisionId === fact.revisionId &&
+              item.fileObjectId === fact.fileObjectId &&
+              item.outcome === 'rejected',
           )
-            throw incomplete([{ kind: mapped.kind, subject: normalized.subject, code: 'file_not_verified' }]);
-        }
+        )
+          throw incomplete([{ kind: mapped.kind, subject: normalized.subject, code: 'file_not_verified' }]);
       }
-      const subject = normalized.subject;
-      const [decision] = await tx
-        .insert(reviewDecision)
-        .values({
-          reviewAssignmentId: assignmentId,
-          organizationId: graph.profile.organizationId,
-          expertId: actor.id,
-          profileSectionId: fact.sectionId,
-          subjectRevisionId: fact.revisionId,
-          sectionRevisionId: subject.kind === 'section' ? subject.sectionRevisionId : null,
-          certificateId: subject.kind === 'certificate' ? subject.certificateId : null,
-          documentId: subject.kind === 'document' ? subject.documentId : null,
-          fileVersionId: subject.kind === 'file' ? subject.fileVersionId : null,
-          fileObjectId: subject.kind === 'file' ? fact.fileObjectId : null,
-          outcome: normalized.outcome,
-          comment: normalized.comment,
-          decidedAt: new Date(),
-        })
-        .returning();
-      await this.audit.record(
-        {
-          userId: actor.id,
-          organizationId: graph.profile.organizationId,
-          action: 'review.decide',
-          objectType: 'review_decision',
-          objectId: decision!.id,
-          diff: { assignmentId, subject, outcome: decision!.outcome },
-          ip: options.ip,
-        },
-        tx,
+    }
+    const previous = fact.decisionId
+      ? (await tx.execute(sql`select to_jsonb(d) as value from review_decision d where id=${fact.decisionId}`)).rows[0]!
+          .value
+      : null;
+    const subject = normalized.subject;
+    const [decision] = await tx
+      .insert(reviewDecision)
+      .values({
+        reviewAssignmentId: assignmentId,
+        organizationId: graph.profile.organizationId,
+        expertId: actor.id,
+        profileSectionId: fact.sectionId,
+        subjectRevisionId: fact.revisionId,
+        sectionRevisionId: subject.kind === 'section' ? subject.sectionRevisionId : null,
+        certificateId: subject.kind === 'certificate' ? subject.certificateId : null,
+        documentId: subject.kind === 'document' ? subject.documentId : null,
+        fileVersionId: subject.kind === 'file' ? subject.fileVersionId : null,
+        fileObjectId: subject.kind === 'file' ? fact.fileObjectId : null,
+        outcome: normalized.outcome,
+        comment: normalized.comment,
+        decidedAt: new Date(),
+      })
+      .returning();
+    const after = (await tx.execute(sql`select to_jsonb(d) as value from review_decision d where id=${decision!.id}`))
+      .rows[0]!.value;
+    await this.audit.record(
+      {
+        userId: actor.id,
+        organizationId: graph.profile.organizationId,
+        action: 'review.decide',
+        objectType: 'review_decision',
+        objectId: decision!.id,
+        diff: { assignmentId, subject, outcome: decision!.outcome, before: previous, after },
+        ip: options.ip,
+      },
+      tx,
+    );
+    return parseResponse(
+      profileReviewDecisionSchema,
+      {
+        id: decision!.id,
+        assignmentId,
+        expertId: actor.id,
+        subject,
+        outcome: decision!.outcome,
+        comment: decision!.comment,
+        decidedAt: decision!.decidedAt.toISOString(),
+      },
+      'решение рассмотрения',
+    );
+  }
+
+  /** One section intent writes item decisions and its comment atomically; exact rows stay immutable. */
+  decideSection(
+    actor: AuthUser,
+    assignmentId: string,
+    input: ReviewSectionDecisionInput,
+    options: ProfileReviewOptions = {},
+  ): Promise<ReviewSectionDecisionResult> {
+    const normalized = reviewSectionDecisionInputSchema.parse(input);
+    return this.run(actor, assignmentId, 'decide-section', options, async (tx, _queueDb, graph) => {
+      const section = graph.map.find((mapped) => mapped.revisionId === normalized.sectionRevisionId);
+      if (!section)
+        throw new ProblemException(404, 'review_subject_not_found', 'Раздел не принадлежит этому рассмотрению.');
+      if (!section.reviewRequired)
+        throw new ProblemException(409, 'review_section_not_required', 'Решение по неизменённому разделу сохранено.');
+      const evidence = await profileReviewEvidence(tx, graph);
+      const facts = evidence.filter((fact) => fact.revisionId === section.revisionId);
+      const current = facts.find((fact) => fact.subject.kind === 'section');
+      if (!current) throw changed();
+      if (current.decisionId !== normalized.expectedDecisionId)
+        throw new ProblemException(
+          409,
+          'review_section_changed',
+          'Решение по разделу изменилось. Обновите рассмотрение.',
+        );
+      const items = facts.filter((fact) => fact.subject.kind !== 'section');
+      const submitted = new Map(normalized.items.map((item) => [subjectKey(item.subject), item]));
+      for (const item of normalized.items)
+        if (!items.some((fact) => subjectKey(fact.subject) === subjectKey(item.subject)))
+          throw new ProblemException(404, 'review_subject_not_found', 'Предмет не принадлежит этому разделу.');
+      const missing = items.filter((fact) => fact.subject.kind !== 'file' && !submitted.has(subjectKey(fact.subject)));
+      if (missing.length)
+        throw new ProblemException(
+          409,
+          'review_items_incomplete',
+          'Укажите решение по каждому документу и сертификату.',
+          undefined,
+          {
+            missing: missing.map((fact) => ({ kind: section.kind, subject: fact.subject, code: 'decision_required' })),
+          },
+        );
+      const decisions: ProfileReviewDecision[] = [];
+      // Captured-file decisions precede their documents/certificates regardless of request array order.
+      const ordered = [...normalized.items].sort(
+        (left, right) =>
+          Number(right.subject.kind === 'file') - Number(left.subject.kind === 'file') ||
+          subjectKey(left.subject).localeCompare(subjectKey(right.subject)),
       );
-      return parseResponse(
-        profileReviewDecisionSchema,
-        {
-          id: decision!.id,
+      for (const item of ordered)
+        decisions.push(
+          await this.decideIn(
+            tx,
+            graph,
+            actor,
+            assignmentId,
+            {
+              subject: item.subject,
+              outcome: item.outcome,
+              comment: item.outcome === 'rejected' ? normalized.comment : null,
+            },
+            options,
+            section.revisionId,
+          ),
+        );
+      decisions.push(
+        await this.decideIn(
+          tx,
+          graph,
+          actor,
           assignmentId,
-          expertId: actor.id,
-          subject,
-          outcome: decision!.outcome,
-          comment: decision!.comment,
-          decidedAt: decision!.decidedAt.toISOString(),
-        },
-        'решение рассмотрения',
+          {
+            subject: { kind: 'section', sectionRevisionId: section.revisionId },
+            outcome: normalized.outcome,
+            comment: normalized.comment,
+          },
+          options,
+          section.revisionId,
+        ),
       );
+      return { assignmentId, sectionRevisionId: section.revisionId, decisions };
     });
   }
 
@@ -444,11 +569,7 @@ export class ProfileReviewService {
         .map((item) => ({ kind: item.kind, subject: item.subject, code: 'decision_required' }));
       for (const section of graph.map) {
         const decision = outcomes.get(section.revisionId);
-        if (
-          !decision?.decisionId ||
-          (!section.reviewRequired &&
-            (decision.outcome !== 'verified' || decision.decisionId !== section.retainedDecisionId))
-        )
+        if (!decision?.decisionId || (!section.reviewRequired && decision.decisionId !== section.retainedDecisionId))
           missing.push({
             kind: section.kind,
             subject: { kind: 'section', sectionRevisionId: section.revisionId },
@@ -482,6 +603,7 @@ export class ProfileReviewService {
           'Принятые разделы не образуют согласованный профиль.',
         );
       const status = initial && !allAccepted ? 'returned' : 'verified';
+      const acceptedChanges = !initial && accepted.some((section) => section.revisionId !== verified[section.kind]);
       const closedAt = new Date();
       // Pending pointers only allow submitted state: clear them before technical state transitions.
       await tx.execute(sql`update profile_section set pending_revision_id=null,updated_at=${closedAt}
@@ -512,9 +634,7 @@ export class ProfileReviewService {
                 quarterAnchorAt: graph.profile.quarterAnchorAt ?? localDate(graph.profile.createdAt),
               }
             : {}),
-          ...(!initial && accepted.some((section) => section.reviewRequired)
-            ? { quarterAnchorAt: localDate(closedAt) }
-            : {}),
+          ...(acceptedChanges ? { quarterAnchorAt: localDate(closedAt) } : {}),
           ...(status === 'verified' && graph.profile.verifiedAt === null ? { verifiedAt: closedAt } : {}),
         })
         .where(eq(manufacturerProfile.id, graph.profile.id));
@@ -522,7 +642,10 @@ export class ProfileReviewService {
         .update(reviewAssignment)
         .set({ closedAt, closedBy: actor.id, closeReason: 'review_result' })
         .where(eq(reviewAssignment.id, assignmentId));
-      await rebuildVerifiedCatalogProjection(tx, { profileId: graph.profile.id, organizationId: graph.profile.organizationId });
+      await rebuildVerifiedCatalogProjection(tx, {
+        profileId: graph.profile.id,
+        organizationId: graph.profile.organizationId,
+      });
       await this.audit.record(
         {
           userId: actor.id,
@@ -545,7 +668,7 @@ export class ProfileReviewService {
             quarterAnchorAfter:
               initial && status === 'verified'
                 ? (graph.profile.quarterAnchorAt ?? localDate(graph.profile.createdAt))
-                : !initial && accepted.some((section) => section.reviewRequired)
+                : acceptedChanges
                   ? localDate(closedAt)
                   : graph.profile.quarterAnchorAt,
             verifiedBefore: verified,
@@ -562,7 +685,12 @@ export class ProfileReviewService {
           profileId: graph.profile.id,
           organizationId: graph.profile.organizationId,
           related: { type: 'review_assignment', id: assignmentId },
-          params: {},
+          params: buildReviewResultNotificationParams(
+            graph.map.map((section) => ({
+              kind: section.kind,
+              decisionId: outcomes.get(section.revisionId)!.decisionId!,
+            })),
+          ),
         },
         queueDb,
       );

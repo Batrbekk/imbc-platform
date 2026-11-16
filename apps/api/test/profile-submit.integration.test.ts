@@ -688,7 +688,18 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       expect(overview.readOnly).toBe(true);
       expect(overview.sections.every((section) => section.readOnly)).toBe(true);
       await expect(editContacts()).rejects.toMatchObject({ code: 'profile_locked' });
-      const queue = await new ReviewsService(appDb).queue({ status: ['pending_changes'] });
+      const queue = await new ReviewsService(appPool, new AuditService(appDb)).queue(
+        {
+          id: expertId,
+          organizationId: imbcId,
+          organizationType: 'imbc',
+          role: 'expert',
+          email: 'reviewer@submit.local',
+          fullName: null,
+          locale: 'en',
+        },
+        { status: ['pending_changes'] },
+      );
       expect(queue.items.some((item) => item.profileId === fixture.profile && item.hasPendingChanges)).toBe(true);
       const current = await stateService.current(fixture.actor);
       expect(current.activeAssignmentId).toBe(third.body.assignmentId);
@@ -963,7 +974,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       });
       expect(await state()).toEqual(before);
     });
-    it('an actual Unlock followed by Send without Save copies unaccepted frozen candidates and preserves the first immutable map', async () => {
+    it('an actual Unlock followed by Send without Save keeps unaccepted frozen subjects and the first immutable map', async () => {
       const initial = await send();
       expect(initial.status).toBe(201);
       await db
@@ -974,6 +985,12 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
         .select()
         .from(s.sectionRevision)
         .where(eq(s.sectionRevision.organizationId, fixture.org));
+      const originalMap = (
+        await pool.query(
+          'select to_jsonb(m) as value from review_assignment_section m where review_assignment_id=$1 order by profile_section_id',
+          [initial.body.assignmentId],
+        )
+      ).rows;
       const unlocker = new ProfileUnlockService(appPool, new AuditService(appDb), boss);
       await unlocker.unlock(fixture.actor, {
         operationKey: randomUUID(),
@@ -984,7 +1001,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       expect(result.body.mode).toBe('resubmit');
       expect(
         result.body.sections.every(
-          (section: any) => section.reviewRequired && section.revisionId !== fixture.revisions[section.kind],
+          (section: any) =>
+            section.reviewRequired &&
+            section.retainedDecisionId === null &&
+            section.revisionId === fixture.revisions[section.kind],
         ),
       ).toBe(true);
       const old = await db
@@ -997,6 +1017,22 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
           ),
         );
       expect(old).toEqual(original);
+      expect(
+        (
+          await pool.query(
+            'select to_jsonb(m) as value from review_assignment_section m where review_assignment_id=$1 order by profile_section_id',
+            [initial.body.assignmentId],
+          )
+        ).rows,
+      ).toEqual(originalMap);
+      expect(
+        (
+          await pool.query(
+            'select retained_from_assignment_id from review_assignment_section where review_assignment_id=$1',
+            [result.body.assignmentId],
+          )
+        ).rows.every((row) => row.retained_from_assignment_id === initial.body.assignmentId),
+      ).toBe(true);
       const [assignment] = await db
         .select()
         .from(s.reviewAssignment)

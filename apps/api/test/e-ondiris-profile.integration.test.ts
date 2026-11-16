@@ -60,7 +60,9 @@ describe.skipIf(!url)('Stage 4a actual profile graph, handlers and source COW', 
       throw new Error('Isolated source test database required');
     pool = new pg.Pool({ connectionString: url, max: 8 });
     await resetDatabase(pool);
-    await migrateThrough(pool, '0026_stage4b_main_source_ownership');
+    // Current source/producer services share the complete current review schema. The separate
+    // Main-source migration suite retains its explicit0026 expand/preservation boundary.
+    await migrateThrough(pool);
     db = drizzle(pool, { schema: s, casing: 'snake_case' });
     audit = new AuditService(db);
     source = new EOndirisSnapshotStore(pool, { allowSynthetic: true });

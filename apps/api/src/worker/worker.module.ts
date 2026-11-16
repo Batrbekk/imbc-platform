@@ -7,7 +7,7 @@ import { AuditModule } from '../common/audit.service.js';
 import { PolicyModule } from '../common/policy.js';
 import { ConfigModule } from '../config/config.module.js';
 import { ENV, type Env } from '../config/env.js';
-import { DatabaseModule } from '../database/database.module.js';
+import { DB, DatabaseModule, type Database } from '../database/database.module.js';
 import { redactDatabaseError } from '../database/pg-errors.js';
 import { InfraModule, QUEUE } from '../infra/infra.module.js';
 import { MailService } from '../mail/mail.service.js';
@@ -37,10 +37,10 @@ import {
   SCHEDULES,
 } from '../jobs/queues.js';
 import {
-  defaultNotificationRenderer,
   NOTIFICATION_RENDERER,
   NotificationDispatcher,
 } from '../notifications/dispatcher.js';
+import { createDatabaseNotificationRenderer } from '../notifications/database-renderer.js';
 import { DEFAULT_RECIPIENT_RESOLVERS, RECIPIENT_RESOLVERS } from '../notifications/recipients.js';
 import { AccountInactivityJob } from './account-inactivity.job.js';
 import { ADATA_CLIENT_FACTORY, ADATA_TIMING, AdataPrefillJob, defaultAdataClientFactory } from './adata-prefill.job.js';
@@ -81,7 +81,8 @@ import { JobHandlers } from './handlers.service.js';
     // Письма событий (раздел 8.2): получатели по правилам-данным, тексты из языковых файлов.
     NotificationDispatcher,
     { provide: RECIPIENT_RESOLVERS, useValue: DEFAULT_RECIPIENT_RESOLVERS },
-    { provide: NOTIFICATION_RENDERER, useValue: defaultNotificationRenderer },
+    { provide: NOTIFICATION_RENDERER, inject: [DB, ENV],
+      useFactory: (db: Database, env: Env) => createDatabaseNotificationRenderer(db, env.PUBLIC_URL) },
     { provide: ADATA_CLIENT_FACTORY, useValue: defaultAdataClientFactory },
     { provide: ADATA_TIMING, useValue: ADATA_DEFAULT_TIMING },
     // ClamAV вызывает только worker (DATA-07).

@@ -925,7 +925,7 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
     const operator = await account('operator');
     const error = vi.spyOn(Logger.prototype, 'error');
     const warn = vi.spyOn(Logger.prototype, 'warn');
-    // Рендерер по умолчанию: текста NOT-04 ещё нет (этап 5), у NOT-03 есть.
+    // NOT-01 отправляет Keycloak: у платформенного рендерера нет шаблона; NOT-03 уже поддержан.
     const transport = fakeTransport();
     const dispatcher = new NotificationDispatcher(
       roleDb,
@@ -936,7 +936,7 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
     const keys = {
       invalid: eventKey('invalid'),
       notReady: eventKey('review'),
-      noText: eventKey('submitted'),
+      noText: eventKey('identity-owned'),
       noParam: eventKey('locked'),
       noRule: eventKey('pause'),
     };
@@ -948,7 +948,7 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
       organizationId: maker.organizationId,
       params: {},
     });
-    await enqueueNotification(boss, { rule: 'NOT-04', eventKey: keys.noText, params: {} });
+    await enqueueNotification(boss, { rule: 'NOT-01', eventKey: keys.noText, accountId: operator.id, params: {} });
     await enqueueNotification(boss, {
       rule: 'NOT-03',
       eventKey: keys.noParam,
@@ -979,7 +979,7 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
         refused: 'permanent_failure',
         reason: 'notification NOT-05: review_assignment без related.id',
       },
-      noText: { rule: 'NOT-04', refused: 'permanent_failure', reason: 'notification NOT-04: нет текста письма' },
+      noText: { rule: 'NOT-01', refused: 'permanent_failure', reason: 'notification NOT-01: нет текста письма' },
       noParam: { rule: 'NOT-03', refused: 'permanent_failure', reason: 'mail NOT-03: нет подстановки {link}' },
       noRule: {
         rule: 'NOT-17',
@@ -1000,7 +1000,7 @@ describe.skipIf(!databaseUrl)('уведомления: правила-данны
       expect.arrayContaining([
         'notification NOT-04: задание отклонено без повторов — неверные поля: job:unrecognized_keys',
         'notification NOT-05: письмо не будет отправлено, без повторов — notification NOT-05: review_assignment без related.id',
-        'notification NOT-04: письмо не будет отправлено, без повторов — notification NOT-04: нет текста письма',
+        'notification NOT-01: письмо не будет отправлено, без повторов — notification NOT-01: нет текста письма',
         'notification NOT-03: письмо не будет отправлено, без повторов — mail NOT-03: нет подстановки {link}',
         'notification NOT-17: письмо не будет отправлено, без повторов — notification NOT-17: правила нет в notification_rule',
       ]),

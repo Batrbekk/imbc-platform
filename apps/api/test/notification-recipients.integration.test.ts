@@ -375,7 +375,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('scoped current and immutable no
     const job = reviewJob(p, a);
     expect((await dispatcher.dispatch(job)).sent).toBe(1);
     expect(transport.sent.map((m) => m.to)).toEqual([p.accountEmail]);
-    expect(render).toHaveBeenCalledWith('NOT-05', 'en', {});
+    expect(render).toHaveBeenCalledWith('NOT-05', 'en', {}, job);
     expect((await dispatcher.dispatch(job)).duplicates).toBe(1);
     expect(transport.sent).toHaveLength(1);
     const jobData = notifyJobSchema.parse(job);

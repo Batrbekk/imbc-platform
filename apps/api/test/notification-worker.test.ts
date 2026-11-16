@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import type { Provider } from '@nestjs/common';
+import type { FactoryProvider, Provider } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NOTIFY_QUEUE_OPTIONS, QUEUES } from '../src/jobs/queues.js';
@@ -9,7 +9,10 @@ import {
   NOTIFICATION_RENDERER,
   NotificationDispatcher,
   type NotificationRefusal,
+  type NotificationRenderer,
 } from '../src/notifications/dispatcher.js';
+import { DB } from '../src/database/database.module.js';
+import { ENV } from '../src/config/env.js';
 import { PermanentNotificationError } from '../src/notifications/errors.js';
 import { DEFAULT_RECIPIENT_RESOLVERS, RECIPIENT_RESOLVERS } from '../src/notifications/recipients.js';
 import { JobHandlers } from '../src/worker/handlers.service.js';
@@ -21,7 +24,7 @@ describe('worker: письма событий', () => {
     vi.restoreAllMocks();
   });
 
-  it('WorkerModule передаёт диспетчеру резолверы по умолчанию и тексты из языковых файлов; у JobHandlers диспетчера нет — опрос Keycloak ставит задание notify', () => {
+  it('WorkerModule передаёт диспетчеру резолверы и рендерер с БД; у JobHandlers диспетчера нет — опрос Keycloak ставит задание notify', async () => {
     const providers = (Reflect.getMetadata('providers', WorkerModule) ?? []) as Provider[];
     const value = (token: symbol) => {
       const provider = providers.find((p) => typeof p === 'object' && 'provide' in p && p.provide === token);
@@ -30,7 +33,12 @@ describe('worker: письма событий', () => {
     expect(providers).toContain(NotificationDispatcher);
     expect(providers).toContain(MailService);
     expect(value(RECIPIENT_RESOLVERS)).toBe(DEFAULT_RECIPIENT_RESOLVERS);
-    expect(value(NOTIFICATION_RENDERER)).toBe(defaultNotificationRenderer);
+    const rendererProvider = providers.find(p => typeof p === 'object' && 'provide' in p && p.provide === NOTIFICATION_RENDERER) as FactoryProvider<NotificationRenderer>;
+    expect(rendererProvider.inject).toEqual([DB, ENV]);
+    const renderer = await rendererProvider.useFactory({}, { PUBLIC_URL: 'https://imbc.local' });
+    expect((await renderer('NOT-03', 'en', { minutes: '15', link: 'https://imbc.local/login' })).subject)
+      .toBe('Your IMBC Platform account is temporarily locked');
+    await expect(renderer('NOT-05', 'en', {})).rejects.toThrow('missing event context');
     // Внедрение по типу: почта — вторым параметром диспетчера. Опрос Keycloak письма не шлёт, а ставит
     // задание notify: диспетчера у JobHandlers нет.
     expect((Reflect.getMetadata('design:paramtypes', NotificationDispatcher) as unknown[])[1]).toBe(MailService);
@@ -105,9 +113,12 @@ describe('worker: письма событий', () => {
     });
   });
 
-  it('письмо без текста или подстановки — постоянный отказ, а не пустое письмо: NOT-04 до своего этапа', () => {
+  it('письмо без текста или обязательной подстановки отклоняется, а готовый шаблон работает', () => {
+    expect(() => defaultNotificationRenderer('NOT-01', 'kk', {})).toThrow(PermanentNotificationError);
+    expect(() => defaultNotificationRenderer('NOT-01', 'kk', {})).toThrow('notification NOT-01: нет текста письма');
     expect(() => defaultNotificationRenderer('NOT-04', 'kk', {})).toThrow(PermanentNotificationError);
-    expect(() => defaultNotificationRenderer('NOT-04', 'kk', {})).toThrow('notification NOT-04: нет текста письма');
+    expect(defaultNotificationRenderer('NOT-04', 'en', { name: 'Manufacturer', link: 'https://imbc.local/reviews' }).text)
+      .toContain('Manufacturer');
     expect(() => defaultNotificationRenderer('NOT-03', 'kk', { minutes: '15' })).toThrow(PermanentNotificationError);
     expect(
       defaultNotificationRenderer('NOT-03', 'en', { minutes: '15', link: 'https://imbc.local/login' }).subject,

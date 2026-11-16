@@ -59,6 +59,16 @@ export const routes: RouteObject[] = [
         ),
         children: [
           {
+            path: "reviews/assignments/:assignmentId",
+            handle: { title: "reviewWorkflow.workbenchTitle" } satisfies AppRouteHandle,
+            lazy: lazyPage(() => import("@/routes/app/review"), (m) => m.ReviewPage),
+          },
+          {
+            path: "admin/reviews",
+            handle: { title: "reviewWorkflow.assignmentTitle" } satisfies AppRouteHandle,
+            lazy: lazyPage(() => import("@/routes/app/review-assignments"), (m) => m.ReviewAssignmentsPage),
+          },
+          {
             path: "imbc/profiles/:profileId/due-diligence",
             handle: { title: "diligence.title" } satisfies AppRouteHandle,
             lazy: lazyPage(() => import("@/routes/app/diligence"), (m) => m.DiligencePage),

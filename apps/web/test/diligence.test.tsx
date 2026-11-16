@@ -304,11 +304,19 @@ describe("Due diligence business screen", () => {
     const link = screen.queryByRole("link", { name: en.diligence.open });
     expect(Boolean(link)).toBe(["expert", "director"].includes(role)); if (link) expect(link.getAttribute("href")).toBe(DD_URL);
   });
-  it.each(ROLES)("queue DD links retain exact target and filtered return path only for %s", async role => {
-    stubApi({ "GET /api/auth/me": { body: ddMe(role) }, "GET /api/v1/reviews/queue": { body: { total: 1, items: [{ profileId: DD_PROFILE, organizationName: "Demo DD queue company", bin: "900000000010", status: "submitted", hasPendingChanges: false, assignedExpert: null, registeredAt: DD_TIME }] } }, [`GET ${DD_API}`]: { body: DD_DATA } });
-    const { user, router } = renderRoute("/reviews?status=submitted", { routes, locale: "en" }); await screen.findByText("Demo DD queue company");
-    const link = screen.queryByRole("link", { name: en.diligence.open });
-    expect(Boolean(link)).toBe(["expert", "director"].includes(role));
-    if (link) { expect(link.getAttribute("href")).toBe(DD_URL); await user.click(link); await screen.findByText(DD_DATA.record!.comment!); expect(router.state.location.state).toEqual({ from: "/reviews?status=submitted" }); expect(screen.getByRole("link", { name: en.diligence.back }).getAttribute("href")).toBe("/reviews?status=submitted"); }
+  it.each(ROLES)("queue DD links retain exact target and filtered return path only for allowed %s", async role => {
+    const calls = stubApi({ "GET /api/auth/me": { body: ddMe(role) }, "GET /api/v1/reviews/queue": { body: { total: 1, offset: 0, limit: 25, items: [{ profileId: DD_PROFILE, organizationName: "Demo DD queue company", bin: "900000000010", status: "submitted", hasPendingChanges: false, assignmentId: ddId(90), assignedExpertId: null, assignedExpert: null, registeredAt: DD_TIME, receivedAt: DD_TIME, unresolved: false }] } }, "GET /api/v1/reviews/queue/experts": { body: [] }, [`GET ${DD_API}`]: { body: DD_DATA } });
+    const { user, router } = renderRoute("/reviews?status=submitted", { routes, locale: "en" });
+    if (role !== "expert") {
+      await screen.findByText(en.reviewWorkflow.errors.forbidden);
+      expect(screen.queryByRole("link", { name: en.reviewWorkflow.openDiligence })).toBeNull();
+      expect(calls.mock.calls.some(([url]) => String(url).includes("/api/v1/reviews/") || String(url).includes(DD_API))).toBe(false);
+      return;
+    }
+    await screen.findByText("Demo DD queue company");
+    const link = screen.getByRole("link", { name: en.reviewWorkflow.openDiligence });
+    expect(link.getAttribute("href")).toBe(DD_URL); await user.click(link); await screen.findByText(DD_DATA.record!.comment!);
+    expect(router.state.location.state).toEqual({ from: "/reviews?status=submitted" });
+    expect(screen.getByRole("link", { name: en.diligence.back }).getAttribute("href")).toBe("/reviews?status=submitted");
   });
 });

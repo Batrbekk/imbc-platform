@@ -75,7 +75,7 @@
 
 ## 5/6/6б. Рабочие кабинеты
 
-- [ ] SME assignment/open/decisions/return/verify и pending changes workflow; выбор recipient revision и NOT-05/28 без дублей.
+- [x] SME assignment/open/decisions/return/verify и pending changes workflow; exact frozen sections, persisted policy/assignee/CAS, immutable recipient/result context, реальные NOT04/05/10. MAN43/NOT29 сохраняет rejected/partial decisions после Unlock; NOT31 сдвигает квартал по accepted changed revisions. Bounded Astra Approved:199independentAPI/153UI/86contracts +5actualSMTP cases/16.local messages; owner151targeted/536web, exactGit checkpoint2002API/76separate-envskips/368contracts +24current-source. [Срез и открытая production-приёмка](../../handoff/2026-11-16-stage5-integration.md).
 - [ ] Site survey/DD/enhanced DD, IMBC engagements/status/shortlist/execution, records и совместимые миграции.
 - [ ] Verified projection, tier 1/2, visibility green/amber, update status, certificate validity, multi-site region facets/distinct manufacturers.
 - [ ] Operator company/files/works-with/visit/note/request с собственной организацией; observer разрешённый readonly без focal/confidential/export/API.
