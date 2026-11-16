@@ -65,7 +65,8 @@
 
 - [x] Нормализованная immutable e_ondiris_record копия, ingestion и change-by-BIN jobs, metadata/synchronisation/retry; необходимые version links заменяют NULL-only placeholders. Migration0024 и bounded source-COW/outbox integration приняты GPT-6 Astra после трёх P2 fixes;24 profile cases,17 storage и3 worker cases проходят в default runner. [Подробности](2026-11-16-stage4a-profile-integration.md).
 - [ ] Утверждённый live-протокол e-Ondiris и реальная приёмка ежедневного обновления; disabled connector и записанные captures этого не доказывают.
-- [ ] Каталог IMBC-10 проверок и connector modules/allowance/result semantics; unavailable/no-answer/finding раздельны; worker-only calls, no secrets in logs.
+- [x] Каталог всех116 IMBC-10 строк, pure scoring налогов/степени риска/attention и mockgreen/amber/red/unavailable;23 cases и независимое GPT-6 Astra review после P2 fix меток false/zero. [Срез и полный оставшийся scope](2026-11-16-stage4a-due-diligence.md).
+- [ ] Adata mapping/connector modules/allowance/worker integration и сохранение результатов; unavailable/no-answer/finding раздельны, no secrets/raw non-check report in storage/logs. Существующее чтение prefill не завершает DD connector.
 - [x] Product-source reconciliation по имени+TN VED, stable identity/local associations сохраняются, включая явно снятую связь с площадкой; порядок разных кодов не угадывает связи. Runtime/browser acceptance полного Stage4b остаётся.
 - [ ] Audited refresh legal/OKED/founders, source contact/site prefills не стирают сохранённые правки производителя; verified/pending source snapshots разделены.
 - [ ] DD current record/checklist с атомарным full before/after, ordered checks и SME override; оплаченные модули и source contracts подтверждены до live acceptance.
